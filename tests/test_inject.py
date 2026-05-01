@@ -1,0 +1,84 @@
+"""Tests for boot-partition staging."""
+
+import json
+import os
+import tempfile
+
+from easymanet.inject import inject, inject_dry_run_info
+from easymanet.manifest import load_manifest
+
+
+VALID_CONFIG = """
+version: 1
+
+mesh:
+  id: test-mesh
+  password: "test-password"
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: "ap-password"
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"
+
+nodes:
+  node01:
+    role: gate
+    hostname: node01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: node01-local
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+"""
+
+
+def _write_config(content: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=".yml", prefix="easymanet_test_")
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+    return path
+
+
+def test_inject_dry_run_info_mentions_boot_partition():
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+
+    info = inject_dry_run_info(manifest, "node01")
+
+    assert "/easymanet/provision.json" in info
+    assert "first-boot hooks" in info
+    os.unlink(path)
+
+
+def test_inject_writes_provision_json_to_boot_partition(monkeypatch, tmp_path):
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), False),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda _device, _mount_point, _mounted_here: None,
+    )
+
+    results = inject("/dev/disk4", manifest, "node01")
+
+    written = boot_mount / "easymanet" / "provision.json"
+    assert written.exists()
+    data = json.loads(written.read_text())
+    assert data["node"]["name"] == "node01"
+    assert results[0] == ("/boot/easymanet/provision.json", True)
+    os.unlink(path)

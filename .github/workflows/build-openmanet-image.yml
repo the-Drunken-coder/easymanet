@@ -1,0 +1,82 @@
+name: Build OpenMANET Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      openmanet_version:
+        description: OpenMANET tag or branch to build
+        required: false
+        default: "1.6.5"
+      board:
+        description: OpenMANET board profile
+        required: false
+        default: "ekh-bcm2711"
+      target:
+        description: Firmware target suffix
+        required: false
+        default: "rpi4-mm6108-spi"
+      jobs:
+        description: Parallel make jobs inside Docker
+        required: false
+        default: "2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-openmanet-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install EasyMANET
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Show Docker info
+        run: |
+          docker version
+          docker info
+
+      - name: Build EasyMANET-flavored OpenMANET image
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m easymanet.cli image build \
+            --clean \
+            --rebuild-builder \
+            --openmanet-version "${{ inputs.openmanet_version }}" \
+            --board "${{ inputs.board }}" \
+            --target "${{ inputs.target }}" \
+            --jobs "${{ inputs.jobs }}"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmanet-${{ inputs.openmanet_version }}-${{ inputs.target }}
+          path: dist/*.img.gz
+          if-no-files-found: error

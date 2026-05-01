@@ -162,8 +162,8 @@ def _docker_run_command(
 ) -> list[str]:
     import os
 
-    uid = os.getuid()
-    gid = os.getgid()
+    uid = getattr(os, "getuid", lambda: 0)()
+    gid = getattr(os, "getgid", lambda: 0)()
 
     script = _container_script(
         repo_url=repo_url,

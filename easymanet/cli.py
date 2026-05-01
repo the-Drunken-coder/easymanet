@@ -41,7 +41,6 @@ from .build import (
 from .privileges import check_privileges
 
 def _app_startup():
-    check_platform()
     update = check_easymanet_update()
     if update:
         typer.secho(
@@ -138,6 +137,7 @@ def render_cmd(
 @app.command(name="disks")
 def disks_cmd():
     """List available disks for flashing."""
+    check_platform()
     disks = list_disks()
 
     if not disks:
@@ -204,6 +204,7 @@ def flash(
 
     Use --no-download to disable auto-download (requires --base-image).
     """
+    check_platform()
     if not yes and not dry_run:
         typer.secho("--yes is required to flash. Use --dry-run to preview first.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)

@@ -63,6 +63,8 @@ jobs:
           docker info
 
       - name: Build EasyMANET-flavored OpenMANET image
+        id: build_image
+        continue-on-error: true
         env:
           PYTHONPATH: .
         run: |
@@ -74,9 +76,61 @@ jobs:
             --target "${{ inputs.target }}" \
             --jobs "${{ inputs.jobs }}"
 
+      - name: Diagnose failed package builds
+        if: steps.build_image.outcome == 'failure'
+        run: |
+          mkdir -p ci-logs
+          docker run --rm \
+            --platform linux/amd64 \
+            --mount type=volume,source=easymanet-openmanet-firmware-cache,target=/cache \
+            -v "${{ github.workspace }}/ci-logs:/logs" \
+            easymanet-openmanet-builder:ubuntu24.04 \
+            bash -lc '
+              set -euo pipefail
+
+              REPO_DIR=/cache/openmanet-firmware
+              rm -rf "$REPO_DIR"
+              git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
+              cd "$REPO_DIR"
+              git fetch --tags origin
+              git checkout "${{ inputs.openmanet_version }}"
+              git submodule update --init --recursive
+
+              ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
+              make download
+
+              status=0
+              for target in \
+                package/feeds/morse/hostapd_s1g/compile \
+                package/feeds/openmanet/openmanetd/compile
+              do
+                pkg_name="$(echo "$target" | tr "/" "_")"
+                log_path="/logs/${pkg_name}.log"
+                echo "=== Running $target ===" | tee "$log_path"
+                if ! make -j1 V=s "$target" 2>&1 | tee -a "$log_path"; then
+                  status=1
+                fi
+              done
+
+              exit "$status"
+            '
+
       - name: Upload firmware artifact
+        if: steps.build_image.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: openmanet-${{ inputs.openmanet_version }}-${{ inputs.target }}
           path: dist/*.img.gz
           if-no-files-found: error
+
+      - name: Upload diagnostic logs
+        if: steps.build_image.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmanet-build-diagnostics-${{ inputs.openmanet_version }}-${{ inputs.target }}
+          path: ci-logs/*.log
+          if-no-files-found: error
+
+      - name: Fail workflow if build failed
+        if: steps.build_image.outcome == 'failure'
+        run: exit 1

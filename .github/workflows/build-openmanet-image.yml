@@ -89,17 +89,19 @@ jobs:
               set -euo pipefail
 
               REPO_DIR=/cache/openmanet-firmware
-              rm -rf "$REPO_DIR"
-              git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
-              cd "$REPO_DIR"
-              git fetch --tags origin
-              git checkout "${{ inputs.openmanet_version }}"
-              git submodule update --init --recursive
+              if [ ! -d "$REPO_DIR/.git" ]; then
+                echo "Expected failed build tree at $REPO_DIR but it was missing" | tee /logs/diagnostic-setup.log
+                exit 1
+              fi
 
-              ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
-              make download
+              cd "$REPO_DIR"
 
               status=0
+              echo "=== Re-running full world with -j1 V=s from failed tree ===" | tee /logs/world_rerun.log
+              if ! make -j1 V=s world 2>&1 | tee -a /logs/world_rerun.log; then
+                status=1
+              fi
+
               for target in \
                 package/feeds/morse/hostapd_s1g/compile \
                 package/feeds/openmanet/openmanetd/compile

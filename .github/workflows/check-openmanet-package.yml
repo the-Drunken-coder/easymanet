@@ -76,6 +76,7 @@ jobs:
               set -euo pipefail
 
               REPO_DIR=/cache/openmanet-firmware
+              export FORCE_UNSAFE_CONFIGURE=1
               rm -rf "$REPO_DIR"
               git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
               cd "$REPO_DIR"

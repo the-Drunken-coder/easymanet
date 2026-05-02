@@ -29,6 +29,7 @@ APT_PACKAGES = [
     "gettext",
     "git",
     "libcap-dev",
+    "libgps-dev",
     "libncurses5-dev",
     "libnl-3-dev",
     "libnl-genl-3-dev",

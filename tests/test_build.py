@@ -9,6 +9,7 @@ def test_dockerfile_contents_include_core_packages():
     assert "FROM ubuntu:24.04" in dockerfile
     assert "git" in dockerfile
     assert "libcap-dev" in dockerfile
+    assert "libgps-dev" in dockerfile
     assert "libnl-3-dev" in dockerfile
     assert "libnl-genl-3-dev" in dockerfile
     assert "python3-setuptools" in dockerfile

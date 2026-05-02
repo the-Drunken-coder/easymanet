@@ -12,6 +12,8 @@ def test_dockerfile_contents_include_core_packages():
     assert "libgps-dev" in dockerfile
     assert "libnl-3-dev" in dockerfile
     assert "libnl-genl-3-dev" in dockerfile
+    assert "libnl-route-3-dev" in dockerfile
+    assert "pkg-config" in dockerfile
     assert "python3-setuptools" in dockerfile
     assert "subversion" in dockerfile
 

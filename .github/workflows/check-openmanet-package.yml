@@ -89,7 +89,7 @@ jobs:
               cp -R /overlay/* files/
 
               ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
-              make download
+              make -j2 tools/install toolchain/install 2>&1 | tee /logs/bootstrap.log
               make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee /logs/package-check.log
             '
 
@@ -98,5 +98,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openmanet-package-check-${{ inputs.openmanet_version }}
-          path: ci-logs/package-check.log
+          path: ci-logs/*.log
           if-no-files-found: error

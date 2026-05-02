@@ -107,6 +107,9 @@ def test_container_script_builds_expected_artifact():
     )
 
     assert "./scripts/openmanet_setup.sh -i -b ekh-bcm2711" in script
+    assert "patch_openmanetd_alfred_pkg_config" in script
+    assert "PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" in script
+    assert "cleanup_cache_ownership" in script
     assert 'cp -R /overlay/* files/' in script
     assert 'make download -j8' in script
     assert 'make -j8 V=s' in script

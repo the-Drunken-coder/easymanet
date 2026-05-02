@@ -161,7 +161,9 @@ jobs:
       - name: Print diagnostic error summary
         if: steps.build_image.outcome == 'failure'
         run: |
-          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs | head -n 120 || true
+          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs \
+            | grep -v 'echo "ERROR: module' \
+            | head -n 120 || true
 
       - name: Save OpenMANET build cache
         if: always() && steps.openmanet-cache.outputs.cache-hit != 'true'

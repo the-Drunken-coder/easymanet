@@ -251,9 +251,30 @@ TARGET={target_q}
 HOST_UID="${{HOST_UID:-0}}"
 HOST_GID="${{HOST_GID:-0}}"
 export FORCE_UNSAFE_CONFIGURE=1
+cleanup_cache_ownership() {{
+  chown -R "$HOST_UID:$HOST_GID" \\
+    /cache/openmanet-firmware/dl \\
+    /cache/openmanet-firmware/staging_dir/host \\
+    /cache/openmanet-firmware/staging_dir/hostpkg \\
+    /cache/openmanet-firmware/staging_dir/toolchain-* \\
+    /cache/openmanet-firmware/build_dir/host \\
+    /cache/openmanet-firmware/build_dir/hostpkg \\
+    2>/dev/null || true
+}}
+trap cleanup_cache_ownership EXIT
+
 if [ "{clean_flag}" = "1" ]; then
   rm -rf "$REPO_DIR"
 fi
+
+patch_openmanetd_alfred_pkg_config() {{
+  local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
+  [ -f "$makefile" ] || return 0
+  if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
+    return 0
+  fi
+  sed -i 's#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#' "$makefile"
+}}
 
 preserve_openwrt_cache() {{
   local source_dir="$1"
@@ -302,6 +323,7 @@ mkdir -p files/etc files/etc/uci-defaults files/usr/lib
 cp -R /overlay/* files/
 
 ./scripts/openmanet_setup.sh -i -b {board_q}
+patch_openmanetd_alfred_pkg_config
 make download -j{jobs_q}
 make -j{jobs_q} V=s
 

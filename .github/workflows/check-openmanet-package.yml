@@ -92,6 +92,8 @@ jobs:
           mkdir -p ci-logs
           docker run --rm \
             --platform linux/amd64 \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
             --mount type=bind,source="${{ github.workspace }}/.openmanet-cache",target=/cache \
             -v "${{ github.workspace }}/provisioning/openwrt-overlay:/overlay:ro" \
             -v "${{ github.workspace }}/ci-logs:/logs" \
@@ -100,7 +102,29 @@ jobs:
               set -euo pipefail
 
               REPO_DIR=/cache/openmanet-firmware
+              HOST_UID="${HOST_UID:-0}"
+              HOST_GID="${HOST_GID:-0}"
               export FORCE_UNSAFE_CONFIGURE=1
+              cleanup_cache_ownership() {
+                chown -R "$HOST_UID:$HOST_GID" \
+                  /cache/openmanet-firmware/dl \
+                  /cache/openmanet-firmware/staging_dir/host \
+                  /cache/openmanet-firmware/staging_dir/hostpkg \
+                  /cache/openmanet-firmware/staging_dir/toolchain-* \
+                  /cache/openmanet-firmware/build_dir/host \
+                  /cache/openmanet-firmware/build_dir/hostpkg \
+                  2>/dev/null || true
+              }
+              trap cleanup_cache_ownership EXIT
+
+              patch_openmanetd_alfred_pkg_config() {
+                local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
+                [ -f "$makefile" ] || return 0
+                if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
+                  return 0
+                fi
+                sed -i 's#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#' "$makefile"
+              }
 
               preserve_openwrt_cache() {
                 local source_dir="$1"
@@ -149,6 +173,7 @@ jobs:
               cp -R /overlay/* files/
 
               ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
+              patch_openmanetd_alfred_pkg_config
               make -j2 tools/install toolchain/install target/linux/compile 2>&1 | tee /logs/bootstrap.log
               make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee /logs/package-check.log
             '
@@ -156,7 +181,9 @@ jobs:
       - name: Print package error summary
         if: failure()
         run: |
-          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs | head -n 120 || true
+          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs \
+            | grep -v 'echo "ERROR: module' \
+            | head -n 120 || true
 
       - name: Save OpenMANET build cache
         if: always() && steps.openmanet-cache.outputs.cache-hit != 'true'

@@ -1,0 +1,102 @@
+name: Check OpenMANET Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      openmanet_version:
+        description: OpenMANET tag or branch to build against
+        required: false
+        default: "1.6.5"
+      board:
+        description: OpenMANET board profile
+        required: false
+        default: "ekh-bcm2711"
+      package_target:
+        description: OpenWrt make target to compile
+        required: false
+        default: "package/feeds/openmanet/openmanetd/compile"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-openmanet-package-${{ github.ref }}-${{ inputs.package_target }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Compile selected package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install EasyMANET
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Build Docker builder image
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from easymanet.build import _ensure_builder_image, DEFAULT_BUILDER_IMAGE
+          _ensure_builder_image(DEFAULT_BUILDER_IMAGE, force=True)
+          print(DEFAULT_BUILDER_IMAGE)
+          PY
+
+      - name: Compile selected OpenMANET package
+        run: |
+          mkdir -p ci-logs
+          docker run --rm \
+            --platform linux/amd64 \
+            --mount type=volume,source=easymanet-openmanet-firmware-cache,target=/cache \
+            -v "${{ github.workspace }}/provisioning/openwrt-overlay:/overlay:ro" \
+            -v "${{ github.workspace }}/ci-logs:/logs" \
+            easymanet-openmanet-builder:ubuntu24.04 \
+            bash -lc '
+              set -euo pipefail
+
+              REPO_DIR=/cache/openmanet-firmware
+              rm -rf "$REPO_DIR"
+              git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
+              cd "$REPO_DIR"
+              git fetch --tags origin
+              git checkout "${{ inputs.openmanet_version }}"
+              git submodule update --init --recursive
+
+              mkdir -p files
+              rm -rf files/etc/easymanet files/etc/uci-defaults/99-easymanet files/usr/lib/easymanet
+              mkdir -p files/etc files/etc/uci-defaults files/usr/lib
+              cp -R /overlay/* files/
+
+              ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
+              make download
+              make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee /logs/package-check.log
+            '
+
+      - name: Upload package compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmanet-package-check-${{ inputs.openmanet_version }}
+          path: ci-logs/package-check.log
+          if-no-files-found: error

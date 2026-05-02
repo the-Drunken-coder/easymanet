@@ -18,7 +18,7 @@ on:
       jobs:
         description: Parallel make jobs inside Docker
         required: false
-        default: "2"
+        default: "4"
       clean:
         description: Delete the cached OpenMANET source tree before building
         required: false
@@ -86,10 +86,10 @@ jobs:
             .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
+          key: openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
           restore-keys: |
-            build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Show Docker info
         run: |

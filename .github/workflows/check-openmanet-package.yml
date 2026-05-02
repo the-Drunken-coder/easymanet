@@ -72,10 +72,10 @@ jobs:
             .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: check-openmanet-package-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
+          key: openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
           restore-keys: |
-            check-openmanet-package-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            check-openmanet-package-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Build Docker builder image
         env:
@@ -174,7 +174,7 @@ jobs:
 
               ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
               patch_openmanetd_alfred_pkg_config
-              make -j2 tools/install toolchain/install target/linux/compile 2>&1 | tee /logs/bootstrap.log
+              make -j"$(nproc)" tools/install toolchain/install target/linux/compile 2>&1 | tee /logs/bootstrap.log
               make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee /logs/package-check.log
             '
 

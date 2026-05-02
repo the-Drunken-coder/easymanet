@@ -45,6 +45,7 @@ APT_PACKAGES = [
     "file",
     "wget",
     "zlib1g-dev",
+    "zstd",
 ]
 
 

@@ -14,6 +14,7 @@ def test_dockerfile_contents_include_core_packages():
     assert "libnl-genl-3-dev" in dockerfile
     assert "libnl-route-3-dev" in dockerfile
     assert "pkg-config" in dockerfile
+    assert "zstd" in dockerfile
     assert "python3-setuptools" in dockerfile
     assert "subversion" in dockerfile
 

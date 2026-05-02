@@ -119,6 +119,9 @@ easymanet image build
 
 By default this uses Docker, builds OpenMANET `1.6.5` for
 `rpi4-mm6108-spi`, and copies the resulting image into `./dist/`.
+Local builds use a persistent Docker volume for the OpenMANET build cache.
+CI can pass `--cache-dir .openmanet-cache` so GitHub Actions can cache the
+same expensive OpenWrt download, host, and toolchain directories.
 
 ### 6. Flash a node
 

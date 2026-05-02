@@ -7,16 +7,32 @@ def test_dockerfile_contents_include_core_packages():
     dockerfile = build._dockerfile_contents()
 
     assert "FROM ubuntu:24.04" in dockerfile
-    assert "git" in dockerfile
-    assert "libcap-dev" in dockerfile
-    assert "libgps-dev" in dockerfile
-    assert "libnl-3-dev" in dockerfile
-    assert "libnl-genl-3-dev" in dockerfile
-    assert "libnl-route-3-dev" in dockerfile
-    assert "pkg-config" in dockerfile
-    assert "zstd" in dockerfile
-    assert "python3-setuptools" in dockerfile
-    assert "subversion" in dockerfile
+    for package in [
+        "alfred",
+        "batctl",
+        "g++-multilib",
+        "gcc-multilib",
+        "git",
+        "golang-go",
+        "iproute2",
+        "libcap-dev",
+        "libgps-dev",
+        "libnl-3-dev",
+        "libnl-genl-3-dev",
+        "libnl-route-3-dev",
+        "libopus-dev",
+        "libopusfile-dev",
+        "libpcre3",
+        "libpcre3-dev",
+        "net-tools",
+        "pkg-config",
+        "portaudio19-dev",
+        "python3-setuptools",
+        "subversion",
+        "upx-ucl",
+        "zstd",
+    ]:
+        assert package in dockerfile
 
 
 def test_docker_run_command_mounts_overlay_and_output(monkeypatch, tmp_path):
@@ -51,6 +67,35 @@ def test_docker_run_command_mounts_overlay_and_output(monkeypatch, tmp_path):
     assert "builder:test" in command
 
 
+def test_docker_run_command_uses_bind_cache_dir(monkeypatch, tmp_path):
+    overlay = tmp_path / "overlay"
+    overlay.mkdir()
+    output = tmp_path / "out"
+    output.mkdir()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+
+    import os
+
+    monkeypatch.setattr(os, "getuid", lambda: 501)
+    monkeypatch.setattr(os, "getgid", lambda: 20)
+
+    command = build._docker_run_command(
+        repo_url=build.DEFAULT_OPENMANET_REPO,
+        openmanet_version="1.6.5",
+        board="ekh-bcm2711",
+        target="rpi4-mm6108-spi",
+        jobs=8,
+        overlay_dir=overlay,
+        output_dir=output,
+        clean=False,
+        builder_image="builder:test",
+        cache_dir=cache,
+    )
+
+    assert f"type=bind,source={cache},target=/cache" in command
+
+
 def test_container_script_builds_expected_artifact():
     script = build._container_script(
         repo_url="https://github.com/OpenMANET/firmware.git",
@@ -63,7 +108,8 @@ def test_container_script_builds_expected_artifact():
 
     assert "./scripts/openmanet_setup.sh -i -b ekh-bcm2711" in script
     assert 'cp -R /overlay/* files/' in script
-    assert 'make -j8' in script
+    assert 'make download -j8' in script
+    assert 'make -j8 V=s' in script
     assert 'openmanet-*-${TARGET}-squashfs-sysupgrade.img.gz' in script
 
 

@@ -464,6 +464,11 @@ def image_build_cmd(
         "--rebuild-builder",
         help="Force a rebuild of the Docker builder image",
     ),
+    cache_dir: Optional[str] = typer.Option(
+        None,
+        "--cache-dir",
+        help="Host directory to mount as the OpenMANET build cache instead of a Docker volume",
+    ),
 ):
     """Build an EasyMANET-flavored OpenMANET image in Docker."""
     _print_header("Image Build")
@@ -472,6 +477,8 @@ def image_build_cmd(
     typer.echo(f"  Board:        {board}")
     typer.echo(f"  Target:       {target}")
     typer.echo(f"  Output dir:   {output_dir}")
+    if cache_dir:
+        typer.echo(f"  Cache dir:    {cache_dir}")
     typer.echo("  Overlay:      provisioning/openwrt-overlay")
     typer.echo()
 
@@ -485,6 +492,7 @@ def image_build_cmd(
             jobs=jobs,
             clean=clean,
             rebuild_builder=rebuild_builder,
+            cache_dir=cache_dir,
         )
     except BuildError as e:
         typer.secho(f"Build error: {e}", fg=typer.colors.RED)

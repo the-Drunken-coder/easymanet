@@ -3,5 +3,6 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+.openmanet-cache/
 *.egg-info/
 *.egg

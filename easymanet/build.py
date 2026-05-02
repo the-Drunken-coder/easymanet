@@ -25,16 +25,28 @@ APT_PACKAGES = [
     "curl",
     "flex",
     "g++",
+    "g++-multilib",
     "gawk",
+    "gcc-multilib",
     "gettext",
     "git",
+    "alfred",
+    "batctl",
+    "golang-go",
+    "iproute2",
     "libcap-dev",
     "libgps-dev",
     "libncurses5-dev",
     "libnl-3-dev",
     "libnl-route-3-dev",
     "libnl-genl-3-dev",
+    "libopus-dev",
+    "libopusfile-dev",
+    "libpcre3",
+    "libpcre3-dev",
     "libssl-dev",
+    "net-tools",
+    "portaudio19-dev",
     "pkg-config",
     "python3",
     "python3-setuptools",
@@ -42,6 +54,7 @@ APT_PACKAGES = [
     "subversion",
     "swig",
     "unzip",
+    "upx-ucl",
     "file",
     "wget",
     "zlib1g-dev",
@@ -63,6 +76,7 @@ def build_image(
     clean: bool = False,
     rebuild_builder: bool = False,
     builder_image: str = DEFAULT_BUILDER_IMAGE,
+    cache_dir: Optional[str] = None,
 ) -> Path:
     import os
 
@@ -76,6 +90,9 @@ def build_image(
 
     _ensure_builder_image(builder_image, force=rebuild_builder)
     _ensure_build_dirs()
+    cache_path = Path(cache_dir).expanduser().resolve() if cache_dir else None
+    if cache_path:
+        cache_path.mkdir(parents=True, exist_ok=True)
 
     command = _docker_run_command(
         repo_url=repo_url,
@@ -87,6 +104,7 @@ def build_image(
         output_dir=output_path,
         clean=clean,
         builder_image=builder_image,
+        cache_dir=cache_path,
     )
 
     try:
@@ -166,6 +184,7 @@ def _docker_run_command(
     output_dir: Path,
     clean: bool,
     builder_image: str,
+    cache_dir: Optional[Path] = None,
 ) -> list[str]:
     import os
 
@@ -181,6 +200,12 @@ def _docker_run_command(
         clean=clean,
     )
 
+    cache_mount = (
+        f"type=bind,source={cache_dir},target=/cache"
+        if cache_dir
+        else f"type=volume,source={DEFAULT_CACHE_VOLUME},target=/cache"
+    )
+
     return [
         "docker",
         "run",
@@ -192,7 +217,7 @@ def _docker_run_command(
         "-e",
         f"HOST_GID={gid}",
         "--mount",
-        f"type=volume,source={DEFAULT_CACHE_VOLUME},target=/cache",
+        cache_mount,
         "-v",
         f"{overlay_dir}:/overlay:ro",
         "-v",
@@ -230,8 +255,40 @@ if [ "{clean_flag}" = "1" ]; then
   rm -rf "$REPO_DIR"
 fi
 
+preserve_openwrt_cache() {{
+  local source_dir="$1"
+  local snapshot_dir="$2"
+  rm -rf "$snapshot_dir"
+  mkdir -p "$snapshot_dir"
+  for rel in dl staging_dir/host staging_dir/hostpkg build_dir/host build_dir/hostpkg; do
+    if [ -e "$source_dir/$rel" ]; then
+      mkdir -p "$snapshot_dir/$(dirname "$rel")"
+      mv "$source_dir/$rel" "$snapshot_dir/$rel"
+    fi
+  done
+  if [ -d "$source_dir/staging_dir" ]; then
+    mkdir -p "$snapshot_dir/staging_dir"
+    find "$source_dir/staging_dir" -maxdepth 1 -type d -name "toolchain-*" -exec mv {{}} "$snapshot_dir/staging_dir/" \\;
+  fi
+}}
+
+restore_openwrt_cache() {{
+  local snapshot_dir="$1"
+  local target_dir="$2"
+  [ -d "$snapshot_dir" ] || return 0
+  find "$snapshot_dir" -mindepth 1 -maxdepth 1 -exec mv {{}} "$target_dir/" \\;
+  rm -rf "$snapshot_dir"
+}}
+
 if [ ! -d "$REPO_DIR/.git" ]; then
+  CACHE_SNAPSHOT=/cache/openmanet-cache-snapshot
+  rm -rf "$CACHE_SNAPSHOT"
+  if [ -d "$REPO_DIR" ]; then
+    preserve_openwrt_cache "$REPO_DIR" "$CACHE_SNAPSHOT"
+    rm -rf "$REPO_DIR"
+  fi
   git clone {repo_url_q} "$REPO_DIR"
+  restore_openwrt_cache "$CACHE_SNAPSHOT" "$REPO_DIR"
 fi
 
 cd "$REPO_DIR"
@@ -245,8 +302,8 @@ mkdir -p files/etc files/etc/uci-defaults files/usr/lib
 cp -R /overlay/* files/
 
 ./scripts/openmanet_setup.sh -i -b {board_q}
-make download
-make -j{jobs_q}
+make download -j{jobs_q}
+make -j{jobs_q} V=s
 
 artifact="$(find bin/target -type f -name "openmanet-*-${{TARGET}}-squashfs-sysupgrade.img.gz" | sort | tail -n1)"
 if [ -z "$artifact" ]; then

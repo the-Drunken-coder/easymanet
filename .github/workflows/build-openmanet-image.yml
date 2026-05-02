@@ -19,6 +19,16 @@ on:
         description: Parallel make jobs inside Docker
         required: false
         default: "2"
+      clean:
+        description: Delete the cached OpenMANET source tree before building
+        required: false
+        type: boolean
+        default: false
+      rebuild_builder:
+        description: Force rebuild of the Docker builder image
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,6 +67,30 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
+      - name: Prepare OpenMANET cache directory
+        run: |
+          mkdir -p .openmanet-cache/openmanet-firmware/dl
+          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/host
+          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
+          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/host
+          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+
+      - name: Restore OpenMANET build cache
+        id: openmanet-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .openmanet-cache/openmanet-firmware/dl
+            .openmanet-cache/openmanet-firmware/staging_dir/host
+            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
+            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
+            .openmanet-cache/openmanet-firmware/build_dir/host
+            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+          key: build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
+          restore-keys: |
+            build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            build-openmanet-image-${{ runner.os }}-${{ inputs.board }}-
+
       - name: Show Docker info
         run: |
           docker version
@@ -68,13 +102,20 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -m easymanet.cli image build \
-            --clean \
-            --rebuild-builder \
+          args=(
             --openmanet-version "${{ inputs.openmanet_version }}" \
             --board "${{ inputs.board }}" \
             --target "${{ inputs.target }}" \
-            --jobs "${{ inputs.jobs }}"
+            --jobs "${{ inputs.jobs }}" \
+            --cache-dir "${{ github.workspace }}/.openmanet-cache"
+          )
+          if [ "${{ inputs.clean }}" = "true" ]; then
+            args+=(--clean)
+          fi
+          if [ "${{ inputs.rebuild_builder }}" = "true" ]; then
+            args+=(--rebuild-builder)
+          fi
+          python -m easymanet.cli image build "${args[@]}"
 
       - name: Diagnose failed package builds
         if: steps.build_image.outcome == 'failure'
@@ -82,7 +123,7 @@ jobs:
           mkdir -p ci-logs
           docker run --rm \
             --platform linux/amd64 \
-            --mount type=volume,source=easymanet-openmanet-firmware-cache,target=/cache \
+            --mount type=bind,source="${{ github.workspace }}/.openmanet-cache",target=/cache \
             -v "${{ github.workspace }}/ci-logs:/logs" \
             easymanet-openmanet-builder:ubuntu24.04 \
             bash -lc '
@@ -116,6 +157,24 @@ jobs:
 
               exit "$status"
             '
+
+      - name: Print diagnostic error summary
+        if: steps.build_image.outcome == 'failure'
+        run: |
+          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs | head -n 120 || true
+
+      - name: Save OpenMANET build cache
+        if: always() && steps.openmanet-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .openmanet-cache/openmanet-firmware/dl
+            .openmanet-cache/openmanet-firmware/staging_dir/host
+            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
+            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
+            .openmanet-cache/openmanet-firmware/build_dir/host
+            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+          key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload firmware artifact
         if: steps.build_image.outcome == 'success'

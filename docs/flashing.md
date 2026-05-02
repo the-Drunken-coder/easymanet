@@ -20,13 +20,16 @@ easymanet image build
 This command uses Docker to:
 
 1. Build a reusable Ubuntu 24.04 builder image with the OpenWrt toolchain.
-2. Clone or refresh the cached OpenMANET source tree under
-   `~/.easymanet/build/`.
+2. Clone or refresh the cached OpenMANET source tree in the Docker cache.
 3. Copy `provisioning/openwrt-overlay/` into the firmware tree's `files/`.
 4. Run `./scripts/openmanet_setup.sh -i -b ekh-bcm2711`.
-5. Run `make download` and `make -jN`.
+5. Run `make download -jN` and `make -jN V=s`.
 6. Copy the resulting `openmanet-*-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz`
    into `./dist/` by default.
+
+By default the cache is a Docker volume. Use `--cache-dir PATH` when the host
+needs to manage or persist OpenMANET cache files directly, such as in GitHub
+Actions.
 
 ## macOS
 

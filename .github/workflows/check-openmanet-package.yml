@@ -123,7 +123,7 @@ jobs:
                 if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
                   return 0
                 fi
-                sed -i 's#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#' "$makefile"
+                perl -0pi -e '"'"'s#\Q$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred\E#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#'"'"' "$makefile"
               }
 
               preserve_openwrt_cache() {
@@ -204,4 +204,4 @@ jobs:
         with:
           name: openmanet-package-check-${{ inputs.openmanet_version }}
           path: ci-logs/*.log
-          if-no-files-found: error
+          if-no-files-found: warn

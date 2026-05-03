@@ -15,6 +15,14 @@ on:
         description: Firmware target suffix
         required: false
         default: "rpi4-mm6108-spi"
+      openwrt_target:
+        description: OpenWrt target platform
+        required: false
+        default: "bcm27xx"
+      subtarget:
+        description: OpenWrt subtarget
+        required: false
+        default: "bcm2711"
       jobs:
         description: Parallel OpenWrt make jobs
         required: false
@@ -49,6 +57,8 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
           df -h
 
       - name: Check out repository
@@ -118,7 +128,8 @@ jobs:
           echo "Using $build_jobs parallel make jobs on $available_jobs available CPUs"
 
           REPO_DIR="${{ github.workspace }}/.openmanet-cache/openmanet-firmware"
-          TARGET="${{ inputs.target }}"
+          OPENWRT_TARGET="${{ inputs.openwrt_target }}"
+          SUBTARGET="${{ inputs.subtarget }}"
 
           patch_openmanetd_alfred_pkg_config() {
             local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
@@ -182,16 +193,32 @@ jobs:
 
           ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
           patch_openmanetd_alfred_pkg_config
+          echo "=== Disk before dependency download ==="
+          df -h
           make download -j"$build_jobs"
+          echo "=== Disk after dependency download ==="
+          df -h
+          echo "=== Largest OpenMANET directories after dependency download ==="
+          du -h -d 2 . 2>/dev/null | sort -h | tail -n 30
           make -j"$build_jobs" V=s 2>&1 | tee "${{ github.workspace }}/build.log"
+          echo "=== Disk after firmware build ==="
+          df -h
 
           mkdir -p "${{ github.workspace }}/dist"
-          artifact="$(find bin/targets -type f -name "openmanet-*-${TARGET}-squashfs-sysupgrade.img.gz" | sort | tail -n1)"
-          if [ -z "$artifact" ]; then
-            echo "No artifact found for target $TARGET" >&2
+          target_dir="bin/targets/${OPENWRT_TARGET}/${SUBTARGET}"
+          if [ ! -d "$target_dir" ]; then
+            echo "No build output directory found at $target_dir" >&2
+            find bin/targets -maxdepth 3 -type d -print 2>/dev/null || true
             exit 1
           fi
-          cp "$artifact" "${{ github.workspace }}/dist/"
+          echo "=== Build outputs in $target_dir ==="
+          ls -lah "$target_dir"
+          find "$target_dir" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*sysupgrade.bin" -o -name "sha256sums" -o -name "*.buildinfo" \) \
+            -print -exec cp {} "${{ github.workspace }}/dist/" \;
+          if ! find "${{ github.workspace }}/dist" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*sysupgrade.bin" \) | grep -q .; then
+            echo "No firmware image artifact found in $target_dir" >&2
+            exit 1
+          fi
 
       - name: Diagnose failed package builds
         if: steps.build_image.outcome == 'failure'
@@ -204,6 +231,10 @@ jobs:
           fi
 
           cd "$REPO_DIR"
+          echo "=== Disk before package diagnostics ==="
+          df -h
+          echo "=== Largest OpenMANET directories before package diagnostics ==="
+          du -h -d 2 . 2>/dev/null | sort -h | tail -n 30
 
           status=0
           echo "=== Running package/feeds/openmanet/openmanetd/compile ===" | tee "${{ github.workspace }}/ci-logs/package_feeds_openmanet_openmanetd_compile.log"
@@ -238,7 +269,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openmanet-${{ inputs.openmanet_version }}-${{ inputs.target }}
-          path: dist/*.img.gz
+          path: |
+            dist/*.img.gz
+            dist/*sysupgrade.bin
+            dist/sha256sums
+            dist/*.buildinfo
           if-no-files-found: error
 
       - name: Upload diagnostic logs

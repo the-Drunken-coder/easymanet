@@ -15,6 +15,10 @@ on:
         description: OpenWrt make target to compile
         required: false
         default: "package/feeds/openmanet/openmanetd/compile"
+      jobs:
+        description: Parallel OpenWrt make jobs for bootstrap steps
+        required: false
+        default: "2"
 
 permissions:
   contents: read
@@ -35,149 +39,75 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
           df -h
 
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install EasyMANET
+      - name: Install OpenMANET build dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex g++ gawk gcc-multilib g++-multilib git gettext \
+            libncurses5-dev libssl-dev python3-setuptools rsync unzip golang-go zlib1g-dev swig file wget \
+            libnl-3-dev libnl-genl-3-dev libnl-route-3-dev libgps-dev libcap-dev pkg-config libopus-dev \
+            libopusfile-dev portaudio19-dev net-tools libpcre3-dev libpcre3 upx-ucl zstd
 
-      - name: Run unit tests
-        run: pytest -q
-
-      - name: Prepare OpenMANET cache directory
+      - name: Clone OpenMANET firmware
         run: |
-          mkdir -p .openmanet-cache/openmanet-firmware/dl
-          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/host
-          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/host
-          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+          git clone https://github.com/OpenMANET/firmware.git openmanet-firmware
+          cd openmanet-firmware
+          git fetch --tags origin
+          git checkout "${{ inputs.openmanet_version }}"
+          git submodule update --init --recursive
 
       - name: Restore OpenMANET build cache
         id: openmanet-cache
         uses: actions/cache/restore@v4
         with:
           path: |
-            .openmanet-cache/openmanet-firmware/dl
-            .openmanet-cache/openmanet-firmware/staging_dir/host
-            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
-            .openmanet-cache/openmanet-firmware/build_dir/host
-            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
+            openmanet-firmware/dl
+            openmanet-firmware/staging_dir/host
+            openmanet-firmware/staging_dir/hostpkg
+            openmanet-firmware/staging_dir/toolchain-*
+            openmanet-firmware/build_dir/host
+            openmanet-firmware/build_dir/hostpkg
+          key: openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
-            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-
-
-      - name: Build Docker builder image
-        env:
-          PYTHONPATH: .
-        run: |
-          python - <<'PY'
-          from easymanet.build import _ensure_builder_image, DEFAULT_BUILDER_IMAGE
-          _ensure_builder_image(DEFAULT_BUILDER_IMAGE, force=True)
-          print(DEFAULT_BUILDER_IMAGE)
-          PY
+            openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Compile selected OpenMANET package
         run: |
+          set -euo pipefail
           mkdir -p ci-logs
-          docker run --rm \
-            --platform linux/amd64 \
-            -e HOST_UID="$(id -u)" \
-            -e HOST_GID="$(id -g)" \
-            --mount type=bind,source="${{ github.workspace }}/.openmanet-cache",target=/cache \
-            -v "${{ github.workspace }}/provisioning/openwrt-overlay:/overlay:ro" \
-            -v "${{ github.workspace }}/ci-logs:/logs" \
-            easymanet-openmanet-builder:ubuntu24.04 \
-            bash -lc '
-              set -euo pipefail
+          cd openmanet-firmware
 
-              REPO_DIR=/cache/openmanet-firmware
-              HOST_UID="${HOST_UID:-0}"
-              HOST_GID="${HOST_GID:-0}"
-              export FORCE_UNSAFE_CONFIGURE=1
-              cleanup_cache_ownership() {
-                chown -R "$HOST_UID:$HOST_GID" \
-                  /cache/openmanet-firmware/dl \
-                  /cache/openmanet-firmware/staging_dir/host \
-                  /cache/openmanet-firmware/staging_dir/hostpkg \
-                  /cache/openmanet-firmware/staging_dir/toolchain-* \
-                  /cache/openmanet-firmware/build_dir/host \
-                  /cache/openmanet-firmware/build_dir/hostpkg \
-                  2>/dev/null || true
-              }
-              trap cleanup_cache_ownership EXIT
+          requested_jobs="${{ inputs.jobs }}"
+          available_jobs="$(nproc)"
+          if [ "$requested_jobs" -gt "$available_jobs" ]; then
+            build_jobs="$available_jobs"
+          else
+            build_jobs="$requested_jobs"
+          fi
+          echo "Using $build_jobs bootstrap make jobs on $available_jobs available CPUs"
 
-              patch_openmanetd_alfred_pkg_config() {
-                local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
-                [ -f "$makefile" ] || return 0
-                if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
-                  return 0
-                fi
-                sed -i '"'"'s#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#'"'"' "$makefile"
-              }
+          echo "=== Configure ${{ inputs.board }} ===" | tee "${{ github.workspace }}/ci-logs/package-check.log"
+          ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}" 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
 
-              preserve_openwrt_cache() {
-                local source_dir="$1"
-                local snapshot_dir="$2"
-                rm -rf "$snapshot_dir"
-                mkdir -p "$snapshot_dir"
-                for rel in dl staging_dir/host staging_dir/hostpkg build_dir/host build_dir/hostpkg; do
-                  if [ -e "$source_dir/$rel" ]; then
-                    mkdir -p "$snapshot_dir/$(dirname "$rel")"
-                    mv "$source_dir/$rel" "$snapshot_dir/$rel"
-                  fi
-                done
-                if [ -d "$source_dir/staging_dir" ]; then
-                  mkdir -p "$snapshot_dir/staging_dir"
-                  find "$source_dir/staging_dir" -maxdepth 1 -type d -name "toolchain-*" -exec mv {} "$snapshot_dir/staging_dir/" \;
-                fi
-              }
+          echo "=== Disk before package bootstrap ===" | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
+          df -h 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
 
-              restore_openwrt_cache() {
-                local snapshot_dir="$1"
-                local target_dir="$2"
-                [ -d "$snapshot_dir" ] || return 0
-                find "$snapshot_dir" -mindepth 1 -maxdepth 1 -exec mv {} "$target_dir/" \;
-                rm -rf "$snapshot_dir"
-              }
+          echo "=== Build package prerequisites ===" | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
+          make -j"$build_jobs" tools/install toolchain/install target/linux/compile 2>&1 | tee "${{ github.workspace }}/ci-logs/bootstrap.log"
 
-              if [ ! -d "$REPO_DIR/.git" ]; then
-                CACHE_SNAPSHOT=/cache/openmanet-cache-snapshot
-                rm -rf "$CACHE_SNAPSHOT"
-                if [ -d "$REPO_DIR" ]; then
-                  preserve_openwrt_cache "$REPO_DIR" "$CACHE_SNAPSHOT"
-                  rm -rf "$REPO_DIR"
-                fi
-                git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
-                restore_openwrt_cache "$CACHE_SNAPSHOT" "$REPO_DIR"
-              fi
+          echo "=== Disk before package compile ===" | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
+          df -h 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
 
-              cd "$REPO_DIR"
-              git fetch --tags origin
-              git checkout "${{ inputs.openmanet_version }}"
-              git submodule update --init --recursive
-
-              mkdir -p files
-              rm -rf files/etc/easymanet files/etc/uci-defaults/99-easymanet files/usr/lib/easymanet
-              mkdir -p files/etc files/etc/uci-defaults files/usr/lib
-              cp -R /overlay/* files/
-
-              ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
-              patch_openmanetd_alfred_pkg_config
-              make -j"$(nproc)" tools/install toolchain/install target/linux/compile 2>&1 | tee /logs/bootstrap.log
-              make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee /logs/package-check.log
-            '
+          echo "=== Compile ${{ inputs.package_target }} ===" | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
+          make -j1 V=s "${{ inputs.package_target }}" 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package-check.log"
 
       - name: Print package error summary
         if: failure()
@@ -191,12 +121,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            .openmanet-cache/openmanet-firmware/dl
-            .openmanet-cache/openmanet-firmware/staging_dir/host
-            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
-            .openmanet-cache/openmanet-firmware/build_dir/host
-            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+            openmanet-firmware/dl
+            openmanet-firmware/staging_dir/host
+            openmanet-firmware/staging_dir/hostpkg
+            openmanet-firmware/staging_dir/toolchain-*
+            openmanet-firmware/build_dir/host
+            openmanet-firmware/build_dir/hostpkg
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload package compile log

@@ -327,7 +327,7 @@ patch_openmanetd_alfred_pkg_config
 make download -j{jobs_q}
 make -j{jobs_q} V=s
 
-artifact="$(find bin/target -type f -name "openmanet-*-${{TARGET}}-squashfs-sysupgrade.img.gz" | sort | tail -n1)"
+artifact="$(find bin/targets -type f -name "openmanet-*-${{TARGET}}-squashfs-sysupgrade.img.gz" | sort | tail -n1)"
 if [ -z "$artifact" ]; then
   echo "No artifact found for target $TARGET" >&2
   exit 1

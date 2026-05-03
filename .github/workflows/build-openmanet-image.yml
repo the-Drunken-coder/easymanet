@@ -16,7 +16,7 @@ on:
         required: false
         default: "rpi4-mm6108-spi"
       jobs:
-        description: Parallel make jobs inside Docker
+        description: Parallel OpenWrt make jobs
         required: false
         default: "2"
       clean:
@@ -25,7 +25,7 @@ on:
         type: boolean
         default: false
       rebuild_builder:
-        description: Force rebuild of the Docker builder image
+        description: Ignored; retained for compatibility with older manual runs
         required: false
         type: boolean
         default: false
@@ -67,6 +67,16 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
+      - name: Install OpenMANET build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang curl flex g++ g++-multilib gawk gcc-multilib gettext git \
+            alfred batctl golang-go iproute2 libcap-dev libgps-dev libncurses5-dev libnl-3-dev libnl-route-3-dev \
+            libnl-genl-3-dev libopus-dev libopusfile-dev libpcre3 libpcre3-dev libssl-dev net-tools \
+            portaudio19-dev pkg-config python3 python3-setuptools rsync subversion swig unzip upx-ucl file wget \
+            zlib1g-dev zstd
+
       - name: Prepare OpenMANET cache directory
         run: |
           mkdir -p .openmanet-cache/openmanet-firmware/dl
@@ -92,17 +102,12 @@ jobs:
             openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
             openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-
 
-      - name: Show Docker info
-        run: |
-          docker version
-          docker info
-
       - name: Build EasyMANET-flavored OpenMANET image
         id: build_image
         continue-on-error: true
-        env:
-          PYTHONPATH: .
         run: |
+          set -euo pipefail
+
           requested_jobs="${{ inputs.jobs }}"
           available_jobs="$(nproc)"
           if [ "$requested_jobs" -gt "$available_jobs" ]; then
@@ -112,61 +117,101 @@ jobs:
           fi
           echo "Using $build_jobs parallel make jobs on $available_jobs available CPUs"
 
-          args=(
-            --openmanet-version "${{ inputs.openmanet_version }}" \
-            --board "${{ inputs.board }}" \
-            --target "${{ inputs.target }}" \
-            --jobs "$build_jobs" \
-            --cache-dir "${{ github.workspace }}/.openmanet-cache"
-          )
+          REPO_DIR="${{ github.workspace }}/.openmanet-cache/openmanet-firmware"
+          TARGET="${{ inputs.target }}"
+
+          patch_openmanetd_alfred_pkg_config() {
+            local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
+            [ -f "$makefile" ] || return 0
+            if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
+              return 0
+            fi
+            sed -i 's#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#' "$makefile"
+          }
+
+          preserve_openwrt_cache() {
+            local source_dir="$1"
+            local snapshot_dir="$2"
+            rm -rf "$snapshot_dir"
+            mkdir -p "$snapshot_dir"
+            for rel in dl staging_dir/host staging_dir/hostpkg build_dir/host build_dir/hostpkg; do
+              if [ -e "$source_dir/$rel" ]; then
+                mkdir -p "$snapshot_dir/$(dirname "$rel")"
+                mv "$source_dir/$rel" "$snapshot_dir/$rel"
+              fi
+            done
+            if [ -d "$source_dir/staging_dir" ]; then
+              mkdir -p "$snapshot_dir/staging_dir"
+              find "$source_dir/staging_dir" -maxdepth 1 -type d -name "toolchain-*" -exec mv {} "$snapshot_dir/staging_dir/" \;
+            fi
+          }
+
+          restore_openwrt_cache() {
+            local snapshot_dir="$1"
+            local target_dir="$2"
+            [ -d "$snapshot_dir" ] || return 0
+            find "$snapshot_dir" -mindepth 1 -maxdepth 1 -exec mv {} "$target_dir/" \;
+            rm -rf "$snapshot_dir"
+          }
+
           if [ "${{ inputs.clean }}" = "true" ]; then
-            args+=(--clean)
+            rm -rf "$REPO_DIR"
           fi
-          if [ "${{ inputs.rebuild_builder }}" = "true" ]; then
-            args+=(--rebuild-builder)
+
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            CACHE_SNAPSHOT="${{ github.workspace }}/.openmanet-cache-snapshot"
+            rm -rf "$CACHE_SNAPSHOT"
+            if [ -d "$REPO_DIR" ]; then
+              preserve_openwrt_cache "$REPO_DIR" "$CACHE_SNAPSHOT"
+              rm -rf "$REPO_DIR"
+            fi
+            rm -rf "$REPO_DIR"
+            git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
+            restore_openwrt_cache "$CACHE_SNAPSHOT" "$REPO_DIR"
           fi
-          python -m easymanet.cli image build "${args[@]}"
+
+          cd "$REPO_DIR"
+          git fetch --tags origin
+          git checkout "${{ inputs.openmanet_version }}"
+          git submodule update --init --recursive
+
+          mkdir -p files
+          rm -rf files/etc/easymanet files/etc/uci-defaults/99-easymanet files/usr/lib/easymanet
+          mkdir -p files/etc files/etc/uci-defaults files/usr/lib
+          cp -R "${{ github.workspace }}/provisioning/openwrt-overlay/"* files/
+
+          ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
+          patch_openmanetd_alfred_pkg_config
+          make download -j"$build_jobs"
+          make -j"$build_jobs" V=s 2>&1 | tee "${{ github.workspace }}/build.log"
+
+          mkdir -p "${{ github.workspace }}/dist"
+          artifact="$(find bin/targets -type f -name "openmanet-*-${TARGET}-squashfs-sysupgrade.img.gz" | sort | tail -n1)"
+          if [ -z "$artifact" ]; then
+            echo "No artifact found for target $TARGET" >&2
+            exit 1
+          fi
+          cp "$artifact" "${{ github.workspace }}/dist/"
 
       - name: Diagnose failed package builds
         if: steps.build_image.outcome == 'failure'
         run: |
           mkdir -p ci-logs
-          docker run --rm \
-            --platform linux/amd64 \
-            --mount type=bind,source="${{ github.workspace }}/.openmanet-cache",target=/cache \
-            -v "${{ github.workspace }}/ci-logs:/logs" \
-            easymanet-openmanet-builder:ubuntu24.04 \
-            bash -lc '
-              set -euo pipefail
+          REPO_DIR="${{ github.workspace }}/.openmanet-cache/openmanet-firmware"
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            echo "Expected failed build tree at $REPO_DIR but it was missing" | tee ci-logs/diagnostic-setup.log
+            exit 1
+          fi
 
-              REPO_DIR=/cache/openmanet-firmware
-              if [ ! -d "$REPO_DIR/.git" ]; then
-                echo "Expected failed build tree at $REPO_DIR but it was missing" | tee /logs/diagnostic-setup.log
-                exit 1
-              fi
+          cd "$REPO_DIR"
 
-              cd "$REPO_DIR"
+          status=0
+          echo "=== Running package/feeds/openmanet/openmanetd/compile ===" | tee "${{ github.workspace }}/ci-logs/package_feeds_openmanet_openmanetd_compile.log"
+          if ! make -j1 V=s package/feeds/openmanet/openmanetd/compile 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package_feeds_openmanet_openmanetd_compile.log"; then
+            status=1
+          fi
 
-              status=0
-              echo "=== Re-running full world with -j1 V=s from failed tree ===" | tee /logs/world_rerun.log
-              if ! make -j1 V=s world 2>&1 | tee -a /logs/world_rerun.log; then
-                status=1
-              fi
-
-              for target in \
-                package/feeds/morse/hostapd_s1g/compile \
-                package/feeds/openmanet/openmanetd/compile
-              do
-                pkg_name="$(echo "$target" | tr "/" "_")"
-                log_path="/logs/${pkg_name}.log"
-                echo "=== Running $target ===" | tee "$log_path"
-                if ! make -j1 V=s "$target" 2>&1 | tee -a "$log_path"; then
-                  status=1
-                fi
-              done
-
-              exit "$status"
-            '
+          exit "$status"
 
       - name: Print diagnostic error summary
         if: steps.build_image.outcome == 'failure'
@@ -201,7 +246,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openmanet-build-diagnostics-${{ inputs.openmanet_version }}-${{ inputs.target }}
-          path: ci-logs/*.log
+          path: |
+            build.log
+            ci-logs/*.log
           if-no-files-found: error
 
       - name: Fail workflow if build failed

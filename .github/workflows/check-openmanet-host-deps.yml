@@ -68,10 +68,11 @@ jobs:
             .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
+          key: openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Build Docker builder image
         env:
@@ -187,19 +188,6 @@ jobs:
           grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs \
             | grep -v 'echo "ERROR: module' \
             | head -n 120 || true
-
-      - name: Save OpenMANET build cache
-        if: always() && steps.openmanet-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .openmanet-cache/openmanet-firmware/dl
-            .openmanet-cache/openmanet-firmware/staging_dir/host
-            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
-            .openmanet-cache/openmanet-firmware/build_dir/host
-            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload host dependency logs
         if: always()

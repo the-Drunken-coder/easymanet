@@ -18,7 +18,7 @@ on:
       jobs:
         description: Parallel make jobs inside Docker
         required: false
-        default: "4"
+        default: "2"
       clean:
         description: Delete the cached OpenMANET source tree before building
         required: false
@@ -86,10 +86,11 @@ jobs:
             .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}
+          key: openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-build-cache-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Show Docker info
         run: |
@@ -102,11 +103,20 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
+          requested_jobs="${{ inputs.jobs }}"
+          available_jobs="$(nproc)"
+          if [ "$requested_jobs" -gt "$available_jobs" ]; then
+            build_jobs="$available_jobs"
+          else
+            build_jobs="$requested_jobs"
+          fi
+          echo "Using $build_jobs parallel make jobs on $available_jobs available CPUs"
+
           args=(
             --openmanet-version "${{ inputs.openmanet_version }}" \
             --board "${{ inputs.board }}" \
             --target "${{ inputs.target }}" \
-            --jobs "${{ inputs.jobs }}" \
+            --jobs "$build_jobs" \
             --cache-dir "${{ github.workspace }}/.openmanet-cache"
           )
           if [ "${{ inputs.clean }}" = "true" ]; then

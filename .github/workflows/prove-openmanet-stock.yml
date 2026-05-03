@@ -1,0 +1,164 @@
+name: Prove Stock OpenMANET Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      openmanet_version:
+        description: OpenMANET tag or branch to build
+        required: false
+        default: "1.6.5"
+      board:
+        description: OpenMANET board profile
+        required: false
+        default: "ekh-bcm2711"
+      openwrt_target:
+        description: OpenWrt target platform
+        required: false
+        default: "bcm27xx"
+      subtarget:
+        description: OpenWrt subtarget
+        required: false
+        default: "bcm2711"
+      jobs:
+        description: Parallel OpenWrt make jobs, or 0 for nproc
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prove-openmanet-stock-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build stock OpenMANET
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - name: Install OpenMANET build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex g++ gawk gcc-multilib g++-multilib git gettext \
+            libncurses5-dev libssl-dev python3-setuptools rsync unzip golang-go zlib1g-dev swig file wget \
+            libnl-3-dev libnl-genl-3-dev libgps-dev libcap-dev pkg-config libopus-dev \
+            libopusfile-dev portaudio19-dev net-tools libpcre3-dev libpcre3 upx-ucl zstd
+
+      - name: Clone OpenMANET firmware
+        run: |
+          git clone https://github.com/OpenMANET/firmware.git openmanet-firmware
+          cd openmanet-firmware
+          git fetch --tags origin
+          git checkout "${{ inputs.openmanet_version }}"
+          git submodule update --init --recursive
+
+      - name: Restore OpenMANET build cache
+        id: openmanet-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            openmanet-firmware/dl
+            openmanet-firmware/staging_dir/host
+            openmanet-firmware/staging_dir/hostpkg
+            openmanet-firmware/staging_dir/toolchain-*
+            openmanet-firmware/build_dir/host
+            openmanet-firmware/build_dir/hostpkg
+          key: prove-openmanet-stock-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.run_id }}
+          restore-keys: |
+            prove-openmanet-stock-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            prove-openmanet-stock-v1-${{ runner.os }}-${{ inputs.board }}-
+
+      - name: Configure stock OpenMANET
+        run: |
+          cd openmanet-firmware
+          ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
+
+      - name: Download dependencies
+        run: |
+          cd openmanet-firmware
+          requested_jobs="${{ inputs.jobs }}"
+          if [ "$requested_jobs" = "0" ]; then
+            build_jobs="$(nproc)"
+          else
+            build_jobs="$requested_jobs"
+          fi
+          echo "Using $build_jobs parallel make jobs"
+          make download -j"$build_jobs"
+
+      - name: Build stock OpenMANET firmware
+        run: |
+          set -o pipefail
+          cd openmanet-firmware
+          requested_jobs="${{ inputs.jobs }}"
+          if [ "$requested_jobs" = "0" ]; then
+            build_jobs="$(nproc)"
+          else
+            build_jobs="$requested_jobs"
+          fi
+          echo "Using $build_jobs parallel make jobs"
+          make -j"$build_jobs" V=s 2>&1 | tee "${{ github.workspace }}/build.log"
+
+      - name: Check build output
+        run: |
+          cd openmanet-firmware
+          target_dir="bin/targets/${{ inputs.openwrt_target }}/${{ inputs.subtarget }}"
+          ls -lah "$target_dir"
+          echo "=== Images created ==="
+          find "$target_dir" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*.bin" -o -name "sha256sums" -o -name "*.buildinfo" \) -print
+
+      - name: Prepare artifacts
+        run: |
+          cd openmanet-firmware
+          target_dir="bin/targets/${{ inputs.openwrt_target }}/${{ inputs.subtarget }}"
+          mkdir -p "${{ github.workspace }}/artifacts/stock-openmanet"
+          cp "$target_dir"/*.img.gz "${{ github.workspace }}/artifacts/stock-openmanet/" 2>/dev/null || true
+          cp "$target_dir"/*sysupgrade.bin "${{ github.workspace }}/artifacts/stock-openmanet/" 2>/dev/null || true
+          cp "$target_dir"/sha256sums "${{ github.workspace }}/artifacts/stock-openmanet/" 2>/dev/null || true
+          cp "$target_dir"/*.buildinfo "${{ github.workspace }}/artifacts/stock-openmanet/" 2>/dev/null || true
+          echo "Board: ${{ inputs.board }}" > "${{ github.workspace }}/artifacts/stock-openmanet/BOARD_INFO.txt"
+          echo "OpenMANET: ${{ inputs.openmanet_version }}" >> "${{ github.workspace }}/artifacts/stock-openmanet/BOARD_INFO.txt"
+          echo "Target: ${{ inputs.openwrt_target }}/${{ inputs.subtarget }}" >> "${{ github.workspace }}/artifacts/stock-openmanet/BOARD_INFO.txt"
+          echo "Overlay: none" >> "${{ github.workspace }}/artifacts/stock-openmanet/BOARD_INFO.txt"
+          if ! find "${{ github.workspace }}/artifacts/stock-openmanet" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*sysupgrade.bin" \) | grep -q .; then
+            echo "No firmware image artifact found in $target_dir" >&2
+            exit 1
+          fi
+
+      - name: Save OpenMANET build cache
+        if: success() && steps.openmanet-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            openmanet-firmware/dl
+            openmanet-firmware/staging_dir/host
+            openmanet-firmware/staging_dir/hostpkg
+            openmanet-firmware/staging_dir/toolchain-*
+            openmanet-firmware/build_dir/host
+            openmanet-firmware/build_dir/hostpkg
+          key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
+
+      - name: Upload stock OpenMANET artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-openmanet-${{ inputs.openmanet_version }}-${{ inputs.board }}
+          path: artifacts/stock-openmanet/*
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-openmanet-build-log-${{ inputs.openmanet_version }}-${{ inputs.board }}
+          path: build.log
+          if-no-files-found: warn

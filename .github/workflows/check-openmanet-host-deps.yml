@@ -68,11 +68,11 @@ jobs:
             .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
+          key: openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
-            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-build-cache-v2-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
+            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Build Docker builder image
         env:

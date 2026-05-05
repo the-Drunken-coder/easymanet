@@ -236,14 +236,17 @@ uci_commit firewall
 
 if [ "$NODE_ROLE" = "gate" ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
-    uci -q del_list network.@device[0].ports="$UPLINK" 2>/dev/null || true
-    uci_set network.wan=interface
-    uci_set network.wan.proto="dhcp"
-    uci_set network.wan.device="$UPLINK"
-    uci_set network.wan.ifname="$UPLINK"
-    uci_set network.wan.peerdns="0"
-    uci_set network.wan.dns="1.1.1.1 8.8.8.8"
-    uci_commit network
+    if [ "$UPLINK" = "eth0" ]; then
+        echo "Keeping eth0 on br-lan for management; skipping WAN on eth0." >> "$LOG_FILE"
+    else
+        uci_set network.wan=interface
+        uci_set network.wan.proto="dhcp"
+        uci_set network.wan.device="$UPLINK"
+        uci_set network.wan.ifname="$UPLINK"
+        uci_set network.wan.peerdns="0"
+        uci_set network.wan.dns="1.1.1.1 8.8.8.8"
+        uci_commit network
+    fi
 fi
 
 if [ -f /etc/openmanetd/config.yml ]; then

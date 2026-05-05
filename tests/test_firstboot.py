@@ -31,4 +31,5 @@ def test_firstboot_splits_mesh_and_local_ap_radios():
         assert 'wireless.ap0.device="$AP_RADIO"' in text
         assert "s1g_chanbw" in text
         assert 'uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true' in text
-        assert "network.@device[0].ports=\"$UPLINK\"" in text
+        assert "Keeping eth0 on br-lan for management" in text
+        assert "network.@device[0].ports=\"$UPLINK\"" not in text

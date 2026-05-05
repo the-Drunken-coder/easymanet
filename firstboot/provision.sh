@@ -64,6 +64,25 @@ find_morse_radio() {
     uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.hwmode='11ah'$/\1/p" | head -n 1
 }
 
+find_local_ap_radio() {
+    for radio in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p"); do
+        band="$(uci -q get wireless."$radio".band || true)"
+        if [ "$band" = "2g" ]; then
+            printf '%s' "$radio"
+            return 0
+        fi
+    done
+
+    uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p" | head -n 1
+}
+
+delete_ifaces_for_radio() {
+    radio="$1"
+    for iface in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.device='$radio'$/\1/p"); do
+        uci -q delete wireless."$iface"
+    done
+}
+
 find_boot_json() {
     for candidate in \
         /boot/easymanet/provision.json \
@@ -150,8 +169,6 @@ if json_val management ssh_authorized_keys >/dev/null 2>&1; then
 fi
 
 echo "Configuring mesh wireless..." >> "$LOG_FILE"
-while uci -q delete wireless.@wifi-iface[0] 2>/dev/null; do :; done
-
 MESH_RADIO="$(find_morse_radio)"
 if [ -z "$MESH_RADIO" ]; then
     echo "FATAL: no Morse/802.11ah wifi-device found in /etc/config/wireless" | tee -a "$LOG_FILE"
@@ -159,8 +176,10 @@ if [ -z "$MESH_RADIO" ]; then
 fi
 
 echo "Using Morse HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
+delete_ifaces_for_radio "$MESH_RADIO"
 uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
-uci_set wireless."$MESH_RADIO".htmode="HT${MESH_BW}0"
+uci_set wireless."$MESH_RADIO".s1g_chanbw="$MESH_BW"
+uci -q delete wireless."$MESH_RADIO".htmode
 uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
 uci_set wireless."$MESH_RADIO".disabled="0"
 
@@ -176,13 +195,22 @@ uci_set wireless.mesh0.mesh_fwding="1"
 if json_bool node local_ap enabled; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
     LOCAL_AP_PASSWORD="$(json_val node local_ap password)"
-    uci_set wireless.ap0=wifi-iface
-    uci_set wireless.ap0.device="$MESH_RADIO"
-    uci_set wireless.ap0.network="lan"
-    uci_set wireless.ap0.mode="ap"
-    uci_set wireless.ap0.ssid="$LOCAL_AP_SSID"
-    uci_set wireless.ap0.encryption="sae"
-    uci_set wireless.ap0.key="$LOCAL_AP_PASSWORD"
+    AP_RADIO="$(find_local_ap_radio)"
+    if [ -n "$AP_RADIO" ]; then
+        echo "Using local AP radio $AP_RADIO..." >> "$LOG_FILE"
+        delete_ifaces_for_radio "$AP_RADIO"
+        uci_set wireless."$AP_RADIO".country="$MESH_COUNTRY"
+        uci_set wireless."$AP_RADIO".disabled="0"
+        uci_set wireless.ap0=wifi-iface
+        uci_set wireless.ap0.device="$AP_RADIO"
+        uci_set wireless.ap0.network="lan"
+        uci_set wireless.ap0.mode="ap"
+        uci_set wireless.ap0.ssid="$LOCAL_AP_SSID"
+        uci_set wireless.ap0.encryption="psk2"
+        uci_set wireless.ap0.key="$LOCAL_AP_PASSWORD"
+    else
+        echo "WARNING: local_ap enabled but no mac80211 wifi-device was found; skipping local AP" >> "$LOG_FILE"
+    fi
 fi
 uci_commit wireless
 
@@ -208,8 +236,10 @@ uci_commit firewall
 
 if [ "$NODE_ROLE" = "gate" ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
+    uci -q del_list network.@device[0].ports="$UPLINK" 2>/dev/null || true
     uci_set network.wan=interface
     uci_set network.wan.proto="dhcp"
+    uci_set network.wan.device="$UPLINK"
     uci_set network.wan.ifname="$UPLINK"
     uci_set network.wan.peerdns="0"
     uci_set network.wan.dns="1.1.1.1 8.8.8.8"

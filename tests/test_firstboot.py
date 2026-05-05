@@ -12,7 +12,7 @@ def test_firstboot_provisioner_uses_openwrt_jsonfilter_not_python():
         assert "python3" not in text
 
 
-def test_firstboot_targets_existing_halow_radio_without_deleting_devices():
+def test_firstboot_splits_mesh_and_local_ap_radios():
     root = Path(__file__).resolve().parents[1]
     for script in [
         root / "firstboot" / "provision.sh",
@@ -22,7 +22,12 @@ def test_firstboot_targets_existing_halow_radio_without_deleting_devices():
         assert "find_morse_radio" in text
         assert "type='morse'" in text
         assert "hwmode='11ah'" in text
-        assert "while uci -q delete wireless.@wifi-iface[0]" in text
+        assert "find_local_ap_radio" in text
+        assert "type='mac80211'" in text
+        assert "delete_ifaces_for_radio" in text
+        assert "while uci -q delete wireless.@wifi-iface[0]" not in text
         assert "while uci -q delete wireless.@wifi-device[0]" not in text
         assert 'wireless.mesh0.device="$MESH_RADIO"' in text
-        assert 'wireless.ap0.device="$MESH_RADIO"' in text
+        assert 'wireless.ap0.device="$AP_RADIO"' in text
+        assert "s1g_chanbw" in text
+        assert "network.@device[0].ports=\"$UPLINK\"" in text

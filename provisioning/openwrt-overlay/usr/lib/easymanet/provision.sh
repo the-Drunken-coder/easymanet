@@ -179,7 +179,7 @@ echo "Using Morse HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
 delete_ifaces_for_radio "$MESH_RADIO"
 uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
 uci_set wireless."$MESH_RADIO".s1g_chanbw="$MESH_BW"
-uci -q delete wireless."$MESH_RADIO".htmode
+uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true
 uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
 uci_set wireless."$MESH_RADIO".disabled="0"
 

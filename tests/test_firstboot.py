@@ -19,7 +19,8 @@ def test_firstboot_targets_existing_halow_radio_without_deleting_devices():
         root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
     ]:
         text = script.read_text()
-        assert "find_halow_radio" in text
+        assert "find_morse_radio" in text
+        assert "type='morse'" in text
         assert "hwmode='11ah'" in text
         assert "while uci -q delete wireless.@wifi-iface[0]" in text
         assert "while uci -q delete wireless.@wifi-device[0]" not in text

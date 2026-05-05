@@ -54,7 +54,13 @@ uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
 }
 
-find_halow_radio() {
+find_morse_radio() {
+    radio="$(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='morse'$/\1/p" | head -n 1)"
+    if [ -n "$radio" ]; then
+        printf '%s' "$radio"
+        return 0
+    fi
+
     uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.hwmode='11ah'$/\1/p" | head -n 1
 }
 
@@ -146,13 +152,13 @@ fi
 echo "Configuring mesh wireless..." >> "$LOG_FILE"
 while uci -q delete wireless.@wifi-iface[0] 2>/dev/null; do :; done
 
-MESH_RADIO="$(find_halow_radio)"
+MESH_RADIO="$(find_morse_radio)"
 if [ -z "$MESH_RADIO" ]; then
-    echo "FATAL: no 802.11ah wifi-device found in /etc/config/wireless" | tee -a "$LOG_FILE"
+    echo "FATAL: no Morse/802.11ah wifi-device found in /etc/config/wireless" | tee -a "$LOG_FILE"
     exit 1
 fi
 
-echo "Using HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
+echo "Using Morse HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
 uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
 uci_set wireless."$MESH_RADIO".htmode="HT${MESH_BW}0"
 uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"

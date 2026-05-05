@@ -27,32 +27,23 @@ cleanup() {
 
 trap cleanup EXIT
 
+json_path() {
+    path="@"
+    for key in "$@"; do
+        path="${path}.${key}"
+    done
+    printf '%s' "$path"
+}
+
 json_val() {
-    python3 -c '
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-val = data
-for key in sys.argv[2:]:
-    if not isinstance(val, dict):
-        val = None
-        break
-    val = val.get(key)
-    if val is None:
-        break
-if isinstance(val, str):
-    print(val, end="")
-elif isinstance(val, bool):
-    print("1" if val else "0", end="")
-elif isinstance(val, (int, float)):
-    print(str(val), end="")
-elif isinstance(val, list):
-    print("\n".join(str(item) for item in val), end="")
-' "$PROVISION_JSON" "$@"
+    jsonfilter -i "$PROVISION_JSON" -e "$(json_path "$@")" 2>/dev/null || true
 }
 
 json_bool() {
-    [ "$(json_val "$@")" = "1" ]
+    case "$(json_val "$@")" in
+        1|true|TRUE|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 uci_set() {
@@ -104,6 +95,11 @@ fi
 mkdir -p "$PROVISION_DIR"
 cp "$BOOT_JSON" "$PROVISION_JSON"
 chmod 0600 "$PROVISION_JSON"
+
+if ! command -v jsonfilter >/dev/null 2>&1; then
+    echo "FATAL: jsonfilter not found; cannot parse provision.json" | tee -a "$LOG_FILE"
+    exit 1
+fi
 
 MESH_ID="$(json_val mesh id)"
 MESH_PASSWORD="$(json_val mesh password)"

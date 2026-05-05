@@ -54,6 +54,10 @@ uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
 }
 
+find_halow_radio() {
+    uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.hwmode='11ah'$/\1/p" | head -n 1
+}
+
 find_boot_json() {
     for candidate in \
         /boot/easymanet/provision.json \
@@ -140,18 +144,22 @@ if json_val management ssh_authorized_keys >/dev/null 2>&1; then
 fi
 
 echo "Configuring mesh wireless..." >> "$LOG_FILE"
-while uci -q delete wireless.@wifi-device[0] 2>/dev/null; do :; done
 while uci -q delete wireless.@wifi-iface[0] 2>/dev/null; do :; done
 
-uci_set wireless.radio0=wifi-device
-uci_set wireless.radio0.type="mac80211"
-uci_set wireless.radio0.channel="$MESH_CHANNEL"
-uci_set wireless.radio0.htmode="HT${MESH_BW}0"
-uci_set wireless.radio0.country="$MESH_COUNTRY"
-uci_set wireless.radio0.disabled="0"
+MESH_RADIO="$(find_halow_radio)"
+if [ -z "$MESH_RADIO" ]; then
+    echo "FATAL: no 802.11ah wifi-device found in /etc/config/wireless" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+echo "Using HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
+uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
+uci_set wireless."$MESH_RADIO".htmode="HT${MESH_BW}0"
+uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
+uci_set wireless."$MESH_RADIO".disabled="0"
 
 uci_set wireless.mesh0=wifi-iface
-uci_set wireless.mesh0.device="radio0"
+uci_set wireless.mesh0.device="$MESH_RADIO"
 uci_set wireless.mesh0.network="mesh"
 uci_set wireless.mesh0.mode="mesh"
 uci_set wireless.mesh0.mesh_id="$MESH_ID"
@@ -163,7 +171,7 @@ if json_bool node local_ap enabled; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
     LOCAL_AP_PASSWORD="$(json_val node local_ap password)"
     uci_set wireless.ap0=wifi-iface
-    uci_set wireless.ap0.device="radio0"
+    uci_set wireless.ap0.device="$MESH_RADIO"
     uci_set wireless.ap0.network="lan"
     uci_set wireless.ap0.mode="ap"
     uci_set wireless.ap0.ssid="$LOCAL_AP_SSID"

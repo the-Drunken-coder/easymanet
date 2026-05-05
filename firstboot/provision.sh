@@ -11,6 +11,7 @@ LOG_FILE="/var/log/easymanet.log"
 PROVISIONED_FLAG="/etc/easymanet/provisioned"
 PROVISION_DIR="/etc/easymanet"
 PROVISION_JSON="$PROVISION_DIR/provision.json"
+BOOT_REPORT_SCRIPT="/usr/lib/easymanet/boot-report.sh"
 BOOT_MOUNT_TMP="/tmp/easymanet-boot"
 BOOT_JSON=""
 BOOT_MOUNTED_TMP=0
@@ -276,6 +277,11 @@ echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
 echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"
 echo "ip: $NODE_IP" >> "$PROVISIONED_FLAG"
 echo "=== EasyMANET provisioning complete $(date) ===" >> "$LOG_FILE"
+
+if [ -f "$BOOT_REPORT_SCRIPT" ]; then
+    . "$BOOT_REPORT_SCRIPT"
+    write_easymanet_boot_report provisioned || true
+fi
 
 ( sleep 5; reboot ) &
 exit 0

@@ -82,3 +82,59 @@ def test_inject_writes_provision_json_to_boot_partition(monkeypatch, tmp_path):
     assert data["node"]["name"] == "node01"
     assert results[0] == ("/boot/easymanet/provision.json", True)
     os.unlink(path)
+
+
+def test_inject_patches_rpi_boot_root_to_partuuid(monkeypatch, tmp_path):
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+    cmdline = boot_mount / "cmdline.txt"
+    cmdline.write_text(
+        "console=serial0 console=tty1 root=/dev/mmcblk0p2 rootfstype=squashfs,ext4 rootwait\n"
+    )
+    (boot_mount / "partuuid.txt").write_text("a7ad1f13\n")
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), False),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda _device, _mount_point, _mounted_here: None,
+    )
+
+    results = inject("/dev/disk4", manifest, "node01")
+
+    assert "root=PARTUUID=a7ad1f13-02" in cmdline.read_text()
+    assert "root=/dev/mmcblk0p2" not in cmdline.read_text()
+    assert (boot_mount / "cmdline.txt.easymanet.bak").read_text().startswith("console=serial0")
+    assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=a7ad1f13-02", True)
+    os.unlink(path)
+
+
+def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+    cmdline = boot_mount / "cmdline.txt"
+    original = "console=serial0 console=tty1 root=PARTUUID=a7ad1f13-02 rootwait\n"
+    cmdline.write_text(original)
+    (boot_mount / "partuuid.txt").write_text("a7ad1f13\n")
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), False),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda _device, _mount_point, _mounted_here: None,
+    )
+
+    results = inject("/dev/disk4", manifest, "node01")
+
+    assert cmdline.read_text() == original
+    assert not (boot_mount / "cmdline.txt.easymanet.bak").exists()
+    assert all("cmdline.txt" not in path for path, _ok in results)
+    os.unlink(path)

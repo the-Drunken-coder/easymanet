@@ -11,6 +11,8 @@ from .manifest import Manifest
 from .platform import is_linux, is_macos
 from .render import render
 
+SD_ROOT_DEVICE = "/dev/mmcblk0p2"
+
 
 class InjectError(Exception):
     pass
@@ -36,10 +38,14 @@ def inject(
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / "provision.json"
         dest_path.write_text(provision_json)
-        return [
+        results = [
             ("/boot/easymanet/provision.json", True),
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
+        cmdline_result = _fix_usb_boot_root(boot_root)
+        if cmdline_result:
+            results.append((cmdline_result, True))
+        return results
     except OSError as e:
         raise InjectError(f"Failed to write boot-partition provision.json: {e}") from e
     finally:
@@ -58,6 +64,29 @@ def inject_dry_run_info(manifest: Manifest, node_name: str) -> str:
     lines.append("  /etc/uci-defaults/99-easymanet")
     lines.append("  and /usr/lib/easymanet/provision.sh via the firmware build.")
     return "\n".join(lines)
+
+
+def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
+    cmdline_path = boot_root / "cmdline.txt"
+    partuuid_path = boot_root / "partuuid.txt"
+    if not cmdline_path.exists() or not partuuid_path.exists():
+        return None
+
+    cmdline = cmdline_path.read_text()
+    if f"root={SD_ROOT_DEVICE}" not in cmdline:
+        return None
+
+    partuuid = partuuid_path.read_text().strip()
+    if not partuuid:
+        return None
+
+    root_partuuid = f"{partuuid}-02"
+    backup_path = boot_root / "cmdline.txt.easymanet.bak"
+    if not backup_path.exists():
+        backup_path.write_text(cmdline)
+
+    cmdline_path.write_text(cmdline.replace(f"root={SD_ROOT_DEVICE}", f"root=PARTUUID={root_partuuid}"))
+    return f"/boot/cmdline.txt root=PARTUUID={root_partuuid}"
 
 
 def _mount_boot_partition(device: str) -> Tuple[str, bool]:

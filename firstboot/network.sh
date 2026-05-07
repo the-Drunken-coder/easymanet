@@ -63,7 +63,7 @@ easymanet_repair_management_lan() {
     easymanet_ensure_lan_bridge_port "$uplink"
     uci commit network >> "$EASYMANET_NETWORK_LOG" 2>&1
     /sbin/ifup lan >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
-    /sbin/ubus call network reload >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
+    ubus call network reload >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
     ip link set "$uplink" up >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
     brctl addif br-lan "$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
 }

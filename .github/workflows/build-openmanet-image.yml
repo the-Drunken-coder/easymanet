@@ -103,14 +103,13 @@ jobs:
             .openmanet-cache/openmanet-firmware/dl
             .openmanet-cache/openmanet-firmware/staging_dir/host
             .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-native-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
+          key: openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-native-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
-            openmanet-native-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-native-cache-v1-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
+            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Build EasyMANET-flavored OpenMANET image
         id: build_image
@@ -259,7 +258,6 @@ jobs:
             .openmanet-cache/openmanet-firmware/dl
             .openmanet-cache/openmanet-firmware/staging_dir/host
             .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/staging_dir/toolchain-*
             .openmanet-cache/openmanet-firmware/build_dir/host
             .openmanet-cache/openmanet-firmware/build_dir/hostpkg
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}

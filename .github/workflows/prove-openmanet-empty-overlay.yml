@@ -74,13 +74,12 @@ jobs:
             openmanet-firmware/dl
             openmanet-firmware/staging_dir/host
             openmanet-firmware/staging_dir/hostpkg
-            openmanet-firmware/staging_dir/toolchain-*
             openmanet-firmware/build_dir/host
             openmanet-firmware/build_dir/hostpkg
-          key: prove-openmanet-empty-overlay-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.run_id }}
+          key: prove-openmanet-empty-overlay-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.run_id }}
           restore-keys: |
-            prove-openmanet-empty-overlay-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            prove-openmanet-empty-overlay-v1-${{ runner.os }}-${{ inputs.board }}-
+            prove-openmanet-empty-overlay-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            prove-openmanet-empty-overlay-v2-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Apply empty EasyMANET overlay
         run: |
@@ -153,7 +152,6 @@ jobs:
             openmanet-firmware/dl
             openmanet-firmware/staging_dir/host
             openmanet-firmware/staging_dir/hostpkg
-            openmanet-firmware/staging_dir/toolchain-*
             openmanet-firmware/build_dir/host
             openmanet-firmware/build_dir/hostpkg
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}

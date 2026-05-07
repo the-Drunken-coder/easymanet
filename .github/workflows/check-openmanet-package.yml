@@ -71,13 +71,12 @@ jobs:
             openmanet-firmware/dl
             openmanet-firmware/staging_dir/host
             openmanet-firmware/staging_dir/hostpkg
-            openmanet-firmware/staging_dir/toolchain-*
             openmanet-firmware/build_dir/host
             openmanet-firmware/build_dir/hostpkg
-          key: openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.workflow }}-${{ github.run_id }}
+          key: openmanet-package-native-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ github.workflow }}-${{ github.run_id }}
           restore-keys: |
-            openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-package-native-v1-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-package-native-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-package-native-v2-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Compile selected OpenMANET package
         run: |
@@ -124,7 +123,6 @@ jobs:
             openmanet-firmware/dl
             openmanet-firmware/staging_dir/host
             openmanet-firmware/staging_dir/hostpkg
-            openmanet-firmware/staging_dir/toolchain-*
             openmanet-firmware/build_dir/host
             openmanet-firmware/build_dir/hostpkg
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}

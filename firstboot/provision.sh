@@ -12,6 +12,7 @@ PROVISIONED_FLAG="/etc/easymanet/provisioned"
 PROVISION_DIR="/etc/easymanet"
 PROVISION_JSON="$PROVISION_DIR/provision.json"
 BOOT_REPORT_SCRIPT="/usr/lib/easymanet/boot-report.sh"
+NETWORK_HELPERS="/usr/lib/easymanet/network.sh"
 BOOT_MOUNT_TMP="/tmp/easymanet-boot"
 BOOT_JSON=""
 BOOT_MOUNTED_TMP=0
@@ -53,20 +54,6 @@ uci_set() {
 
 uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
-}
-
-ensure_lan_bridge_port() {
-    port="$1"
-    bridge="$(uci show network | sed -n "s/^network\.\([^.=]*\)\.name='br-lan'$/\1/p" | head -n 1)"
-    if [ -z "$bridge" ]; then
-        bridge="$(uci add network device)"
-        uci_set network."$bridge".name="br-lan"
-        uci_set network."$bridge".type="bridge"
-    fi
-
-    uci_set network.lan.device="br-lan"
-    uci -q delete network."$bridge".ports 2>/dev/null || true
-    uci add_list network."$bridge".ports="$port" >> "$LOG_FILE" 2>&1
 }
 
 find_morse_radio() {
@@ -253,10 +240,14 @@ if [ "$NODE_ROLE" = "gate" ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
     if [ "$UPLINK" = "eth0" ]; then
         echo "Keeping eth0 on br-lan for management; removing WAN from eth0." >> "$LOG_FILE"
-        uci -q delete network.wan 2>/dev/null || true
-        uci -q delete network.wan6 2>/dev/null || true
-        ensure_lan_bridge_port "$UPLINK"
-        uci_commit network
+        if [ -f "$NETWORK_HELPERS" ]; then
+            EASYMANET_NETWORK_LOG="$LOG_FILE" . "$NETWORK_HELPERS"
+            easymanet_repair_management_lan firstboot
+        else
+            uci -q delete network.wan 2>/dev/null || true
+            uci -q delete network.wan6 2>/dev/null || true
+            uci_commit network
+        fi
     else
         uci_set network.wan=interface
         uci_set network.wan.proto="dhcp"

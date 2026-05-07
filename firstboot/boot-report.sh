@@ -80,6 +80,7 @@ write_easymanet_boot_report() {
     run_report_cmd "$latest/mount.txt" mount
 
     cp /var/log/easymanet.log "$latest/easymanet.log" 2>/dev/null || true
+    cp /var/log/easymanet-network.log "$latest/easymanet-network.log" 2>/dev/null || true
     cp /etc/easymanet/provision.json "$latest/provision.json" 2>/dev/null || true
     cp /etc/easymanet/provisioned "$latest/provisioned" 2>/dev/null || true
     cp /etc/config/wireless "$latest/config-wireless" 2>/dev/null || true

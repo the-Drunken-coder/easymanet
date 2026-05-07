@@ -1,0 +1,11 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /bin/sh -c 'sleep 25; . /usr/lib/easymanet/network.sh; easymanet_repair_management_lan late-boot'
+    procd_set_param respawn 0 0 0
+    procd_close_instance
+}

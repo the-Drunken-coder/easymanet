@@ -32,11 +32,28 @@ def test_firstboot_splits_mesh_and_local_ap_radios():
         assert "s1g_chanbw" in text
         assert 'uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true' in text
         assert "Keeping eth0 on br-lan for management; removing WAN from eth0." in text
-        assert "ensure_lan_bridge_port" in text
-        assert "uci -q delete network.wan" in text
-        assert "uci -q delete network.wan6" in text
-        assert 'uci add_list network."$bridge".ports="$port"' in text
+        assert "easymanet_repair_management_lan firstboot" in text
         assert "network.@device[0].ports=\"$UPLINK\"" not in text
+
+
+def test_management_lan_repair_hook_is_packaged_and_enabled():
+    root = Path(__file__).resolve().parents[1]
+    overlay = root / "provisioning" / "openwrt-overlay"
+    helper = overlay / "usr" / "lib" / "easymanet" / "network.sh"
+    init = overlay / "etc" / "init.d" / "easymanet-management-lan"
+    defaults = overlay / "etc" / "uci-defaults" / "97-easymanet-management-lan"
+
+    assert helper.exists()
+    assert init.exists()
+    assert defaults.exists()
+    helper_text = helper.read_text()
+    assert "easymanet_repair_management_lan" in helper_text
+    assert "uci -q delete network.wan" in helper_text
+    assert "uci -q delete network.wan6" in helper_text
+    assert 'uci add_list network."$bridge".ports="$port"' in helper_text
+    assert "brctl addif br-lan" in helper_text
+    assert "sleep 25" in init.read_text()
+    assert "/etc/init.d/easymanet-management-lan enable" in defaults.read_text()
 
 
 def test_boot_report_hook_is_packaged_and_enabled():
@@ -54,3 +71,4 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "boot-report-latest" in report.read_text()
     assert "/etc/init.d/easymanet-boot-report enable" in defaults.read_text()
     assert "write_easymanet_boot_report provisioned" in provision.read_text()
+    assert "easymanet-network.log" in report.read_text()

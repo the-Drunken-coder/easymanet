@@ -24,13 +24,14 @@ config wifi-device 'radio0'
     option disabled '0'
 
 config wifi-iface 'mesh0'
-    option device 'radio0'
+    option device 'radio2'
+    option ifname 'wlan0'
     option network 'mesh'
     option mode 'mesh'
     option mesh_id '<mesh-id>'
     option encryption 'sae'
     option key '<mesh-password>'
-    option mesh_fwding '1'
+    option mesh_fwding '0'
 
 config wifi-iface 'ap0'          # Only if local AP enabled
     option device 'radio0'
@@ -43,13 +44,28 @@ config wifi-iface 'ap0'          # Only if local AP enabled
 
 ### `/etc/config/network`
 
-Mesh interface (static IP) and gateway WAN:
+OpenMANET uses BATMAN-adv over the 802.11s HaLow interface. The
+802.11s interface is a BATMAN hard interface; node IPs belong on
+`bat0`, not directly on `wlan0`:
 
 ```
+config interface 'bat0'
+    option proto 'batadv'
+    option routing_algo 'BATMAN_V'
+    option bridge_loop_avoidance '1'
+    option distributed_arp_table '1'
+    option multicast_mode '1'
+    option gw_mode '<server|client>'
+
 config interface 'mesh'
+    option proto 'batadv_hardif'
+    option master 'bat0'
+
+config interface 'meship'
     option proto 'static'
+    option device 'bat0'
     option ipaddr '<node-ip>'
-    option netmask '255.255.255.0'
+    option netmask '255.255.0.0'
 
 config interface 'wan'           # Only on gate nodes
     option proto 'dhcp'
@@ -66,13 +82,43 @@ config system
     option timezone 'UTC'
 ```
 
-### `/etc/config/dhcp`
+### `/etc/config/mesh11sd`
 
-Mesh interface is excluded from DHCP serving:
+`mesh11sd` manages the Morse 802.11s parameters. The tested working
+state keeps Morse mesh forwarding disabled at the 802.11s layer and
+lets BATMAN-adv carry the mesh:
 
 ```
-config dhcp 'mesh'
-    option interface 'mesh'
+config mesh11sd 'setup'
+    option enabled '1'
+
+config mesh11sd 'mesh_params'
+    option mesh_fwding '0'
+    option mesh_max_peer_links '10'
+    option mesh_rssi_threshold '0'
+    option mesh_hwmp_rootmode '0'
+    option mesh_gate_announcements '<1-on-gate-0-on-point>'
+
+config mesh11sd 'mesh_dynamic_peering'
+    option enabled '1'
+
+config mesh11sd 'mesh_beaconless'
+    option mesh_beacon_less_mode '0'
+
+config mesh11sd 'mbca'
+    option mbca_config '1'
+```
+
+Do not set `dot11MeshHWMPRootMode=1`; it caused
+`wpa_supplicant_s1g` parse failures on the tested image.
+
+### `/etc/config/dhcp`
+
+Mesh IP interface is excluded from DHCP serving:
+
+```
+config dhcp 'meship'
+    option interface 'meship'
     option ignore '1'
 ```
 
@@ -83,7 +129,7 @@ Mesh zone (open between mesh nodes):
 ```
 config zone
     option name 'mesh'
-    option network 'mesh'
+    option network 'meship'
     option input 'ACCEPT'
     option output 'ACCEPT'
     option forward 'ACCEPT'
@@ -137,6 +183,8 @@ After configuration changes, the following services need restart:
 
 ```
 /etc/init.d/network restart
+/etc/init.d/mesh11sd enable
+/etc/init.d/mesh11sd restart
 /etc/init.d/openmanetd restart    # If daemon model
 ```
 
@@ -144,6 +192,7 @@ Or enable for subsequent boots:
 
 ```
 /etc/init.d/network enable
+/etc/init.d/mesh11sd enable
 /etc/init.d/openmanetd enable
 ```
 
@@ -161,8 +210,8 @@ before the mesh fully forms. This is handled by EasyMANET's
 
 | Role | UCI Changes | Network Behavior |
 |------|------------|------------------|
-| **gate** | WAN interface configured, IP forwarding enabled, mesh firewall open | Routes mesh traffic to uplink (internet/other network) |
-| **point** | Mesh interface only, no WAN | Participates in mesh, no external routing |
+| **gate** | BATMAN gateway mode `server`, mesh gate announcements enabled, WAN or management LAN preserved | Routes mesh traffic to uplink (internet/other network) |
+| **point** | BATMAN gateway mode `client`, mesh gate announcements disabled, no WAN | Participates in mesh, no external routing |
 
 ---
 
@@ -171,11 +220,13 @@ before the mesh fully forms. This is handled by EasyMANET's
 The following sections need validation against a running OpenMANET
 node to confirm exact UCI paths and service names:
 
-1. Exact `/etc/config/wireless` radio0 type string for MM6108 SPI
-2. Whether OpenMANET uses `mesh_id` or `ssid` for mesh identification
-3. Exact encryption type (sae, psk2, none) per OpenMANET version
-4. OpenMANET daemon path (`/etc/init.d/openmanetd` — may differ)
-5. Any additional UCI config files (e.g., `olsrd`, `batman-adv`)
+1. Exact `/etc/config/wireless` radio numbering may vary by image.
+   EasyMANET detects the Morse radio by `type='morse'` or
+   `hwmode='11ah'`.
+2. Exact encryption type may vary by OpenMANET version. The tested
+   working OpenMANET path uses SAE plus the shared mesh password.
+3. OpenMANET daemon path (`/etc/init.d/openmanetd` — may differ).
+4. BATMAN-adv package naming and `batctl` availability by image.
 
 **These should be verified by inspecting a node configured via the
 OpenMANET web wizard.**

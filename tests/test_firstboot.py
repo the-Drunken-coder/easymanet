@@ -28,12 +28,61 @@ def test_firstboot_splits_mesh_and_local_ap_radios():
         assert "while uci -q delete wireless.@wifi-iface[0]" not in text
         assert "while uci -q delete wireless.@wifi-device[0]" not in text
         assert 'wireless.mesh0.device="$MESH_RADIO"' in text
+        assert 'wireless.mesh0.ifname="wlan0"' in text
         assert 'wireless.ap0.device="$AP_RADIO"' in text
         assert "s1g_chanbw" in text
+        assert 'bcf="bcf_fgh100mhaamd.bin"' in text
         assert 'uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true' in text
         assert "Keeping eth0 on br-lan for management; removing WAN from eth0." in text
         assert "easymanet_repair_management_lan firstboot" in text
         assert "network.@device[0].ports=\"$UPLINK\"" not in text
+
+
+def test_firstboot_uses_batman_mesh_topology():
+    root = Path(__file__).resolve().parents[1]
+    for script in [
+        root / "firstboot" / "provision.sh",
+        root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
+    ]:
+        text = script.read_text()
+        assert 'wireless.mesh0.mesh_fwding="0"' in text
+        assert 'network.bat0.proto="batadv"' in text
+        assert 'network.bat0.routing_algo="BATMAN_V"' in text
+        assert 'network.bat0.gw_mode="$BATMAN_GW_MODE"' in text
+        assert 'network.mesh.proto="batadv_hardif"' in text
+        assert 'network.mesh.master="bat0"' in text
+        assert 'uci -q delete network.mesh.ipaddr 2>/dev/null || true' in text
+        assert 'uci -q delete network.mesh.netmask 2>/dev/null || true' in text
+        assert 'network.meship.device="bat0"' in text
+        assert 'network.meship.ipaddr="$NODE_IP"' in text
+        assert 'network.meship.netmask="255.255.0.0"' in text
+        assert "uci -q delete dhcp.mesh" in text
+        assert 'firewall.mesh_zone.network="meship"' in text
+        assert 'network.mesh.proto="static"' not in text
+        assert 'network.mesh.ipaddr="$NODE_IP"' not in text
+        assert 'network.mesh.netmask="255.255.255.0"' not in text
+
+
+def test_firstboot_configures_mesh11sd_from_known_good_openmanet_state():
+    root = Path(__file__).resolve().parents[1]
+    for script in [
+        root / "firstboot" / "provision.sh",
+        root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
+    ]:
+        text = script.read_text()
+        assert 'MESH_GATE_ANNOUNCEMENTS="1"' in text
+        assert 'mesh11sd.setup.enabled="1"' in text
+        assert 'mesh11sd.mesh_params.mesh_fwding="0"' in text
+        assert 'mesh11sd.mesh_params.mesh_max_peer_links="10"' in text
+        assert 'mesh11sd.mesh_params.mesh_rssi_threshold="0"' in text
+        assert 'mesh11sd.mesh_params.mesh_hwmp_rootmode="0"' in text
+        assert 'mesh11sd.mesh_params.mesh_gate_announcements="$MESH_GATE_ANNOUNCEMENTS"' in text
+        assert 'mesh11sd.mesh_dynamic_peering.enabled="1"' in text
+        assert 'mesh11sd.mesh_beaconless.mesh_beacon_less_mode="0"' in text
+        assert 'mesh11sd.mbca.mbca_config="1"' in text
+        assert "/etc/init.d/mesh11sd enable" in text
+        assert "dot11MeshHWMPRootMode" not in text
+        assert 'mesh_hwmp_rootmode="1"' not in text
 
 
 def test_management_lan_repair_hook_is_packaged_and_enabled():
@@ -70,8 +119,16 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert report.exists()
     assert init.exists()
     assert defaults.exists()
-    assert "write_easymanet_boot_report" in report.read_text()
-    assert "boot-report-latest" in report.read_text()
+    report_text = report.read_text()
+    assert "write_easymanet_boot_report" in report_text
+    assert "boot-report-latest" in report_text
+    assert "iw-wlan0-station-dump.txt" in report_text
+    assert "iw-wlan0-mpath-dump.txt" in report_text
+    assert "batctl-neighbors.txt" in report_text
+    assert "batctl-originators.txt" in report_text
+    assert "mesh11sd-status.txt" in report_text
+    assert "uci-mesh11sd.txt" in report_text
+    assert "wpa_supplicant-wlan0.conf" in report_text
     assert "/etc/init.d/easymanet-boot-report enable" in defaults.read_text()
     assert "write_easymanet_boot_report provisioned" in provision.read_text()
-    assert "easymanet-network.log" in report.read_text()
+    assert "easymanet-network.log" in report_text

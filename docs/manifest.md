@@ -139,7 +139,7 @@ node name used with `--node` in CLI commands.
 |-------|------|----------|---------|-------------|
 | `role` | string | yes (or from defaults) | `point` | `gate` or `point` |
 | `hostname` | string | yes | node name | System hostname |
-| `ip` | string | yes | — | Static IP on mesh interface |
+| `ip` | string | yes | — | Static node IP on the BATMAN mesh interface (`bat0`) |
 | `target` | string | no | from defaults | Hardware target |
 | `local_ap` | object | no | from defaults | Local AP override |
 | `gateway` | object | no | from defaults | Gateway settings override |

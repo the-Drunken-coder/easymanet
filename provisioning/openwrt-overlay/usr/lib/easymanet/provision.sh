@@ -146,6 +146,13 @@ if [ -z "$MESH_ID" ] || [ -z "$MESH_PASSWORD" ] || [ -z "$HOSTNAME" ]; then
     exit 1
 fi
 
+BATMAN_GW_MODE="client"
+MESH_GATE_ANNOUNCEMENTS="0"
+if [ "$NODE_ROLE" = "gate" ]; then
+    BATMAN_GW_MODE="server"
+    MESH_GATE_ANNOUNCEMENTS="1"
+fi
+
 echo "Setting hostname to $HOSTNAME..." >> "$LOG_FILE"
 uci_set system.@system[0].hostname="$HOSTNAME"
 uci_set system.@system[0].timezone="UTC"
@@ -183,16 +190,18 @@ uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
 uci_set wireless."$MESH_RADIO".s1g_chanbw="$MESH_BW"
 uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true
 uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
+uci_set wireless."$MESH_RADIO".bcf="bcf_fgh100mhaamd.bin"
 uci_set wireless."$MESH_RADIO".disabled="0"
 
 uci_set wireless.mesh0=wifi-iface
 uci_set wireless.mesh0.device="$MESH_RADIO"
+uci_set wireless.mesh0.ifname="wlan0"
 uci_set wireless.mesh0.network="mesh"
 uci_set wireless.mesh0.mode="mesh"
 uci_set wireless.mesh0.mesh_id="$MESH_ID"
 uci_set wireless.mesh0.encryption="sae"
 uci_set wireless.mesh0.key="$MESH_PASSWORD"
-uci_set wireless.mesh0.mesh_fwding="1"
+uci_set wireless.mesh0.mesh_fwding="0"
 
 if json_bool node local_ap enabled; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
@@ -217,24 +226,63 @@ fi
 uci_commit wireless
 
 echo "Configuring network..." >> "$LOG_FILE"
+uci_set network.bat0=interface
+uci_set network.bat0.proto="batadv"
+uci_set network.bat0.routing_algo="BATMAN_V"
+uci_set network.bat0.bridge_loop_avoidance="1"
+uci_set network.bat0.distributed_arp_table="1"
+uci_set network.bat0.multicast_mode="1"
+uci_set network.bat0.gw_mode="$BATMAN_GW_MODE"
+
 uci_set network.mesh=interface
-uci_set network.mesh.proto="static"
-uci_set network.mesh.ipaddr="$NODE_IP"
-uci_set network.mesh.netmask="255.255.255.0"
+uci_set network.mesh.proto="batadv_hardif"
+uci_set network.mesh.master="bat0"
+uci -q delete network.mesh.ipaddr 2>/dev/null || true
+uci -q delete network.mesh.netmask 2>/dev/null || true
+
+uci_set network.meship=interface
+uci_set network.meship.proto="static"
+uci_set network.meship.device="bat0"
+uci_set network.meship.ipaddr="$NODE_IP"
+uci_set network.meship.netmask="255.255.0.0"
+
+uci_set network.lan.netmask="255.255.255.0"
 uci_commit network
 
-uci_set dhcp.mesh=dhcp
-uci_set dhcp.mesh.interface="mesh"
-uci_set dhcp.mesh.ignore="1"
+uci -q delete dhcp.mesh 2>/dev/null || true
+uci_set dhcp.meship=dhcp
+uci_set dhcp.meship.interface="meship"
+uci_set dhcp.meship.ignore="1"
 uci_commit dhcp
 
 uci_set firewall.mesh_zone=zone
 uci_set firewall.mesh_zone.name="mesh"
-uci_set firewall.mesh_zone.network="mesh"
+uci_set firewall.mesh_zone.network="meship"
 uci_set firewall.mesh_zone.input="ACCEPT"
 uci_set firewall.mesh_zone.output="ACCEPT"
 uci_set firewall.mesh_zone.forward="ACCEPT"
 uci_commit firewall
+
+uci_set mesh11sd.setup=mesh11sd
+uci_set mesh11sd.setup.enabled="1"
+uci_set mesh11sd.mesh_params=mesh11sd
+uci_set mesh11sd.mesh_params.mesh_fwding="0"
+uci_set mesh11sd.mesh_params.mesh_max_peer_links="10"
+uci_set mesh11sd.mesh_params.mesh_rssi_threshold="0"
+uci_set mesh11sd.mesh_params.mesh_hwmp_rootmode="0"
+uci_set mesh11sd.mesh_params.mesh_gate_announcements="$MESH_GATE_ANNOUNCEMENTS"
+uci_set mesh11sd.mesh_params.mesh_nolearn="0"
+uci_set mesh11sd.mesh_dynamic_peering=mesh11sd
+uci_set mesh11sd.mesh_dynamic_peering.enabled="1"
+uci_set mesh11sd.mesh_beaconless=mesh11sd
+uci_set mesh11sd.mesh_beaconless.mesh_beacon_less_mode="0"
+uci_set mesh11sd.mbca=mesh11sd
+uci_set mesh11sd.mbca.mbca_config="1"
+uci_set mesh11sd.mbca.mesh_beacon_timing_report_int="10"
+uci_set mesh11sd.mbca.mbss_start_scan_duration_ms="2048"
+uci_set mesh11sd.mbca.mbca_min_beacon_gap_ms="25"
+uci_set mesh11sd.mbca.mbca_tbtt_adj_interval_sec="60"
+uci_commit mesh11sd
 
 if [ "$NODE_ROLE" = "gate" ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
@@ -276,6 +324,9 @@ EOF
 fi
 
 /etc/init.d/network enable 2>/dev/null || true
+if [ -f /etc/init.d/mesh11sd ]; then
+    /etc/init.d/mesh11sd enable 2>/dev/null || true
+fi
 /etc/init.d/network restart 2>/dev/null || true
 if [ -f /etc/init.d/openmanetd ]; then
     /etc/init.d/openmanetd enable 2>/dev/null || true

@@ -158,6 +158,8 @@ will configure itself and reboot once. After reboot, it joins the mesh.
 5. SSH into either node and verify mesh connectivity:
    ```bash
    ssh root@10.41.1.1
+   ip addr show bat0
+   batctl n
    ping 10.41.2.1
    ```
 

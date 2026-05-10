@@ -148,6 +148,7 @@ fi
 
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"
+WIFI_UPLINK_ENABLED=0
 if [ "$NODE_ROLE" = "gate" ]; then
     BATMAN_GW_MODE="server"
     MESH_GATE_ANNOUNCEMENTS="1"
@@ -222,6 +223,37 @@ if json_bool node local_ap enabled; then
     else
         echo "WARNING: local_ap enabled but no mac80211 wifi-device was found; skipping local AP" >> "$LOG_FILE"
     fi
+fi
+
+if json_bool node gateway wifi enabled; then
+    WIFI_UPLINK_ENABLED=1
+    WIFI_UPLINK_SSID="$(json_val node gateway wifi ssid)"
+    WIFI_UPLINK_PASSWORD="$(json_val node gateway wifi password)"
+    WIFI_UPLINK_ENCRYPTION="$(json_val node gateway wifi encryption)"
+    if [ -z "$WIFI_UPLINK_ENCRYPTION" ]; then
+        WIFI_UPLINK_ENCRYPTION="psk2"
+    fi
+    if [ -z "$WIFI_UPLINK_SSID" ] || [ -z "$WIFI_UPLINK_PASSWORD" ]; then
+        echo "FATAL: gateway.wifi.enabled requires gateway.wifi.ssid and gateway.wifi.password" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+    if [ -z "${AP_RADIO:-}" ]; then
+        AP_RADIO="$(find_local_ap_radio)"
+    fi
+    if [ -z "$AP_RADIO" ]; then
+        echo "FATAL: gateway.wifi.enabled but no mac80211 wifi-device was found" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+    echo "Using Wi-Fi uplink on radio $AP_RADIO for SSID $WIFI_UPLINK_SSID..." >> "$LOG_FILE"
+    uci_set wireless."$AP_RADIO".country="$MESH_COUNTRY"
+    uci_set wireless."$AP_RADIO".disabled="0"
+    uci_set wireless.wan0=wifi-iface
+    uci_set wireless.wan0.device="$AP_RADIO"
+    uci_set wireless.wan0.network="wan"
+    uci_set wireless.wan0.mode="sta"
+    uci_set wireless.wan0.ssid="$WIFI_UPLINK_SSID"
+    uci_set wireless.wan0.encryption="$WIFI_UPLINK_ENCRYPTION"
+    uci_set wireless.wan0.key="$WIFI_UPLINK_PASSWORD"
 fi
 uci_commit wireless
 
@@ -305,6 +337,17 @@ if [ "$NODE_ROLE" = "gate" ]; then
         uci_set network.wan.dns="1.1.1.1 8.8.8.8"
         uci_commit network
     fi
+fi
+
+if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
+    uci_set network.wan=interface
+    uci_set network.wan.proto="dhcp"
+    uci -q delete network.wan.device 2>/dev/null || true
+    uci -q delete network.wan.ifname 2>/dev/null || true
+    uci_set network.wan.peerdns="0"
+    uci_set network.wan.dns="1.1.1.1 8.8.8.8"
+    uci -q delete network.wan6 2>/dev/null || true
+    uci_commit network
 fi
 
 if [ -f /etc/openmanetd/config.yml ]; then

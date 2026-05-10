@@ -85,6 +85,25 @@ def test_firstboot_configures_mesh11sd_from_known_good_openmanet_state():
         assert 'mesh_hwmp_rootmode="1"' not in text
 
 
+def test_firstboot_can_configure_wifi_uplink():
+    root = Path(__file__).resolve().parents[1]
+    for script in [
+        root / "firstboot" / "provision.sh",
+        root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
+    ]:
+        text = script.read_text()
+        assert "json_bool node gateway wifi enabled" in text
+        assert "gateway.wifi.enabled requires gateway.wifi.ssid" in text
+        assert 'wireless.wan0=wifi-iface' in text
+        assert 'wireless.wan0.network="wan"' in text
+        assert 'wireless.wan0.mode="sta"' in text
+        assert 'wireless.wan0.ssid="$WIFI_UPLINK_SSID"' in text
+        assert 'wireless.wan0.encryption="$WIFI_UPLINK_ENCRYPTION"' in text
+        assert 'wireless.wan0.key="$WIFI_UPLINK_PASSWORD"' in text
+        assert 'network.wan.proto="dhcp"' in text
+        assert 'uci -q delete network.wan.ifname' in text
+
+
 def test_management_lan_repair_hook_is_packaged_and_enabled():
     root = Path(__file__).resolve().parents[1]
     overlay = root / "provisioning" / "openwrt-overlay"

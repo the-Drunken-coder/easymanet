@@ -6,3 +6,4 @@ dist/
 .openmanet-cache/
 *.egg-info/
 *.egg
+examples/fleet.yml

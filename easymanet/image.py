@@ -98,6 +98,7 @@ def flash_image(
         print()
 
     unmount_disk(device)
+    _clear_stale_overlay(device)
     print(f"Writing {image.name} to {device}...")
 
     try:
@@ -135,6 +136,14 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
         raise subprocess.CalledProcessError(gzip_return, ["gzip", "-dc", image_path])
     if dd_return != 0:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
+
+
+def _clear_stale_overlay(device: str) -> None:
+    print("Clearing stale OpenWrt overlay area...")
+    subprocess.run(
+        ["dd", "if=/dev/zero", f"of={device}", "bs=16m", "count=32"],
+        check=True,
+    )
 
 
 def _write_raw_via_dd(image_path: str, device: str) -> None:

@@ -4,7 +4,7 @@ import gzip
 
 import pytest
 
-from easymanet.image import FlashError, _check_image
+from easymanet.image import FlashError, _check_image, _clear_stale_overlay
 
 
 def test_check_image_accepts_valid_gzip(tmp_path):
@@ -34,3 +34,21 @@ def test_check_image_rejects_corrupt_gzip(tmp_path):
 
     with pytest.raises(FlashError, match="Invalid gzip-compressed image"):
         _check_image(str(image))
+
+
+def test_clear_stale_overlay_zeroes_initial_disk_region(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, check):
+        calls.append((cmd, check))
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    _clear_stale_overlay("/dev/disk4")
+
+    assert calls == [
+        (
+            ["dd", "if=/dev/zero", "of=/dev/disk4", "bs=16m", "count=32"],
+            True,
+        )
+    ]

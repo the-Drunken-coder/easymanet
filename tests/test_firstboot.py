@@ -24,6 +24,7 @@ def test_firstboot_splits_mesh_and_local_ap_radios():
         assert "hwmode='11ah'" in text
         assert "find_local_ap_radio" in text
         assert "type='mac80211'" in text
+        assert "mmc_host" in text
         assert "delete_ifaces_for_radio" in text
         assert "while uci -q delete wireless.@wifi-iface[0]" not in text
         assert "while uci -q delete wireless.@wifi-device[0]" not in text
@@ -100,6 +101,7 @@ def test_firstboot_can_configure_wifi_uplink():
         assert 'wireless.wan0.ssid="$WIFI_UPLINK_SSID"' in text
         assert 'wireless.wan0.encryption="$WIFI_UPLINK_ENCRYPTION"' in text
         assert 'wireless.wan0.key="$WIFI_UPLINK_PASSWORD"' in text
+        assert "uci -q delete wireless.ap0" in text
         assert 'network.wan.proto="dhcp"' in text
         assert 'uci -q delete network.wan.ifname' in text
 

@@ -68,6 +68,19 @@ find_morse_radio() {
 
 find_local_ap_radio() {
     for radio in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p"); do
+        path="$(uci -q get wireless."$radio".path || true)"
+        band="$(uci -q get wireless."$radio".band || true)"
+        case "$path" in
+            *mmc_host*|*mmc1*)
+                if [ "$band" = "2g" ] || [ "$band" = "5g" ]; then
+                    printf '%s' "$radio"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+
+    for radio in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p"); do
         band="$(uci -q get wireless."$radio".band || true)"
         if [ "$band" = "2g" ]; then
             printf '%s' "$radio"
@@ -149,6 +162,9 @@ fi
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"
 WIFI_UPLINK_ENABLED=0
+if json_bool node gateway wifi enabled; then
+    WIFI_UPLINK_ENABLED=1
+fi
 if [ "$NODE_ROLE" = "gate" ]; then
     BATMAN_GW_MODE="server"
     MESH_GATE_ANNOUNCEMENTS="1"
@@ -204,7 +220,7 @@ uci_set wireless.mesh0.encryption="sae"
 uci_set wireless.mesh0.key="$MESH_PASSWORD"
 uci_set wireless.mesh0.mesh_fwding="0"
 
-if json_bool node local_ap enabled; then
+if json_bool node local_ap enabled && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
     LOCAL_AP_PASSWORD="$(json_val node local_ap password)"
     AP_RADIO="$(find_local_ap_radio)"
@@ -225,8 +241,7 @@ if json_bool node local_ap enabled; then
     fi
 fi
 
-if json_bool node gateway wifi enabled; then
-    WIFI_UPLINK_ENABLED=1
+if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     WIFI_UPLINK_SSID="$(json_val node gateway wifi ssid)"
     WIFI_UPLINK_PASSWORD="$(json_val node gateway wifi password)"
     WIFI_UPLINK_ENCRYPTION="$(json_val node gateway wifi encryption)"
@@ -247,6 +262,7 @@ if json_bool node gateway wifi enabled; then
     echo "Using Wi-Fi uplink on radio $AP_RADIO for SSID $WIFI_UPLINK_SSID..." >> "$LOG_FILE"
     uci_set wireless."$AP_RADIO".country="$MESH_COUNTRY"
     uci_set wireless."$AP_RADIO".disabled="0"
+    uci -q delete wireless.ap0 2>/dev/null || true
     uci_set wireless.wan0=wifi-iface
     uci_set wireless.wan0.device="$AP_RADIO"
     uci_set wireless.wan0.network="wan"

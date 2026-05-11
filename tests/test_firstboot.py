@@ -101,7 +101,7 @@ def test_firstboot_can_configure_wifi_uplink():
         assert 'wireless.wan0.ssid="$WIFI_UPLINK_SSID"' in text
         assert 'wireless.wan0.encryption="$WIFI_UPLINK_ENCRYPTION"' in text
         assert 'wireless.wan0.key="$WIFI_UPLINK_PASSWORD"' in text
-        assert "uci -q delete wireless.ap0" in text
+        assert 'delete_ifaces_for_radio "$AP_RADIO"' in text
         assert 'network.wan.proto="dhcp"' in text
         assert 'uci -q delete network.wan.ifname' in text
 

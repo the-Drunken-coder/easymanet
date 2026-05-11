@@ -260,9 +260,9 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
         exit 1
     fi
     echo "Using Wi-Fi uplink on radio $AP_RADIO for SSID $WIFI_UPLINK_SSID..." >> "$LOG_FILE"
+    delete_ifaces_for_radio "$AP_RADIO"
     uci_set wireless."$AP_RADIO".country="$MESH_COUNTRY"
     uci_set wireless."$AP_RADIO".disabled="0"
-    uci -q delete wireless.ap0 2>/dev/null || true
     uci_set wireless.wan0=wifi-iface
     uci_set wireless.wan0.device="$AP_RADIO"
     uci_set wireless.wan0.network="wan"

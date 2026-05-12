@@ -106,6 +106,17 @@ def test_firstboot_can_configure_wifi_uplink():
         assert 'uci -q delete network.wan.ifname' in text
 
 
+def test_firstboot_does_not_auto_reboot_after_provisioning():
+    root = Path(__file__).resolve().parents[1]
+    for script in [
+        root / "firstboot" / "provision.sh",
+        root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
+    ]:
+        text = script.read_text()
+        assert "reboot" not in text
+        assert "( sleep 5;" not in text
+
+
 def test_management_lan_repair_hook_is_packaged_and_enabled():
     root = Path(__file__).resolve().parents[1]
     overlay = root / "provisioning" / "openwrt-overlay"

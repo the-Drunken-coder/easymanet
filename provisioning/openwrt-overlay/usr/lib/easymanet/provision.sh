@@ -402,5 +402,4 @@ if [ -f "$BOOT_REPORT_SCRIPT" ]; then
     write_easymanet_boot_report provisioned || true
 fi
 
-( sleep 5; reboot ) &
 exit 0

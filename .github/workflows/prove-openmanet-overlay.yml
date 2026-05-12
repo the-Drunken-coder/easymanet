@@ -94,6 +94,36 @@ jobs:
           cd openmanet-firmware
           ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
 
+      - name: Enable EasyMANET extra packages
+        run: |
+          cd openmanet-firmware
+          pkglist="${{ github.workspace }}/provisioning/extra-packages.txt"
+          if [ ! -f "$pkglist" ]; then
+            echo "No extra-packages.txt; skipping."
+            exit 0
+          fi
+          while IFS= read -r line; do
+            pkg="${line%%#*}"
+            pkg="$(echo "$pkg" | tr -d '[:space:]')"
+            [ -z "$pkg" ] && continue
+            if grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config 2>/dev/null; then
+              echo "Already enabled: $pkg"
+              continue
+            fi
+            echo "Enabling: $pkg"
+            sed -i "/^# CONFIG_PACKAGE_${pkg} /d" .config
+            sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+            echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+          done < "$pkglist"
+          make defconfig
+          echo "=== Resolved package selection ==="
+          while IFS= read -r line; do
+            pkg="${line%%#*}"
+            pkg="$(echo "$pkg" | tr -d '[:space:]')"
+            [ -z "$pkg" ] && continue
+            grep "^CONFIG_PACKAGE_${pkg}=" .config || { echo "MISSING: $pkg"; exit 1; }
+          done < "$pkglist"
+
       - name: Download dependencies
         run: |
           cd openmanet-firmware

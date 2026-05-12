@@ -192,6 +192,21 @@ jobs:
 
           ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
           patch_openmanetd_alfred_pkg_config
+
+          pkglist="${{ github.workspace }}/provisioning/extra-packages.txt"
+          if [ -f "$pkglist" ]; then
+            while IFS= read -r line; do
+              pkg="${line%%#*}"
+              pkg="$(echo "$pkg" | tr -d '[:space:]')"
+              [ -z "$pkg" ] && continue
+              grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config && continue
+              sed -i "/^# CONFIG_PACKAGE_${pkg} /d" .config
+              sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+              echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+            done < "$pkglist"
+            make defconfig
+          fi
+
           echo "=== Disk before dependency download ==="
           df -h
           make download -j"$build_jobs"

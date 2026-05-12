@@ -41,29 +41,30 @@ easymanet_ensure_lan_bridge_port() {
 
 easymanet_repair_management_lan() {
     reason="${1:-manual}"
-    if ! command -v jsonfilter >/dev/null 2>&1; then
-        easymanet_log_network "jsonfilter missing; cannot inspect provisioning config"
-        return 0
-    fi
+    mgmt_iface="eth0"
 
-    role="$(easymanet_json_val node role)"
-    uplink="$(easymanet_json_val node gateway uplink_interface)"
+    role="$(easymanet_json_val node role 2>/dev/null || true)"
+    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
 
-    if [ "$role" != "gate" ] || [ "$uplink" != "eth0" ]; then
-        easymanet_log_network "skipping management LAN repair for role=$role uplink=$uplink reason=$reason"
-        return 0
+    easymanet_log_network "ensuring $mgmt_iface stays on br-lan for management reason=$reason role=$role uplink=$uplink"
+
+    # If wan is currently sitting on the management interface (the gate-eth0
+    # default), tear it down so it doesn't fight br-lan. Wi-Fi-uplink wan on
+    # phy1-sta0 must be left alone.
+    wan_device="$(uci -q get network.wan.device || true)"
+    wan_ifname="$(uci -q get network.wan.ifname || true)"
+    if [ "$wan_device" = "$mgmt_iface" ] || [ "$wan_ifname" = "$mgmt_iface" ]; then
+        /sbin/ifdown wan >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
+        /sbin/ifdown wan6 >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
+        uci -q delete network.wan 2>/dev/null || true
+        uci -q delete network.wan6 2>/dev/null || true
     fi
 
-    easymanet_log_network "ensuring eth0 remains on br-lan for management reason=$reason"
-    /sbin/ifdown wan >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
-    /sbin/ifdown wan6 >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
-    uci -q delete network.wan 2>/dev/null || true
-    uci -q delete network.wan6 2>/dev/null || true
-    easymanet_ensure_lan_bridge_port "$uplink"
+    easymanet_ensure_lan_bridge_port "$mgmt_iface"
     uci commit network >> "$EASYMANET_NETWORK_LOG" 2>&1
     /sbin/ifup lan >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
     ubus call network reload >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
-    ip link set "$uplink" up >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
-    brctl addif br-lan "$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
+    ip link set "$mgmt_iface" up >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
+    brctl addif br-lan "$mgmt_iface" >> "$EASYMANET_NETWORK_LOG" 2>&1 || true
 }

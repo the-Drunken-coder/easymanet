@@ -34,8 +34,9 @@ def test_firstboot_splits_mesh_and_local_ap_radios():
         assert "s1g_chanbw" in text
         assert 'bcf="bcf_fgh100mhaamd.bin"' in text
         assert 'uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true' in text
-        assert "Keeping eth0 on br-lan for management; removing WAN from eth0." in text
+        assert "Ensuring eth0 stays on br-lan for management" in text
         assert "easymanet_repair_management_lan firstboot" in text
+        assert "Keeping eth0 on br-lan for management; removing WAN from eth0." not in text
         assert "network.@device[0].ports=\"$UPLINK\"" not in text
 
 
@@ -58,6 +59,8 @@ def test_firstboot_uses_batman_mesh_topology():
         assert 'network.meship.ipaddr="$NODE_IP"' in text
         assert 'network.meship.netmask="255.255.0.0"' in text
         assert "uci -q delete dhcp.mesh" in text
+        assert 'dhcp.lan.interface="lan"' in text
+        assert 'dhcp.lan.start="100"' in text
         assert 'firewall.mesh_zone.network="meship"' in text
         assert 'network.mesh.proto="static"' not in text
         assert 'network.mesh.ipaddr="$NODE_IP"' not in text

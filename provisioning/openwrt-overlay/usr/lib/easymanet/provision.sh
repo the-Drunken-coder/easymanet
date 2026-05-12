@@ -301,6 +301,11 @@ uci -q delete dhcp.mesh 2>/dev/null || true
 uci_set dhcp.meship=dhcp
 uci_set dhcp.meship.interface="meship"
 uci_set dhcp.meship.ignore="1"
+uci_set dhcp.lan=dhcp
+uci_set dhcp.lan.interface="lan"
+uci_set dhcp.lan.start="100"
+uci_set dhcp.lan.limit="150"
+uci_set dhcp.lan.leasetime="12h"
 uci_commit dhcp
 
 uci_set firewall.mesh_zone=zone
@@ -332,19 +337,15 @@ uci_set mesh11sd.mbca.mbca_min_beacon_gap_ms="25"
 uci_set mesh11sd.mbca.mbca_tbtt_adj_interval_sec="60"
 uci_commit mesh11sd
 
+echo "Ensuring eth0 stays on br-lan for management..." >> "$LOG_FILE"
+if [ -f "$NETWORK_HELPERS" ]; then
+    EASYMANET_NETWORK_LOG="$LOG_FILE" . "$NETWORK_HELPERS"
+    easymanet_repair_management_lan firstboot
+fi
+
 if [ "$NODE_ROLE" = "gate" ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
-    if [ "$UPLINK" = "eth0" ]; then
-        echo "Keeping eth0 on br-lan for management; removing WAN from eth0." >> "$LOG_FILE"
-        if [ -f "$NETWORK_HELPERS" ]; then
-            EASYMANET_NETWORK_LOG="$LOG_FILE" . "$NETWORK_HELPERS"
-            easymanet_repair_management_lan firstboot
-        else
-            uci -q delete network.wan 2>/dev/null || true
-            uci -q delete network.wan6 2>/dev/null || true
-            uci_commit network
-        fi
-    else
+    if [ "$UPLINK" != "eth0" ]; then
         uci_set network.wan=interface
         uci_set network.wan.proto="dhcp"
         uci_set network.wan.device="$UPLINK"

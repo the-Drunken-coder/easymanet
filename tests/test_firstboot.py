@@ -104,6 +104,10 @@ def test_firstboot_can_configure_wifi_uplink():
         assert 'delete_ifaces_for_radio "$AP_RADIO"' in text
         assert 'network.wan.proto="dhcp"' in text
         assert 'uci -q delete network.wan.ifname' in text
+        assert "firewall.allow_ssh_wan=rule" in text
+        assert 'firewall.allow_ssh_wan.src="wan"' in text
+        assert 'firewall.allow_ssh_wan.dest_port="22"' in text
+        assert 'firewall.allow_ssh_wan.target="ACCEPT"' in text
 
 
 def test_firstboot_does_not_auto_reboot_after_provisioning():

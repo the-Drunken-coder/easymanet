@@ -364,6 +364,15 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     uci_set network.wan.dns="1.1.1.1 8.8.8.8"
     uci -q delete network.wan6 2>/dev/null || true
     uci_commit network
+
+    uci -q delete firewall.allow_ssh_wan 2>/dev/null || true
+    uci_set firewall.allow_ssh_wan=rule
+    uci_set firewall.allow_ssh_wan.name="Allow-SSH-WAN"
+    uci_set firewall.allow_ssh_wan.src="wan"
+    uci_set firewall.allow_ssh_wan.proto="tcp"
+    uci_set firewall.allow_ssh_wan.dest_port="22"
+    uci_set firewall.allow_ssh_wan.target="ACCEPT"
+    uci_commit firewall
 fi
 
 if [ -f /etc/openmanetd/config.yml ]; then

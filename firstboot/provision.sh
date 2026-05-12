@@ -170,6 +170,11 @@ if [ "$NODE_ROLE" = "gate" ]; then
     MESH_GATE_ANNOUNCEMENTS="1"
 fi
 
+SSH_ENABLED=0
+if [ "$NODE_ROLE" = "gate" ] || json_bool management ssh_enabled; then
+    SSH_ENABLED=1
+fi
+
 echo "Setting hostname to $HOSTNAME..." >> "$LOG_FILE"
 uci_set system.@system[0].hostname="$HOSTNAME"
 uci_set system.@system[0].timezone="UTC"
@@ -367,13 +372,26 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     uci_commit network
 
     uci -q delete firewall.allow_ssh_wan 2>/dev/null || true
-    uci_set firewall.allow_ssh_wan=rule
-    uci_set firewall.allow_ssh_wan.name="Allow-SSH-WAN"
-    uci_set firewall.allow_ssh_wan.src="wan"
-    uci_set firewall.allow_ssh_wan.proto="tcp"
-    uci_set firewall.allow_ssh_wan.dest_port="22"
-    uci_set firewall.allow_ssh_wan.target="ACCEPT"
+    if [ "$SSH_ENABLED" -eq 1 ]; then
+        uci_set firewall.allow_ssh_wan=rule
+        uci_set firewall.allow_ssh_wan.name="Allow-SSH-WAN"
+        uci_set firewall.allow_ssh_wan.src="wan"
+        uci_set firewall.allow_ssh_wan.proto="tcp"
+        uci_set firewall.allow_ssh_wan.dest_port="22"
+        uci_set firewall.allow_ssh_wan.target="ACCEPT"
+    fi
     uci_commit firewall
+fi
+
+if [ -x /etc/init.d/dropbear ]; then
+    if [ "$SSH_ENABLED" -eq 1 ]; then
+        echo "Enabling SSH (dropbear)..." >> "$LOG_FILE"
+        /etc/init.d/dropbear enable 2>/dev/null || true
+    else
+        echo "Disabling SSH (dropbear) for this node..." >> "$LOG_FILE"
+        /etc/init.d/dropbear stop 2>/dev/null || true
+        /etc/init.d/dropbear disable 2>/dev/null || true
+    fi
 fi
 
 if [ -f /etc/openmanetd/config.yml ]; then

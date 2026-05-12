@@ -23,8 +23,10 @@ def inject(
     manifest: Manifest,
     node_name: str,
     dry_run: bool = False,
+    *,
+    ssh_enabled: Optional[bool] = None,
 ) -> List[Tuple[str, bool]]:
-    provision_json = render(manifest, node_name)
+    provision_json = render(manifest, node_name, ssh_enabled=ssh_enabled)
     if dry_run:
         return [
             ("/boot/easymanet/provision.json", True),

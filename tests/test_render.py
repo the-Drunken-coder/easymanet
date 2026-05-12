@@ -133,6 +133,29 @@ nodes:
     os.unlink(path)
 
 
+def test_render_ssh_enabled_defaults_to_role():
+    path = _write_config(VALID_CONFIG)
+    m = load_manifest(path)
+    gate = render_dict(m, "node01")
+    point = render_dict(m, "node02")
+
+    assert gate["management"]["ssh_enabled"] is True
+    assert point["management"]["ssh_enabled"] is False
+    os.unlink(path)
+
+
+def test_render_ssh_enabled_explicit_override():
+    path = _write_config(VALID_CONFIG)
+    m = load_manifest(path)
+
+    point_on = render_dict(m, "node02", ssh_enabled=True)
+    assert point_on["management"]["ssh_enabled"] is True
+
+    gate_off = render_dict(m, "node01", ssh_enabled=False)
+    assert gate_off["management"]["ssh_enabled"] is False
+    os.unlink(path)
+
+
 def test_render_no_local_ap():
     config = """
 version: 1

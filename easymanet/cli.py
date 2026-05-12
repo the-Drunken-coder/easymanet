@@ -194,6 +194,9 @@ def flash(
     no_eject: bool = typer.Option(
         False, "--no-eject", help="Do not eject disk after flashing"
     ),
+    enable_ssh: bool = typer.Option(
+        False, "--enable-ssh", help="Enable SSH on this node. Gateway nodes (role=gate) always have SSH; for point nodes this flag must be set or dropbear is disabled at first boot."
+    ),
 ):
     """Flash an OpenMANET image and stage node config on the boot partition.
 
@@ -224,6 +227,8 @@ def flash(
 
     resolved = render_dict(manifest, node)
     target = resolved["node"]["target"]
+    role = resolved["node"]["role"]
+    ssh_enabled = role == "gate" or enable_ssh
 
     image_path = _resolve_base_image(target, base_image, image_url, download, no_download, dry_run)
 
@@ -231,11 +236,13 @@ def flash(
     typer.echo(f"  Config:       {config}")
     typer.echo(f"  Node:         {node}")
     typer.echo(f"  Hostname:     {resolved['node']['hostname']}")
-    typer.echo(f"  Role:         {resolved['node']['role']}")
+    typer.echo(f"  Role:         {role}")
     typer.echo(f"  Target:       {target}")
     typer.echo(f"  Base image:   {image_path}")
     typer.echo(f"  Device:       {device}")
     typer.echo("  Boot payload: /easymanet/provision.json")
+    ssh_note = "yes (gate role)" if role == "gate" else ("yes (--enable-ssh)" if enable_ssh else "no (point role without --enable-ssh)")
+    typer.echo(f"  SSH:          {ssh_note}")
     typer.echo()
 
     disk = find_disk(device)
@@ -254,7 +261,7 @@ def flash(
         typer.echo()
 
     _print_header("Resolved provision.json")
-    print(render(manifest, node))
+    print(render(manifest, node, ssh_enabled=ssh_enabled))
     print()
 
     typer.echo(inject_dry_run_info(manifest, node))
@@ -279,7 +286,7 @@ def flash(
     typer.echo()
     _print_header("Writing boot-partition payload")
     try:
-        results = inject(device=device, manifest=manifest, node_name=node)
+        results = inject(device=device, manifest=manifest, node_name=node, ssh_enabled=ssh_enabled)
         for path, ok in results:
             status = "✓" if ok else "✗"
             color = typer.colors.GREEN if ok else typer.colors.RED

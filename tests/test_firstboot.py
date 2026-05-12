@@ -113,6 +113,21 @@ def test_firstboot_can_configure_wifi_uplink():
         assert 'firewall.allow_ssh_wan.target="ACCEPT"' in text
 
 
+def test_firstboot_honors_ssh_enabled_flag():
+    root = Path(__file__).resolve().parents[1]
+    for script in [
+        root / "firstboot" / "provision.sh",
+        root / "provisioning" / "openwrt-overlay" / "usr" / "lib" / "easymanet" / "provision.sh",
+    ]:
+        text = script.read_text()
+        assert "SSH_ENABLED=0" in text
+        assert 'if [ "$NODE_ROLE" = "gate" ] || json_bool management ssh_enabled; then' in text
+        assert "/etc/init.d/dropbear enable" in text
+        assert "/etc/init.d/dropbear disable" in text
+        assert "/etc/init.d/dropbear stop" in text
+        assert 'if [ "$SSH_ENABLED" -eq 1 ]; then' in text
+
+
 def test_firstboot_does_not_auto_reboot_after_provisioning():
     root = Path(__file__).resolve().parents[1]
     for script in [

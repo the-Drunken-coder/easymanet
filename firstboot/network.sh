@@ -34,7 +34,20 @@ easymanet_ensure_lan_bridge_port() {
         uci set network."$bridge".type="bridge" >> "$EASYMANET_NETWORK_LOG" 2>&1
     fi
 
+    # Stock OpenMANET ships network.ahwlan on br-ahwlan and no network.lan.
+    # Create the lan interface explicitly so ifup lan and br-lan come up.
+    if ! uci -q get network.lan >/dev/null 2>&1; then
+        uci set network.lan=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
+    fi
     uci set network.lan.device="br-lan" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci set network.lan.proto="static" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    if [ -z "$(uci -q get network.lan.ipaddr)" ]; then
+        uci set network.lan.ipaddr="10.41.254.1" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    fi
+    if [ -z "$(uci -q get network.lan.netmask)" ]; then
+        uci set network.lan.netmask="255.255.255.0" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    fi
+
     uci -q delete network."$bridge".ports 2>/dev/null || true
     uci add_list network."$bridge".ports="$port" >> "$EASYMANET_NETWORK_LOG" 2>&1
 }

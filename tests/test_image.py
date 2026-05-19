@@ -36,7 +36,7 @@ def test_check_image_rejects_corrupt_gzip(tmp_path):
         _check_image(str(image))
 
 
-def test_clear_stale_overlay_zeroes_initial_disk_region(monkeypatch):
+def test_clear_stale_overlay_zeroes_full_writable_partition(monkeypatch):
     calls = []
 
     def fake_run(cmd, check):
@@ -46,9 +46,18 @@ def test_clear_stale_overlay_zeroes_initial_disk_region(monkeypatch):
 
     _clear_stale_overlay("/dev/disk4")
 
+    # Must cover all of OpenMANET partition 2 (~4.3 GB) so the f2fs overlay,
+    # not just the squashfs, gets wiped. 16 MiB * 288 = 4.5 GiB.
     assert calls == [
         (
-            ["dd", "if=/dev/zero", "of=/dev/disk4", "bs=16m", "count=32"],
+            [
+                "dd",
+                "if=/dev/zero",
+                "of=/dev/disk4",
+                "bs=16m",
+                "count=288",
+                "status=progress",
+            ],
             True,
         )
     ]

@@ -138,10 +138,27 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
 
 
+# Stock OpenMANET partition 2 (squashfs+overlay) is ~4.3 GB. The f2fs
+# overlay lives well past the first 512 MiB, so a small wipe leaves the
+# overlay intact across re-flashes — /etc/easymanet/provisioned and the
+# rest of /etc/easymanet survive, and first-boot provisioning silently
+# skips on subsequent flashes. Zero 4.5 GiB to cover all of partition 2.
+_OVERLAY_WIPE_BLOCK_MIB = 16
+_OVERLAY_WIPE_BLOCKS = 288  # 16 MiB * 288 = 4.5 GiB
+
+
 def _clear_stale_overlay(device: str) -> None:
-    print("Clearing stale OpenWrt overlay area...")
+    total_mib = _OVERLAY_WIPE_BLOCK_MIB * _OVERLAY_WIPE_BLOCKS
+    print(f"Clearing stale OpenWrt overlay area ({total_mib} MiB)...")
     subprocess.run(
-        ["dd", "if=/dev/zero", f"of={device}", "bs=16m", "count=32"],
+        [
+            "dd",
+            "if=/dev/zero",
+            f"of={device}",
+            f"bs={_OVERLAY_WIPE_BLOCK_MIB}m",
+            f"count={_OVERLAY_WIPE_BLOCKS}",
+            "status=progress",
+        ],
         check=True,
     )
 

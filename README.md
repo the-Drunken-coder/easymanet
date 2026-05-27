@@ -143,9 +143,14 @@ will configure itself and reboot once. After reboot, it joins the mesh.
 
 - **Never auto-selects a disk.** You must always provide `--device`.
 - **`--yes` is required** to flash. Use `--dry-run` to preview first.
-- **System disk detection** warns or refuses to flash likely system
-  disks (internal drives with `/`, `/boot`, etc.).
-- **`--force` overrides** system disk detection (use with extreme care).
+- **`easymanet disks`** lists removable, USB, and MMC/SD-like devices on
+  Linux; macOS shows external drives. Use `easymanet disks --all` to list
+  every block device.
+- **Blocking checks** refuse to flash system disks, large internal drives,
+  suspiciously large devices, and devices not in the default list unless
+  you pass **`--force`**.
+- **Partial failure recovery:** if the image write succeeds but boot
+  payload staging fails, re-run with `--inject-only`.
 - **Unmounts partitions** before writing.
 - **Syncs writes** and **ejects** after completion.
 
@@ -167,12 +172,13 @@ will configure itself and reboot once. After reboot, it joins the mesh.
 
 | Command | Description |
 |---------|-------------|
-| `easymanet disks` | List external/removable disks |
+| `easymanet disks` | List flashable disks (`--all` for every block device) |
 | `easymanet validate --config FILE` | Validate fleet config |
 | `easymanet validate --config FILE --node NAME` | Validate specific node |
 | `easymanet render --config FILE --node NAME` | Print resolved provision.json |
 | `easymanet image build` | Build an EasyMANET-flavored OpenMANET image with Docker |
 | `easymanet flash --config FILE --node NAME --device DEV --base-image IMG --yes` | Flash and provision |
+| `easymanet flash ... --inject-only --yes` | Stage `provision.json` only (recovery) |
 | `easymanet flash ... --dry-run` | Preview flash without writing |
 
 ## Architecture
@@ -196,6 +202,19 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 pip install -e ".[dev]"
 pytest
 ```
+
+Pull requests run the `CI` workflow (unit tests, overlay shell syntax, and
+packaging checks). Full OpenMANET firmware images are built via the
+`Build OpenMANET Image` workflow (manual) or the weekly `Prove Overlay Weekly`
+workflow on `main`. Docker-based `easymanet image build` on Apple Silicon uses
+`linux/amd64` emulation and is slower than on native x86_64 hosts.
+
+## Security Notes
+
+- An empty `root_password_hash` leaves the root password unchanged on the node.
+- Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
+- When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
+  into that file in plaintext (OpenMANET daemon requirement; verify on hardware).
 
 ## OpenMANET Provisioning Status
 

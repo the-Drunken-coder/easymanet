@@ -56,6 +56,16 @@ def test_firstboot_uses_batman_mesh_topology():
     assert 'network.mesh.netmask="255.255.255.0"' not in text
 
 
+def test_firstboot_creates_lan_interface_before_setting_lan_fields():
+    text = PROVISION_SCRIPT.read_text()
+
+    create_idx = text.index("uci_set network.lan=interface")
+    netmask_idx = text.index('uci_set network.lan.netmask="255.255.255.0"')
+    repair_idx = text.index("easymanet_repair_management_lan firstboot")
+
+    assert create_idx < netmask_idx < repair_idx
+
+
 def test_firstboot_configures_mesh11sd_from_known_good_openmanet_state():
     text = PROVISION_SCRIPT.read_text()
     assert 'MESH_GATE_ANNOUNCEMENTS="1"' in text
@@ -90,6 +100,12 @@ def test_firstboot_can_configure_wifi_uplink():
     assert 'firewall.allow_ssh_wan.src="wan"' in text
     assert 'firewall.allow_ssh_wan.dest_port="22"' in text
     assert 'firewall.allow_ssh_wan.target="ACCEPT"' in text
+
+
+def test_firstboot_installs_ssh_keys_via_jsonfilter_array():
+    text = PROVISION_SCRIPT.read_text()
+    assert "@.management.ssh_authorized_keys[*]" in text
+    assert "jsonfilter -i \"$PROVISION_JSON\" -e '@.management.ssh_authorized_keys[*]'" in text
 
 
 def test_firstboot_honors_ssh_enabled_flag():

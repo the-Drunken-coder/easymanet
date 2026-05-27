@@ -16,13 +16,9 @@ def test_extra_packages_includes_iperf3():
     assert "iperf3" in _read_packages()
 
 
-def test_extra_packages_referenced_by_build_workflows():
+def test_extra_packages_referenced_by_build_workflow():
     root = Path(__file__).resolve().parents[1]
-    for wf in [
-        root / ".github" / "workflows" / "prove-openmanet-overlay.yml",
-        root / ".github" / "workflows" / "build-openmanet-image.yml",
-    ]:
-        text = wf.read_text()
-        assert "provisioning/extra-packages.txt" in text
-        assert "CONFIG_PACKAGE_" in text
-        assert "make defconfig" in text
+    text = (root / ".github" / "workflows" / "build-openmanet-image.yml").read_text()
+    assert "image build" in text
+    assert "easymanet" in text
+    assert "extra-packages.txt" in (root / "easymanet" / "build.py").read_text()

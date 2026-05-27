@@ -39,7 +39,8 @@ Actions.
 easymanet disks
 ```
 
-Uses `diskutil list external` to find removable/external drives.
+Uses `diskutil list external` to find removable/external drives. Use
+`easymanet disks --all` to include every block device.
 
 ### Flashing
 
@@ -55,18 +56,21 @@ easymanet flash \
 Steps:
 1. Validate config.
 2. Render `provision.json` for the selected node.
-3. Unmount all partitions of the target device.
-4. Stream (decompress if `.gz`) the image to the raw device.
-5. Mount the FAT boot partition.
-6. Write `/easymanet/provision.json`.
-7. Unmount and eject.
+3. Enforce disk safety checks (or require `--force`).
+4. Unmount all partitions of the target device.
+5. Stream (decompress if `.gz`) the image to the raw device via `dd`.
+6. Wipe stale overlay data on partition 2 (when layout is detected).
+7. Mount the FAT boot partition.
+8. Write `/easymanet/provision.json`.
+9. Unmount and eject.
 
 ### Safety
 
 - Mac internal drives (containing `/` or `/System/Volumes/Data`) are
-  flagged as system disks and rejected.
+  blocking unless `--force` is used.
 - `--yes` is required. Use `--dry-run` to preview.
-- `--force` overrides system disk detection.
+- `--force` overrides all blocking disk warnings (system disk, large
+  fixed disk, device not in the default list).
 
 ### Post-flash
 
@@ -81,24 +85,41 @@ and insert into the Raspberry Pi.
 easymanet disks
 ```
 
-Uses `lsblk -J` to list block devices. Filters to disk type devices.
+Uses `lsblk` and lists removable disks plus USB and MMC/SD-like devices.
+Use `easymanet disks --all` to list every block device.
 
 ### Flashing
 
-Same command as macOS. Uses `dd`-style streaming write via Python
-file I/O.
+Same command as macOS. Streams the image with `gzip | dd` or `dd`.
 
 ### Safety
 
 - System disks are detected by mount points (`/`, `/boot`, `/home`,
   `/var`, `/usr`).
+- Large internal fixed disks and devices not in the default list are blocking.
 - `--yes` is required.
-- `--force` overrides system disk detection.
+- `--force` overrides all blocking warnings.
 
 ### Permissions
 
 Flashing requires write access to the target block device, typically
 meaning the command must be run as root or with `sudo`.
+
+## Recovery: inject only
+
+If the base image was written but boot-partition staging failed:
+
+```bash
+easymanet flash \
+  --config fleet.yml \
+  --node manet02 \
+  --device /dev/sdb \
+  --inject-only \
+  --yes
+```
+
+This skips the image write and only mounts the boot partition to write
+`/easymanet/provision.json`.
 
 ## Dry Run
 
@@ -117,19 +138,19 @@ Outputs the complete flash plan without writing anything:
 - Target device details
 - Resolved `provision.json`
 - The boot-partition payload that would be written
-- Disk safety warnings if any
+- Disk safety warnings (same checks as a real flash)
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
 | Permission denied | Run with `sudo` |
-| Device not found | Use `easymanet disks` to verify device path |
-| System disk warning | Verify you selected the correct device; use `--force` only if sure |
-| Boot payload staging failed | Verify the first FAT partition mounted correctly and is writable from your host OS. |
+| Device not found | Use `easymanet disks` or `easymanet disks --all`; if the path is valid but hidden, use `--force` |
+| Blocking disk warning | Verify the correct device; use `--force` only if sure |
+| Boot payload staging failed | Re-run with `--inject-only --yes` after verifying the boot partition mounts |
 | Image won't boot | Verify the base image matches your hardware (RPi4 + MM6108 SPI) by writing it directly first, without EasyMANET injection. |
 | `gzip` reports `trailing garbage ignored` for an OpenWrt/OpenMANET sysupgrade image | This is expected. OpenWrt appends sysupgrade metadata after the gzip payload. EasyMANET validates the gzip payload but allows the metadata trailer. |
-| EasyMANET payload is present on the boot partition but the node still launches the normal wizard | The base image does not yet include the EasyMANET first-boot hooks. Rebuild the firmware image with `provisioning/openwrt-overlay/` copied into OpenMANET's `files/` tree. |
+| EasyMANET payload is present on the boot partition but the node still launches the normal wizard | The base image does not yet include the EasyMANET first-boot hooks. Rebuild the firmware image with `easymanet image build` or `provisioning/openwrt-overlay/` in the OpenMANET `files/` tree. |
 
 EasyMANET validates `.img.gz` payloads before flashing. A corrupt cached
 download is skipped during automatic image resolution and deleted before

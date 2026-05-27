@@ -7,18 +7,22 @@ We detect when privileges are needed and provide a clear message.
 import os
 
 
+class PrivilegeError(Exception):
+    pass
+
+
 def is_running_as_root() -> bool:
     return os.geteuid() == 0
 
 
 def check_privileges(device: str) -> None:
+    del device
     if is_running_as_root():
         return
 
-    print()
-    print("Root privileges are required to write to the disk.")
-    print()
-    print("Run with sudo:")
-    print(f"  sudo easymanet flash --config fleet.yml --node manet01 --device {device} --yes")
-    print()
-    raise SystemExit(1)
+    raise PrivilegeError(
+        "Root privileges are required to write to the disk.\n"
+        "Run with sudo, for example:\n"
+        "  sudo easymanet flash --config fleet.yml --node manet01 "
+        "--device /dev/sdX --yes"
+    )

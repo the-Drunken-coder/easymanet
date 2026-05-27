@@ -56,6 +56,7 @@ def test_docker_run_command_mounts_overlay_and_output(monkeypatch, tmp_path):
         output_dir=output,
         clean=False,
         builder_image="builder:test",
+        extra_packages=["iperf3"],
     )
 
     assert command[:3] == ["docker", "run", "--rm"]
@@ -91,6 +92,7 @@ def test_docker_run_command_uses_bind_cache_dir(monkeypatch, tmp_path):
         clean=False,
         builder_image="builder:test",
         cache_dir=cache,
+        extra_packages=[],
     )
 
     assert f"type=bind,source={cache},target=/cache" in command
@@ -104,6 +106,7 @@ def test_container_script_builds_expected_artifact():
         target="rpi4-mm6108-spi",
         jobs=8,
         clean=False,
+        extra_packages=["iperf3"],
     )
 
     assert "./scripts/openmanet_setup.sh -i -b ekh-bcm2711" in script
@@ -111,9 +114,34 @@ def test_container_script_builds_expected_artifact():
     assert "PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" in script
     assert "cleanup_cache_ownership" in script
     assert 'cp -R /overlay/* files/' in script
+    assert "easymanet-extra-packages.txt" in script
+    assert "iperf3" in script
+    assert 'CONFIG_PACKAGE_${pkg}=y' in script
+    assert "make defconfig" in script
     assert 'make download -j8' in script
     assert 'make -j8 V=s' in script
     assert 'openmanet-*-${TARGET}-squashfs-sysupgrade.img.gz' in script
+
+
+def test_overlay_dir_falls_back_to_installed_data(monkeypatch, tmp_path):
+    fake_site = tmp_path / "venv" / "lib" / "python3.11" / "site-packages"
+    fake_package = fake_site / "easymanet"
+    fake_package.mkdir(parents=True)
+    fake_file = fake_package / "build.py"
+    installed = tmp_path / "venv" / "share" / "easymanet" / "provisioning"
+
+    monkeypatch.setattr(build, "__file__", str(fake_file))
+    monkeypatch.setattr(build.sys, "prefix", str(tmp_path / "venv"))
+
+    assert build._provisioning_dir() == installed
+    assert build._overlay_dir() == installed / "openwrt-overlay"
+
+
+def test_read_extra_packages_strips_comments_and_blanks(tmp_path):
+    package_file = tmp_path / "extra-packages.txt"
+    package_file.write_text("\n# comment\niperf3\n tcpdump  # diagnostic\n")
+
+    assert build._read_extra_packages(package_file) == ["iperf3", "tcpdump"]
 
 
 def test_build_image_returns_expected_artifact(monkeypatch, tmp_path):

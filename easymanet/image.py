@@ -6,14 +6,19 @@ verify/sync, and clean unmount/eject.
 
 import os
 import shlex
-import shutil
 import subprocess
-import sys
 import zlib
 from pathlib import Path
 from typing import Callable, Optional
 
-from .disks import unmount_disk, eject_disk, find_disk
+from .disks import (
+    assert_flash_allowed,
+    get_partition2_wipe_range,
+    lookup_device,
+    unmount_disk,
+    eject_disk,
+    _OVERLAY_WIPE_BLOCK_MIB,
+)
 
 
 class FlashError(Exception):
@@ -21,18 +26,10 @@ class FlashError(Exception):
 
 
 def _check_device_safety(device: str, force: bool = False) -> None:
-    disk = find_disk(device)
-    if disk is None:
-        raise FlashError(f"Device {device} not found. Use 'easymanet disks' to list available devices.")
-    if not os.path.exists(device):
-        raise FlashError(f"Device {device} does not exist.")
-    if disk.is_system and not force:
-        raise FlashError(
-            f"Device {device} appears to be a system disk. Use --force to override.\n"
-            f"  Model: {disk.model}\n"
-            f"  Size: {disk.size_human}\n"
-            f"  Mounted: {', '.join(disk.mounted) if disk.mounted else 'none'}"
-        )
+    try:
+        assert_flash_allowed(device, force=force)
+    except ValueError as e:
+        raise FlashError(str(e)) from e
 
 
 def _check_image(image_path: str) -> Path:
@@ -79,14 +76,16 @@ def flash_image(
     dry_run: bool = False,
     force: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    skip_overlay_wipe: bool = False,
 ) -> None:
+    del progress_callback
     image = _check_image(image_path)
     _check_device_safety(device, force=force)
 
     if dry_run:
         return
 
-    disk = find_disk(device)
+    disk = lookup_device(device)
 
     if disk:
         mounted_str = ", ".join(disk.mounted) if disk.mounted else "none"
@@ -98,7 +97,6 @@ def flash_image(
         print()
 
     unmount_disk(device)
-    _clear_stale_overlay(device)
     print(f"Writing {image.name} to {device}...")
 
     try:
@@ -110,6 +108,9 @@ def flash_image(
         print("Syncing...")
         os.sync()
         print("Done writing.")
+
+        if not skip_overlay_wipe:
+            _clear_stale_overlay(device)
 
     except subprocess.CalledProcessError as e:
         raise FlashError(f"Flash failed: {e}")
@@ -138,25 +139,31 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
 
 
-# Stock OpenMANET partition 2 (squashfs+overlay) is ~4.3 GB. The f2fs
-# overlay lives well past the first 512 MiB, so a small wipe leaves the
-# overlay intact across re-flashes — /etc/easymanet/provisioned and the
-# rest of /etc/easymanet survive, and first-boot provisioning silently
-# skips on subsequent flashes. Zero 4.5 GiB to cover all of partition 2.
-_OVERLAY_WIPE_BLOCK_MIB = 16
-_OVERLAY_WIPE_BLOCKS = 288  # 16 MiB * 288 = 4.5 GiB
-
-
 def _clear_stale_overlay(device: str) -> None:
-    total_mib = _OVERLAY_WIPE_BLOCK_MIB * _OVERLAY_WIPE_BLOCKS
-    print(f"Clearing stale OpenWrt overlay area ({total_mib} MiB)...")
+    wipe_range = get_partition2_wipe_range(device)
+    if not wipe_range:
+        print(
+            "Warning: Could not determine partition 2 layout; "
+            "skipping stale overlay wipe."
+        )
+        return
+
+    start_bytes, wipe_bytes = wipe_range
+    block_size = _OVERLAY_WIPE_BLOCK_MIB * 1024 * 1024
+    seek_blocks = start_bytes // block_size
+    count = max(1, wipe_bytes // block_size)
+    total_mib = (count * _OVERLAY_WIPE_BLOCK_MIB)
+    print(
+        f"Clearing stale OpenWrt overlay area ({total_mib} MiB at offset {start_bytes} bytes)..."
+    )
     subprocess.run(
         [
             "dd",
             "if=/dev/zero",
             f"of={device}",
             f"bs={_OVERLAY_WIPE_BLOCK_MIB}m",
-            f"count={_OVERLAY_WIPE_BLOCKS}",
+            f"seek={seek_blocks}",
+            f"count={count}",
             "status=progress",
         ],
         check=True,
@@ -166,24 +173,6 @@ def _clear_stale_overlay(device: str) -> None:
 def _write_raw_via_dd(image_path: str, device: str) -> None:
     cmd = f"dd if={shlex.quote(str(image_path))} of={shlex.quote(device)} bs=16m status=progress 2>&1"
     subprocess.run(cmd, shell=True, check=True)
-
-
-def _get_uncompressed_size(gz_path: Path) -> int:
-    with open(gz_path, "rb") as f:
-        f.seek(-4, 2)
-        size_bytes = f.read(4)
-        return int.from_bytes(size_bytes, "little")
-
-
-def _human_size(n: int) -> str:
-    if n < 1024:
-        return f"{n} B"
-    elif n < 1024**2:
-        return f"{n/1024:.1f} KB"
-    elif n < 1024**3:
-        return f"{n/1024**2:.1f} MB"
-    else:
-        return f"{n/1024**3:.1f} GB"
 
 
 def finish_flash(device: str, eject: bool = True) -> None:

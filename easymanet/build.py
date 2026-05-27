@@ -2,6 +2,7 @@
 
 import shlex
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -84,9 +85,11 @@ def build_image(
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
-    overlay_dir = _overlay_dir()
+    provisioning_dir = _provisioning_dir()
+    overlay_dir = provisioning_dir / "openwrt-overlay"
     if not overlay_dir.exists():
         raise BuildError(f"OpenWrt overlay not found: {overlay_dir}")
+    extra_packages = _read_extra_packages(provisioning_dir / "extra-packages.txt")
 
     _ensure_builder_image(builder_image, force=rebuild_builder)
     _ensure_build_dirs()
@@ -105,6 +108,7 @@ def build_image(
         clean=clean,
         builder_image=builder_image,
         cache_dir=cache_path,
+        extra_packages=extra_packages,
     )
 
     try:
@@ -130,8 +134,27 @@ def _ensure_build_dirs() -> None:
     DOCKER_CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _provisioning_dir() -> Path:
+    source_tree_dir = Path(__file__).resolve().parent.parent / "provisioning"
+    if source_tree_dir.exists():
+        return source_tree_dir
+    return Path(sys.prefix) / "share" / "easymanet" / "provisioning"
+
+
 def _overlay_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "provisioning" / "openwrt-overlay"
+    """Return the OpenWrt overlay directory (source tree or installed data)."""
+    return _provisioning_dir() / "openwrt-overlay"
+
+
+def _read_extra_packages(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    packages = []
+    for raw in path.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            packages.append(line)
+    return packages
 
 
 def _ensure_builder_image(image_name: str, force: bool = False) -> None:
@@ -185,6 +208,7 @@ def _docker_run_command(
     clean: bool,
     builder_image: str,
     cache_dir: Optional[Path] = None,
+    extra_packages: Optional[list[str]] = None,
 ) -> list[str]:
     import os
 
@@ -198,6 +222,7 @@ def _docker_run_command(
         target=target,
         jobs=jobs,
         clean=clean,
+        extra_packages=extra_packages,
     )
 
     cache_mount = (
@@ -236,6 +261,7 @@ def _container_script(
     target: str,
     jobs: int,
     clean: bool,
+    extra_packages: Optional[list[str]] = None,
 ) -> str:
     repo_url_q = shlex.quote(repo_url)
     version_q = shlex.quote(openmanet_version)
@@ -243,6 +269,7 @@ def _container_script(
     target_q = shlex.quote(target)
     jobs_q = shlex.quote(str(jobs))
     clean_flag = "1" if clean else "0"
+    extra_packages_payload = "\n".join(extra_packages or [])
     return f"""
 set -euo pipefail
 
@@ -324,6 +351,19 @@ cp -R /overlay/* files/
 
 ./scripts/openmanet_setup.sh -i -b {board_q}
 patch_openmanetd_alfred_pkg_config
+cat > /tmp/easymanet-extra-packages.txt <<'EASYMANET_EXTRA_PACKAGES'
+{extra_packages_payload}
+EASYMANET_EXTRA_PACKAGES
+if [ -s /tmp/easymanet-extra-packages.txt ]; then
+  while IFS= read -r pkg; do
+    [ -z "$pkg" ] && continue
+    grep -q "^CONFIG_PACKAGE_${{pkg}}=y$" .config && continue
+    sed -i "/^# CONFIG_PACKAGE_${{pkg}} /d" .config
+    sed -i "/^CONFIG_PACKAGE_${{pkg}}=/d" .config
+    echo "CONFIG_PACKAGE_${{pkg}}=y" >> .config
+  done < /tmp/easymanet-extra-packages.txt
+  make defconfig
+fi
 make download -j{jobs_q}
 make -j{jobs_q} V=s
 

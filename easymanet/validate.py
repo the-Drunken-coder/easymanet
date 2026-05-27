@@ -13,6 +13,8 @@ from .manifest import Manifest
 VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
 VALID_BANDWIDTHS = {1, 2, 4, 8}
+VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
+COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 
 SSH_KEY_PATTERN = re.compile(
     r"^(ssh-(?:ed25519|rsa|ecdsa|dss)\s+[A-Za-z0-9+/]+={0,2}(\s+\S+)?)$"
@@ -63,17 +65,22 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             result.add_error("mesh.id is required")
         if not mesh.get("password"):
             result.add_error("mesh.password is required")
-        if not mesh.get("channel"):
+        if mesh.get("channel") is None:
             result.add_error("mesh.channel is required")
-        if not mesh.get("bandwidth_mhz"):
+        if mesh.get("bandwidth_mhz") is None:
             result.add_error("mesh.bandwidth_mhz is required")
         elif mesh["bandwidth_mhz"] not in VALID_BANDWIDTHS:
             result.add_error(
                 f"mesh.bandwidth_mhz must be one of {sorted(VALID_BANDWIDTHS)}, "
                 f"got {mesh['bandwidth_mhz']}"
             )
-        if not mesh.get("country"):
+        country = mesh.get("country", "")
+        if not country:
             result.add_error("mesh.country is required")
+        elif not COUNTRY_PATTERN.match(str(country)):
+            result.add_error(
+                f"mesh.country must be a two-letter ISO country code (e.g. US), got '{country}'"
+            )
 
     nodes = manifest.nodes
     if not nodes:
@@ -91,7 +98,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
 
         node = nodes[name]
 
-        role = node.get("role", manifest.defaults.get("role"))
+        role = node.get("role", manifest.defaults.get("role", "point"))
         if role not in VALID_ROLES:
             result.add_error(f"Node '{name}': role must be one of {sorted(VALID_ROLES)}, got '{role}'")
 
@@ -136,13 +143,17 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                     f"Node '{name}': local_ap.password must be at least 8 characters"
                 )
 
-        gateway = node.get("gateway", {})
-        if isinstance(gateway, dict) and gateway.get("enabled"):
-            uplink = gateway.get("uplink_interface")
-            if role == "gate" and not uplink:
-                result.add_warning(
-                    f"Node '{name}': gate role without gateway.uplink_interface set"
-                )
+        default_gateway = manifest.defaults.get("gateway", {})
+        node_gateway = node.get("gateway", {})
+        if isinstance(default_gateway, dict) or isinstance(node_gateway, dict):
+            resolved_gateway = {**default_gateway, **node_gateway}
+            if resolved_gateway.get("enabled") and role == "gate":
+                uplink = resolved_gateway.get("uplink_interface")
+                if not uplink:
+                    result.add_warning(
+                        f"Node '{name}': gate role without gateway.uplink_interface set"
+                    )
+            _validate_gateway_wifi(result, name, resolved_gateway)
 
     management = manifest.defaults.get("management", {})
     ssh_keys = management.get("ssh_authorized_keys", [])
@@ -170,8 +181,33 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                     result.add_error(
                         f"Node '{node_name}': resolved local_ap.password must be at least 8 characters"
                     )
+            _validate_gateway_wifi(result, node_name, resolved.get("gateway", {}))
 
     return result
+
+
+def _validate_gateway_wifi(result: ValidationResult, node_label: str, gateway: dict) -> None:
+    if not isinstance(gateway, dict):
+        return
+    wifi = gateway.get("wifi", {})
+    if not isinstance(wifi, dict) or not wifi.get("enabled"):
+        return
+    ssid = wifi.get("ssid", "")
+    password = wifi.get("password", "")
+    if not ssid:
+        result.add_error(
+            f"Node '{node_label}': gateway.wifi.enabled requires gateway.wifi.ssid"
+        )
+    if not password:
+        result.add_error(
+            f"Node '{node_label}': gateway.wifi.enabled requires gateway.wifi.password"
+        )
+    encryption = wifi.get("encryption")
+    if encryption is not None and encryption not in VALID_WIFI_ENCRYPTION:
+        result.add_error(
+            f"Node '{node_label}': gateway.wifi.encryption must be one of "
+            f"{sorted(VALID_WIFI_ENCRYPTION)}, got '{encryption}'"
+        )
 
 
 def resolve_node(manifest: Manifest, node_name: str) -> dict:

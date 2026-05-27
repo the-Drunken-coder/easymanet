@@ -103,7 +103,7 @@ Node management settings.
 | Field | Type | Description |
 |-------|------|-------------|
 | `root_password_hash` | string | Hashed root password (from `openssl passwd -6`) |
-| `ssh_authorized_keys` | list[string] | SSH public keys for root login |
+| `ssh_authorized_keys` | list[string] | SSH public keys for root login (installed one per line via jsonfilter on the node) |
 
 ```yaml
 defaults:
@@ -201,3 +201,13 @@ Priority (highest to lowest):
 | No SSH keys provided | Warning |
 | root_password_hash is empty | Warning |
 | Gate role without uplink_interface | Warning |
+| mesh.country must be two-letter ISO code (e.g. US) | Error |
+| gateway.wifi.enabled requires ssid and password | Error |
+| gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |
+
+## Security
+
+- Empty `root_password_hash` does not set a root password on the node.
+- `gateway.wifi.enabled` with SSH enabled opens SSH on the WAN firewall zone.
+- Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext
+  when that file exists on the image.

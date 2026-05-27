@@ -43,6 +43,34 @@ easymanet = "easymanet.cli:app"
 [tool.setuptools.packages.find]
 include = ["easymanet*"]
 
+[tool.setuptools.data-files]
+"share/easymanet/provisioning" = [
+    "provisioning/extra-packages.txt",
+]
+"share/easymanet/provisioning/openwrt-overlay" = [
+    "provisioning/openwrt-overlay/README.md",
+]
+"share/easymanet/provisioning/openwrt-overlay/etc/easymanet" = [
+    "provisioning/openwrt-overlay/etc/easymanet/provision.json",
+]
+"share/easymanet/provisioning/openwrt-overlay/etc/init.d" = [
+    "provisioning/openwrt-overlay/etc/init.d/easymanet-boot-report",
+    "provisioning/openwrt-overlay/etc/init.d/easymanet-management-lan",
+]
+"share/easymanet/provisioning/openwrt-overlay/etc/sysctl.d" = [
+    "provisioning/openwrt-overlay/etc/sysctl.d/99-easymanet.conf",
+]
+"share/easymanet/provisioning/openwrt-overlay/etc/uci-defaults" = [
+    "provisioning/openwrt-overlay/etc/uci-defaults/97-easymanet-management-lan",
+    "provisioning/openwrt-overlay/etc/uci-defaults/98-easymanet-boot-report",
+    "provisioning/openwrt-overlay/etc/uci-defaults/99-easymanet",
+]
+"share/easymanet/provisioning/openwrt-overlay/usr/lib/easymanet" = [
+    "provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
+    "provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
+    "provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

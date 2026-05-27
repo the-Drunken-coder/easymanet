@@ -212,3 +212,42 @@ def test_valid_config_with_node():
     result = validate(m, node_name="node01")
     assert result.valid
     os.unlink(path)
+
+
+def test_mesh_channel_zero_is_valid():
+    config = VALID_CONFIG.replace("channel: 42", "channel: 0")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
+    os.unlink(path)
+
+
+def test_invalid_country_code():
+    config = VALID_CONFIG.replace("country: US", "country: usa")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("mesh.country" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_gateway_wifi_requires_ssid_and_password():
+    config = VALID_CONFIG + """
+  node03:
+    role: gate
+    hostname: node03
+    ip: 10.41.3.1
+    gateway:
+      enabled: true
+      wifi:
+        enabled: true
+"""
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m, node_name="node03")
+    assert not result.valid
+    assert any("gateway.wifi.ssid" in e for e in result.errors)
+    assert any("gateway.wifi.password" in e for e in result.errors)
+    os.unlink(path)

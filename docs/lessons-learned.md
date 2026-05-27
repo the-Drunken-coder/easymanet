@@ -12,10 +12,11 @@ debugging path.
   full overlay build can take around 2-5 hours depending on cache state.
 - The slow part is the OpenWrt/OpenMANET firmware build, not the EasyMANET
   Python code or overlay scripts.
-- Stock OpenMANET, empty EasyMANET overlay, and full EasyMANET overlay builds
-  were all in the same broad runtime range. The overlay itself was not the main
+- Historical bisect builds (stock OpenMANET, empty overlay, full overlay) were
+  all in the same broad runtime range. The overlay itself was not the main
   source of build time.
-- Use fast checks for normal development:
+- Normal development is covered by the `CI` workflow on push and pull request
+  (`pytest` plus overlay shell syntax checks). Run the same checks locally with:
 
   ```sh
   pytest -q
@@ -24,21 +25,19 @@ debugging path.
   sh -n provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh
   ```
 
-- Only run the full firmware workflow when a flashable image is needed.
-- The useful full-image workflow is:
+- Only run the full firmware workflow when a flashable image is needed:
 
   ```sh
-  gh workflow run prove-openmanet-overlay.yml \
-    --ref add-project-files \
+  gh workflow run build-openmanet-image.yml \
     -f openmanet_version=1.6.5 \
     -f board=ekh-bcm2711 \
+    -f target=rpi4-mm6108-spi \
     -f openwrt_target=bcm27xx \
     -f subtarget=bcm2711 \
-    -f jobs=0
+    -f jobs=2
   ```
 
-- `jobs=0` means use `nproc` in the proof workflows. Do not assume every
-  workflow handles `0` this way; check the workflow before dispatching.
+- The `jobs` input caps parallel `make` jobs (default `2` on hosted runners).
 
 ## Artifact Selection
 
@@ -66,7 +65,7 @@ debugging path.
     --config examples/fleet.yml \
     --node manet01 \
     --device /dev/disk4 \
-    --base-image /tmp/easymanet-artifact-<run-id>/openmanet-full-easymanet-overlay-1.6.5-ekh-bcm2711/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
+    --base-image /tmp/easymanet-artifact-<run-id>/openmanet-1.6.5-rpi4-mm6108-spi/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
     --yes
   ```
 
@@ -542,7 +541,7 @@ function at the PHY level, which matches the symptoms seen here.
 
 - Set a real root password or valid authorized keys before non-lab use.
 - Consider making Ethernet management available on point nodes during bring-up.
-- Consider a faster non-image CI smoke test for provisioner/network scripts.
+- Extend CI beyond unit tests if overlay shell checks need more coverage.
 - Consider a self-hosted runner for full OpenMANET image builds.
 - Stock OpenMANET images should support USB boot out of the box — consider
   reporting the `cmdline.txt` SD card hardcode as an issue upstream.

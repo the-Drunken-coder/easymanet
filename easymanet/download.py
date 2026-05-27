@@ -8,28 +8,29 @@ Users configure download URLs in ~/.easymanet/images.json:
 {
   "rpi4-mm6108-spi": {
     "url": "https://example.com/openmanet-rpi4-mm6108-spi.img.gz",
-    "version": "2025.04"
+    "version": "2025.04",
+    "github": "OpenMANET/firmware"
   }
 }
 
 Or pass --image-url to flash command.
-
-Also supports GitHub releases via the "github" field.
 """
 
 import json
-import hashlib
-import os
 import urllib.request
 import urllib.error
 import zlib
 from pathlib import Path
 from typing import Optional, Tuple
 
+from . import __version__
 
 CACHE_DIR = Path.home() / ".easymanet" / "images"
 IMAGES_MANIFEST = Path.home() / ".easymanet" / "images.json"
 VERSION_FILE = Path.home() / ".easymanet" / "version.json"
+
+EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
+DEFAULT_OPENMANET_GITHUB = "OpenMANET/firmware"
 
 DEFAULT_IMAGES = {
     "rpi4-mm6108-spi": {
@@ -71,34 +72,59 @@ def set_image_config(target: str, url: str, version: str = "", description: str 
 
 
 def check_latest_version(target: str) -> Optional[Tuple[str, str]]:
-    info = get_image_config(target)
-    if info and info.get("url"):
+    info = get_image_config(target) or {}
+    if info.get("url"):
         return info.get("version", "latest"), info["url"]
 
-    result = _check_openmanet_release(target)
-    if result:
-        return result
-    return None
+    github_repo = info.get("github") or DEFAULT_OPENMANET_GITHUB
+    return _check_github_release(github_repo, target)
 
 
-def _check_openmanet_release(target: str) -> Optional[Tuple[str, str]]:
+def _fetch_github_release(repo: str) -> Optional[dict]:
     try:
-        api_url = "https://api.github.com/repos/OpenMANET/firmware/releases/latest"
+        api_url = f"https://api.github.com/repos/{repo}/releases/latest"
         with urllib.request.urlopen(api_url, timeout=15) as resp:
-            release = json.loads(resp.read().decode())
+            return json.loads(resp.read().decode())
     except Exception:
         return None
 
+
+def _pick_release_asset(release: dict, target: str) -> Optional[Tuple[str, str]]:
     version = release.get("tag_name", "")
     if not version:
         return None
 
-    filename = f"openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
-    for asset in release.get("assets", []):
-        if asset.get("name") == filename:
+    assets = release.get("assets", [])
+    exact = f"openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
+    for asset in assets:
+        if asset.get("name") == exact:
+            return version, asset["browser_download_url"]
+
+    for asset in assets:
+        name = asset.get("name", "")
+        if (
+            target in name
+            and "sysupgrade" in name
+            and name.endswith(".img.gz")
+        ):
+            print(f"  Using release asset: {name}")
             return version, asset["browser_download_url"]
 
     return None
+
+
+def _check_github_release(repo: str, target: str) -> Optional[Tuple[str, str]]:
+    release = _fetch_github_release(repo)
+    if not release:
+        return None
+    result = _pick_release_asset(release, target)
+    if not result:
+        version = release.get("tag_name", "unknown")
+        print(
+            f"No matching sysupgrade image for target '{target}' in {repo} release {version}. "
+            f"Expected asset like openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
+        )
+    return result
 
 
 def _url_to_filename(url: str) -> str:
@@ -221,12 +247,10 @@ def _human_size(n: int) -> str:
 
 def check_easymanet_update() -> Optional[str]:
     try:
-        import urllib.request
-        url = "https://api.github.com/repos/anomalyco/easymanet/releases/latest"
+        url = f"https://api.github.com/repos/{EASYMANET_GITHUB_REPO}/releases/latest"
         with urllib.request.urlopen(url, timeout=10) as resp:
             data = json.loads(resp.read().decode())
         latest = data.get("tag_name", "").lstrip("v")
-        from . import __version__
         if latest and latest != __version__:
             return latest
     except Exception:

@@ -18,7 +18,8 @@ import typer
 from .manifest import load_manifest, ManifestError
 from .validate import validate, ValidationResult
 from .render import render, render_dict
-from .disks import list_disks, find_disk, unmount_disk, DiskInfo
+from . import __version__
+from .disks import list_disks, lookup_device, assert_flash_allowed, DiskInfo
 from .image import flash_image, finish_flash, FlashError
 from .inject import inject, inject_dry_run_info, InjectError
 from .platform import check_platform
@@ -38,13 +39,13 @@ from .build import (
     DEFAULT_OPENMANET_VERSION,
     DEFAULT_TARGET,
 )
-from .privileges import check_privileges
+from .privileges import check_privileges, PrivilegeError
 
 def _app_startup():
     update = check_easymanet_update()
     if update:
         typer.secho(
-            f"EasyMANET {update} is available (you have 0.1.0). "
+            f"EasyMANET {update} is available (you have {__version__}). "
             f"Run: pip3 install --break-system-packages --upgrade easymanet",
             fg=typer.colors.YELLOW,
         )
@@ -135,13 +136,22 @@ def render_cmd(
 
 
 @app.command(name="disks")
-def disks_cmd():
+def disks_cmd(
+    all_disks: bool = typer.Option(
+        False,
+        "--all",
+        help="List every block device, not only removable/USB/MMC (Linux) or external (macOS)",
+    ),
+):
     """List available disks for flashing."""
     check_platform()
-    disks = list_disks()
+    disks = list_disks(include_all=all_disks)
 
     if not disks:
-        typer.secho("No removable/external disks found.", fg=typer.colors.YELLOW)
+        msg = "No disks found." if all_disks else "No removable/external disks found."
+        typer.secho(msg, fg=typer.colors.YELLOW)
+        if not all_disks:
+            typer.echo("Use --all to include every block device.")
         return
 
     for d in disks:
@@ -189,7 +199,14 @@ def flash(
         False, "--dry-run", help="Show plan without writing anything"
     ),
     force: bool = typer.Option(
-        False, "--force", help="Override system disk safety check"
+        False,
+        "--force",
+        help="Override blocking disk safety checks (system disk, large fixed disk, device not in default list)",
+    ),
+    inject_only: bool = typer.Option(
+        False,
+        "--inject-only",
+        help="Skip writing the base image; only stage provision.json on the boot partition (recovery)",
     ),
     no_eject: bool = typer.Option(
         False, "--no-eject", help="Do not eject disk after flashing"
@@ -230,7 +247,10 @@ def flash(
     role = resolved["node"]["role"]
     ssh_enabled = role == "gate" or enable_ssh
 
-    image_path = _resolve_base_image(target, base_image, image_url, download, no_download, dry_run)
+    if inject_only:
+        image_path = base_image or "(skipped — --inject-only)"
+    else:
+        image_path = _resolve_base_image(target, base_image, image_url, download, no_download, dry_run)
 
     _print_header("Flash Plan")
     typer.echo(f"  Config:       {config}")
@@ -245,19 +265,23 @@ def flash(
     typer.echo(f"  SSH:          {ssh_note}")
     typer.echo()
 
-    disk = find_disk(device)
-    if disk:
-        typer.echo("  Disk details:")
-        typer.echo(f"    Model:      {disk.model}")
-        typer.echo(f"    Size:       {disk.size_human}")
-        typer.echo(f"    Removable:  {'yes' if disk.removable else 'no'}")
-        mounted_str = ", ".join(disk.mounted) if disk.mounted else "(none)"
-        typer.echo(f"    Mounted:    {mounted_str}")
-        for w in disk.warnings:
-            typer.secho(f"    {w}", fg=typer.colors.RED)
-        typer.echo()
-    else:
-        typer.secho(f"  Warning: Device {device} not found in disk list", fg=typer.colors.YELLOW)
+    try:
+        disk = lookup_device(device)
+        if disk:
+            typer.echo("  Disk details:")
+            typer.echo(f"    Model:      {disk.model}")
+            typer.echo(f"    Size:       {disk.size_human}")
+            typer.echo(f"    Removable:  {'yes' if disk.removable else 'no'}")
+            mounted_str = ", ".join(disk.mounted) if disk.mounted else "(none)"
+            typer.echo(f"    Mounted:    {mounted_str}")
+            for w in disk.blocking_warnings:
+                typer.secho(f"    {w}", fg=typer.colors.RED)
+            typer.echo()
+        assert_flash_allowed(device, force=force)
+    except ValueError as e:
+        typer.secho(f"  Flash safety: {e}", fg=typer.colors.RED)
+        if not dry_run:
+            raise typer.Exit(1)
         typer.echo()
 
     _print_header("Resolved provision.json")
@@ -271,17 +295,20 @@ def flash(
         typer.secho("Dry run complete. No changes were made.", fg=typer.colors.GREEN)
         return
 
-    if not yes:
-        typer.secho("Use --yes to confirm and proceed with flashing.", fg=typer.colors.YELLOW)
-        raise typer.Exit(0)
-
-    check_privileges(device)
-
     try:
-        flash_image(device=device, image_path=image_path, force=force)
-    except FlashError as e:
-        typer.secho(f"Flash error: {e}", fg=typer.colors.RED)
+        check_privileges(device)
+    except PrivilegeError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
         raise typer.Exit(1)
+
+    if not inject_only:
+        try:
+            flash_image(device=device, image_path=image_path, force=force)
+        except FlashError as e:
+            typer.secho(f"Flash error: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+    else:
+        typer.secho("Skipping base image write (--inject-only).", fg=typer.colors.BLUE)
 
     typer.echo()
     _print_header("Writing boot-partition payload")
@@ -296,6 +323,14 @@ def flash(
         typer.secho(
             "Image was flashed but node provisioning could not be staged on the boot partition.",
             fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "Re-run with --inject-only to retry boot-partition staging only:",
+            fg=typer.colors.YELLOW,
+        )
+        typer.echo(
+            f"  easymanet flash --config {config} --node {node} "
+            f"--device {device} --inject-only --yes"
         )
         raise typer.Exit(1)
 

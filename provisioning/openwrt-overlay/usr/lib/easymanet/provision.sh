@@ -191,12 +191,12 @@ if [ -n "$ROOT_PW_HASH" ]; then
     sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" /etc/shadow 2>/dev/null || true
 fi
 
-if json_val management ssh_authorized_keys >/dev/null 2>&1; then
-    SSH_KEYS="$(json_val management ssh_authorized_keys 2>/dev/null || true)"
-    if [ -n "$SSH_KEYS" ]; then
-        : > /etc/dropbear/authorized_keys
-        printf '%s\n' "$SSH_KEYS" >> /etc/dropbear/authorized_keys
-    fi
+if jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys' >/dev/null 2>&1; then
+    : > /etc/dropbear/authorized_keys
+    jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys[*]' | while IFS= read -r key; do
+        [ -z "$key" ] && continue
+        echo "$key" >> /etc/dropbear/authorized_keys
+    done
 fi
 
 echo "Configuring mesh wireless..." >> "$LOG_FILE"
@@ -299,6 +299,14 @@ uci_set network.meship.device="bat0"
 uci_set network.meship.ipaddr="$NODE_IP"
 uci_set network.meship.netmask="255.255.0.0"
 
+if ! uci -q get network.lan >/dev/null 2>&1; then
+    uci_set network.lan=interface
+fi
+uci_set network.lan.device="br-lan"
+uci_set network.lan.proto="static"
+if [ -z "$(uci -q get network.lan.ipaddr)" ]; then
+    uci_set network.lan.ipaddr="10.41.254.1"
+fi
 uci_set network.lan.netmask="255.255.255.0"
 uci_commit network
 

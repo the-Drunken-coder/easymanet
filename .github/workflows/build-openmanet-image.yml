@@ -15,16 +15,8 @@ on:
         description: Firmware target suffix
         required: false
         default: "rpi4-mm6108-spi"
-      openwrt_target:
-        description: OpenWrt target platform
-        required: false
-        default: "bcm27xx"
-      subtarget:
-        description: OpenWrt subtarget
-        required: false
-        default: "bcm2711"
       jobs:
-        description: Parallel OpenWrt make jobs
+        description: Parallel OpenWrt make jobs inside Docker
         required: false
         default: "2"
       clean:
@@ -33,7 +25,7 @@ on:
         type: boolean
         default: false
       rebuild_builder:
-        description: Ignored; retained for compatibility with older manual runs
+        description: Force a rebuild of the Docker builder image
         required: false
         type: boolean
         default: false
@@ -77,204 +69,45 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
-      - name: Install OpenMANET build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates clang curl flex g++ g++-multilib gawk gcc-multilib gettext git \
-            alfred batctl golang-go iproute2 libcap-dev libgps-dev libncurses5-dev libnl-3-dev libnl-route-3-dev \
-            libnl-genl-3-dev libopus-dev libopusfile-dev libpcre3 libpcre3-dev libssl-dev net-tools \
-            portaudio19-dev pkg-config python3 python3-setuptools rsync subversion swig unzip upx-ucl file wget \
-            zlib1g-dev zstd
-
       - name: Prepare OpenMANET cache directory
-        run: |
-          mkdir -p .openmanet-cache/openmanet-firmware/dl
-          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/host
-          mkdir -p .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/host
-          mkdir -p .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+        run: mkdir -p .openmanet-cache
 
       - name: Restore OpenMANET build cache
         id: openmanet-cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            .openmanet-cache/openmanet-firmware/dl
-            .openmanet-cache/openmanet-firmware/staging_dir/host
-            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/build_dir/host
-            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
-          key: openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-${{ github.workflow }}-${{ github.run_id }}
+          path: .openmanet-cache
+          key: openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/**') }}
           restore-keys: |
-            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/openwrt-overlay/**') }}-
-            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
-            openmanet-native-cache-v2-${{ runner.os }}-${{ inputs.board }}-
+            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-${{ inputs.openmanet_version }}-
+            openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board }}-
 
       - name: Build EasyMANET-flavored OpenMANET image
         id: build_image
-        continue-on-error: true
         run: |
           set -euo pipefail
-
-          requested_jobs="${{ inputs.jobs }}"
-          available_jobs="$(nproc)"
-          if [ "$requested_jobs" -gt "$available_jobs" ]; then
-            build_jobs="$available_jobs"
-          else
-            build_jobs="$requested_jobs"
-          fi
-          echo "Using $build_jobs parallel make jobs on $available_jobs available CPUs"
-
-          REPO_DIR="${{ github.workspace }}/.openmanet-cache/openmanet-firmware"
-          OPENWRT_TARGET="${{ inputs.openwrt_target }}"
-          SUBTARGET="${{ inputs.subtarget }}"
-
-          patch_openmanetd_alfred_pkg_config() {
-            local makefile="$REPO_DIR/feeds/openmanet/openmanetd/Makefile"
-            [ -f "$makefile" ] || return 0
-            if grep -q 'PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig' "$makefile"; then
-              return 0
-            fi
-            sed -i 's#$(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#PKG_CONFIG=/usr/bin/pkg-config PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig $(MAKE) -C $(PKG_BUILD_DIR)/internal/alfred/alfred#' "$makefile"
-          }
-
-          preserve_openwrt_cache() {
-            local source_dir="$1"
-            local snapshot_dir="$2"
-            rm -rf "$snapshot_dir"
-            mkdir -p "$snapshot_dir"
-            for rel in dl staging_dir/host staging_dir/hostpkg build_dir/host build_dir/hostpkg; do
-              if [ -e "$source_dir/$rel" ]; then
-                mkdir -p "$snapshot_dir/$(dirname "$rel")"
-                mv "$source_dir/$rel" "$snapshot_dir/$rel"
-              fi
-            done
-            if [ -d "$source_dir/staging_dir" ]; then
-              mkdir -p "$snapshot_dir/staging_dir"
-              find "$source_dir/staging_dir" -maxdepth 1 -type d -name "toolchain-*" -exec mv {} "$snapshot_dir/staging_dir/" \;
-            fi
-          }
-
-          restore_openwrt_cache() {
-            local snapshot_dir="$1"
-            local target_dir="$2"
-            [ -d "$snapshot_dir" ] || return 0
-            find "$snapshot_dir" -mindepth 1 -maxdepth 1 -exec mv {} "$target_dir/" \;
-            rm -rf "$snapshot_dir"
-          }
-
+          args=(
+            image build
+            --output-dir dist
+            --openmanet-version "${{ inputs.openmanet_version }}"
+            --board "${{ inputs.board }}"
+            --target "${{ inputs.target }}"
+            --cache-dir .openmanet-cache
+            --jobs "${{ inputs.jobs }}"
+          )
           if [ "${{ inputs.clean }}" = "true" ]; then
-            rm -rf "$REPO_DIR"
+            args+=(--clean)
           fi
-
-          if [ ! -d "$REPO_DIR/.git" ]; then
-            CACHE_SNAPSHOT="${{ github.workspace }}/.openmanet-cache-snapshot"
-            rm -rf "$CACHE_SNAPSHOT"
-            if [ -d "$REPO_DIR" ]; then
-              preserve_openwrt_cache "$REPO_DIR" "$CACHE_SNAPSHOT"
-              rm -rf "$REPO_DIR"
-            fi
-            rm -rf "$REPO_DIR"
-            git clone https://github.com/OpenMANET/firmware.git "$REPO_DIR"
-            restore_openwrt_cache "$CACHE_SNAPSHOT" "$REPO_DIR"
+          if [ "${{ inputs.rebuild_builder }}" = "true" ]; then
+            args+=(--rebuild-builder)
           fi
-
-          cd "$REPO_DIR"
-          git fetch --tags origin
-          git checkout "${{ inputs.openmanet_version }}"
-          git submodule update --init --recursive
-
-          mkdir -p files
-          rm -rf files/etc/easymanet files/etc/uci-defaults/99-easymanet files/usr/lib/easymanet
-          mkdir -p files/etc files/etc/uci-defaults files/usr/lib
-          cp -R "${{ github.workspace }}/provisioning/openwrt-overlay/"* files/
-
-          ./scripts/openmanet_setup.sh -i -b "${{ inputs.board }}"
-          patch_openmanetd_alfred_pkg_config
-
-          pkglist="${{ github.workspace }}/provisioning/extra-packages.txt"
-          if [ -f "$pkglist" ]; then
-            while IFS= read -r line; do
-              pkg="${line%%#*}"
-              pkg="$(echo "$pkg" | tr -d '[:space:]')"
-              [ -z "$pkg" ] && continue
-              grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config && continue
-              sed -i "/^# CONFIG_PACKAGE_${pkg} /d" .config
-              sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
-              echo "CONFIG_PACKAGE_${pkg}=y" >> .config
-            done < "$pkglist"
-            make defconfig
-          fi
-
-          echo "=== Disk before dependency download ==="
-          df -h
-          make download -j"$build_jobs"
-          echo "=== Disk after dependency download ==="
-          df -h
-          echo "=== Largest OpenMANET directories after dependency download ==="
-          du -h -d 2 . 2>/dev/null | sort -h | tail -n 30
-          make -j"$build_jobs" V=s 2>&1 | tee "${{ github.workspace }}/build.log"
-          echo "=== Disk after firmware build ==="
-          df -h
-
-          mkdir -p "${{ github.workspace }}/dist"
-          target_dir="bin/targets/${OPENWRT_TARGET}/${SUBTARGET}"
-          if [ ! -d "$target_dir" ]; then
-            echo "No build output directory found at $target_dir" >&2
-            find bin/targets -maxdepth 3 -type d -print 2>/dev/null || true
-            exit 1
-          fi
-          echo "=== Build outputs in $target_dir ==="
-          ls -lah "$target_dir"
-          find "$target_dir" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*sysupgrade.bin" -o -name "sha256sums" -o -name "*.buildinfo" \) \
-            -print -exec cp {} "${{ github.workspace }}/dist/" \;
-          if ! find "${{ github.workspace }}/dist" -maxdepth 1 -type f \( -name "*.img.gz" -o -name "*sysupgrade.bin" \) | grep -q .; then
-            echo "No firmware image artifact found in $target_dir" >&2
-            exit 1
-          fi
-
-      - name: Diagnose failed package builds
-        if: steps.build_image.outcome == 'failure'
-        run: |
-          mkdir -p ci-logs
-          REPO_DIR="${{ github.workspace }}/.openmanet-cache/openmanet-firmware"
-          if [ ! -d "$REPO_DIR/.git" ]; then
-            echo "Expected failed build tree at $REPO_DIR but it was missing" | tee ci-logs/diagnostic-setup.log
-            exit 1
-          fi
-
-          cd "$REPO_DIR"
-          echo "=== Disk before package diagnostics ==="
-          df -h
-          echo "=== Largest OpenMANET directories before package diagnostics ==="
-          du -h -d 2 . 2>/dev/null | sort -h | tail -n 30
-
-          status=0
-          echo "=== Running package/feeds/openmanet/openmanetd/compile ===" | tee "${{ github.workspace }}/ci-logs/package_feeds_openmanet_openmanetd_compile.log"
-          if ! make -j1 V=s package/feeds/openmanet/openmanetd/compile 2>&1 | tee -a "${{ github.workspace }}/ci-logs/package_feeds_openmanet_openmanetd_compile.log"; then
-            status=1
-          fi
-
-          exit "$status"
-
-      - name: Print diagnostic error summary
-        if: steps.build_image.outcome == 'failure'
-        run: |
-          grep -RniE 'error:|fatal|undefined reference|cannot find|No .* found|command not found|make\[[0-9]+\]: \*\*\*' ci-logs \
-            | grep -v 'echo "ERROR: module' \
-            | head -n 120 || true
+          easymanet "${args[@]}"
 
       - name: Save OpenMANET build cache
         if: steps.build_image.outcome == 'success' && steps.openmanet-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: |
-            .openmanet-cache/openmanet-firmware/dl
-            .openmanet-cache/openmanet-firmware/staging_dir/host
-            .openmanet-cache/openmanet-firmware/staging_dir/hostpkg
-            .openmanet-cache/openmanet-firmware/build_dir/host
-            .openmanet-cache/openmanet-firmware/build_dir/hostpkg
+          path: .openmanet-cache
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload firmware artifact
@@ -282,23 +115,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openmanet-${{ inputs.openmanet_version }}-${{ inputs.target }}
-          path: |
-            dist/*.img.gz
-            dist/*sysupgrade.bin
-            dist/sha256sums
-            dist/*.buildinfo
+          path: dist/*.img.gz
+          retention-days: 7
           if-no-files-found: error
-
-      - name: Upload diagnostic logs
-        if: steps.build_image.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: openmanet-build-diagnostics-${{ inputs.openmanet_version }}-${{ inputs.target }}
-          path: |
-            build.log
-            ci-logs/*.log
-          if-no-files-found: error
-
-      - name: Fail workflow if build failed
-        if: steps.build_image.outcome == 'failure'
-        run: exit 1

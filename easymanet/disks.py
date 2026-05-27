@@ -17,6 +17,8 @@ from .platform import is_macos, is_linux
 DISK_WARN_THRESHOLD_GB = 128
 DISK_SUSPICIOUS_SIZE_GB = 256
 
+_SYS_MOUNT_POINTS = frozenset({"/", "/boot", "/boot/efi", "/home", "/var", "/usr"})
+
 
 class DiskInfo:
     def __init__(
@@ -373,11 +375,111 @@ def _get_linux_mounts(dev: dict) -> List[str]:
     return mounts
 
 
+def _findmnt_source(mount_point: str) -> Optional[str]:
+    try:
+        output = subprocess.check_output(
+            ["findmnt", "-n", "-o", "SOURCE", mount_point],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode()
+        return output.strip() or None
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _linux_base_block_device(source: str) -> Optional[str]:
+    if not source.startswith("/dev/"):
+        return None
+    match = re.match(r"^(?P<base>/dev/(?:mmcblk\d+|nvme\d+n\d+))p\d+$", source)
+    if match:
+        return match.group("base")
+    match = re.match(r"^(?P<base>/dev/[a-z]+)\d+$", source)
+    if match:
+        return match.group("base")
+    if re.match(r"^/dev/(?:mmcblk\d+|nvme\d+n\d+|[a-z]+)$", source):
+        return source
+    return None
+
+
+def _linux_lsblk_pkname(device: str) -> Optional[str]:
+    try:
+        output = subprocess.check_output(
+            ["lsblk", "-no", "PKNAME", device],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode()
+        name = output.strip()
+        if name:
+            return f"/dev/{name}"
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return None
+
+
+def _linux_resolve_findmnt_source(source: str) -> Optional[str]:
+    device_path: Optional[str] = None
+    if source.startswith("UUID="):
+        uuid = source.split("=", 1)[1]
+        by_uuid = f"/dev/disk/by-uuid/{uuid}"
+        if os.path.exists(by_uuid):
+            device_path = os.path.realpath(by_uuid)
+    elif source.startswith("PARTUUID="):
+        partuuid = source.split("=", 1)[1]
+        by_partuuid = f"/dev/disk/by-partuuid/{partuuid}"
+        if os.path.exists(by_partuuid):
+            device_path = os.path.realpath(by_partuuid)
+    elif source.startswith("/dev/"):
+        device_path = os.path.realpath(source)
+    else:
+        return None
+
+    if not device_path:
+        return None
+
+    current = device_path
+    for _ in range(8):
+        base = _linux_base_block_device(current)
+        if base:
+            return base
+        parent = _linux_lsblk_pkname(current)
+        if not parent or parent == current:
+            break
+        current = parent
+    return None
+
+
+def _linux_root_block_devices() -> set:
+    related: set = set()
+    for mount_point in sorted(_SYS_MOUNT_POINTS):
+        source = _findmnt_source(mount_point)
+        if not source:
+            continue
+        base = _linux_resolve_findmnt_source(source)
+        if not base:
+            continue
+        related.add(base)
+        related.update(_linux_partitions_for_device(base))
+        if source.startswith("/dev/"):
+            resolved = os.path.realpath(source)
+            if resolved.startswith("/dev/"):
+                related.add(resolved)
+    return related
+
+
 def _check_linux_system_disk(dev_path: str, mounts: List[str]) -> bool:
-    del dev_path
-    sys_mounts = {"/", "/boot", "/home", "/var", "/usr"}
-    for mp in mounts:
-        if mp in sys_mounts:
+    if any(mp in _SYS_MOUNT_POINTS for mp in mounts):
+        return True
+
+    root_related = _linux_root_block_devices()
+    if not root_related:
+        return False
+
+    if dev_path in root_related:
+        return True
+    if set(_linux_partitions_for_device(dev_path)) & root_related:
+        return True
+    for entry in root_related:
+        if _linux_base_block_device(entry) == dev_path:
             return True
     return False
 
@@ -392,7 +494,10 @@ def list_disks(include_all: bool = False) -> List[DiskInfo]:
     return sorted(disks, key=lambda d: d.size_bytes, reverse=True)
 
 
-def lookup_device(device: str) -> Optional[DiskInfo]:
+def lookup_device(
+    device: str,
+    default_disks: Optional[List[DiskInfo]] = None,
+) -> Optional[DiskInfo]:
     if is_macos():
         disk = lookup_device_macos(device)
     elif is_linux():
@@ -403,17 +508,18 @@ def lookup_device(device: str) -> Optional[DiskInfo]:
     if disk is None:
         return None
 
-    in_default = any(d.device == device for d in list_disks(include_all=False))
-    if not in_default:
+    disks = default_disks if default_disks is not None else list_disks(include_all=False)
+    if not any(d.device == device for d in disks):
         disk.not_in_default_list = True
     return disk
 
 
 def find_disk(device: str) -> Optional[DiskInfo]:
-    for disk in list_disks():
+    disks = list_disks()
+    for disk in disks:
         if disk.device == device:
             return disk
-    return lookup_device(device)
+    return lookup_device(device, default_disks=disks)
 
 
 def assert_flash_allowed(device: str, force: bool = False) -> DiskInfo:
@@ -535,7 +641,7 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     if len(partitions) < 2:
         return None
 
-    part2 = partitions[1]
+    part2 = sorted(partitions, key=lambda p: int(p.get("PartitionOffset", 0) or 0))[1]
     start = int(part2.get("PartitionOffset", 0) or 0)
     size = int(part2.get("Size", 0) or 0)
     if start <= 0 or size <= 0:

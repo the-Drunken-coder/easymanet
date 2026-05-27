@@ -133,14 +133,14 @@ nodes:
     os.unlink(path)
 
 
-def test_render_ssh_enabled_defaults_to_role():
+def test_render_omits_ssh_enabled_when_unspecified():
     path = _write_config(VALID_CONFIG)
     m = load_manifest(path)
     gate = render_dict(m, "node01")
     point = render_dict(m, "node02")
 
-    assert gate["management"]["ssh_enabled"] is True
-    assert point["management"]["ssh_enabled"] is False
+    assert "ssh_enabled" not in gate["management"]
+    assert "ssh_enabled" not in point["management"]
     os.unlink(path)
 
 

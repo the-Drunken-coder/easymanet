@@ -647,12 +647,14 @@ Observed symptom:
 
 Fix committed in `16ea990`:
 
-- `easymanet/image.py` now calls `_clear_stale_overlay(device)` before
-  writing the image.
-- `_clear_stale_overlay` zeros the first 512 MiB:
-  ```bash
-  dd if=/dev/zero of=/dev/diskX bs=16m count=32
-  ```
+- `easymanet/image.py` calls `_clear_stale_overlay(device)` **after**
+  writing the image (so the new partition table is in place).
+- `_clear_stale_overlay` uses `get_partition2_wipe_range()` to seek to
+  partition 2 and zero that region (up to the partition size, capped at
+  4608 MiB), instead of only the first 512 MiB of the whole disk.
+
+See [flashing.md](flashing.md) for the current flash flow and stale
+overlay wipe behavior.
 
 This should force clean first-boot behavior on future flashes.
 

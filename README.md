@@ -153,6 +153,15 @@ will configure itself and reboot once. After reboot, it joins the mesh.
   payload staging fails, re-run with `--inject-only`.
 - **Unmounts partitions** before writing.
 - **Syncs writes** and **ejects** after completion.
+- **SSH at flash time:** use `--enable-ssh` or `--disable-ssh` on `easymanet flash`
+  (gate nodes default to SSH on; point nodes default to off). See
+  [docs/flashing.md](docs/flashing.md).
+- **Boot-partition secrets:** `provision.json` on the FAT boot volume contains
+  fleet secrets in cleartext until first boot. Treat flashed media as sensitive.
+  See [docs/flashing.md](docs/flashing.md#security).
+
+Set `EASYMANET_SKIP_UPDATE_CHECK=1` to skip the optional GitHub release check
+on `flash` and `image build`.
 
 ## How to Test a Two-Node Mesh
 

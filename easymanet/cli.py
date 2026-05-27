@@ -7,7 +7,6 @@ Commands:
     easymanet flash --config FILE ...  Flash an image and stage node config
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -41,7 +40,27 @@ from .build import (
 )
 from .privileges import check_privileges, PrivilegeError
 
-def _app_startup():
+
+app = typer.Typer(
+    name="easymanet",
+    help="Zero-touch OpenMANET provisioning and imaging",
+    no_args_is_help=True,
+)
+image_app = typer.Typer(help="Manage image URLs, cache, and firmware builds")
+app.add_typer(image_app, name="image")
+
+
+def _print_header(text: str) -> None:
+    typer.secho(text, bold=True)
+
+
+def _maybe_show_update_notice() -> None:
+    if os.environ.get("EASYMANET_SKIP_UPDATE_CHECK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return
     update = check_easymanet_update()
     if update:
         typer.secho(
@@ -51,18 +70,31 @@ def _app_startup():
         )
 
 
-app = typer.Typer(
-    name="easymanet",
-    help="Zero-touch OpenMANET provisioning and imaging",
-    no_args_is_help=True,
-    callback=_app_startup,
-)
-image_app = typer.Typer(help="Manage image URLs, cache, and firmware builds")
-app.add_typer(image_app, name="image")
+def _resolve_flash_ssh_enabled(
+    *,
+    enable_ssh: bool,
+    disable_ssh: bool,
+) -> Optional[bool]:
+    if disable_ssh:
+        return False
+    if enable_ssh:
+        return True
+    return None
 
 
-def _print_header(text: str) -> None:
-    typer.secho(text, bold=True)
+def _flash_ssh_note(
+    role: str,
+    *,
+    enable_ssh: bool,
+    disable_ssh: bool,
+) -> str:
+    if disable_ssh:
+        return "no (--disable-ssh)"
+    if enable_ssh:
+        return "yes (--enable-ssh)"
+    if role == "gate":
+        return "yes (gate role default)"
+    return "no (point role default)"
 
 
 def _print_errors_and_warnings(result: ValidationResult) -> int:
@@ -212,7 +244,14 @@ def flash(
         False, "--no-eject", help="Do not eject disk after flashing"
     ),
     enable_ssh: bool = typer.Option(
-        False, "--enable-ssh", help="Enable SSH on this node. Gateway nodes (role=gate) always have SSH; for point nodes this flag must be set or dropbear is disabled at first boot."
+        False,
+        "--enable-ssh",
+        help="Enable SSH (dropbear) on this node at first boot.",
+    ),
+    disable_ssh: bool = typer.Option(
+        False,
+        "--disable-ssh",
+        help="Disable SSH at first boot, including on gate nodes.",
     ),
 ):
     """Flash an OpenMANET image and stage node config on the boot partition.
@@ -223,11 +262,22 @@ def flash(
     Use --download to force re-download even if cached.
 
     Use --no-download to disable auto-download (requires --base-image).
+
+    SSH is chosen at flash time: --enable-ssh, --disable-ssh, or the role
+    default (gate on, point off) when the field is omitted from provision.json.
     """
     check_platform()
+    if enable_ssh and disable_ssh:
+        typer.secho(
+            "Cannot use --enable-ssh and --disable-ssh together.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
     if not yes and not dry_run:
         typer.secho("--yes is required to flash. Use --dry-run to preview first.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
+
+    _maybe_show_update_notice()
 
     try:
         manifest = load_manifest(config)
@@ -245,7 +295,9 @@ def flash(
     resolved = render_dict(manifest, node)
     target = resolved["node"]["target"]
     role = resolved["node"]["role"]
-    ssh_enabled = role == "gate" or enable_ssh
+    ssh_enabled = _resolve_flash_ssh_enabled(
+        enable_ssh=enable_ssh, disable_ssh=disable_ssh
+    )
 
     if inject_only:
         image_path = base_image or "(skipped — --inject-only)"
@@ -261,8 +313,9 @@ def flash(
     typer.echo(f"  Base image:   {image_path}")
     typer.echo(f"  Device:       {device}")
     typer.echo("  Boot payload: /easymanet/provision.json")
-    ssh_note = "yes (gate role)" if role == "gate" else ("yes (--enable-ssh)" if enable_ssh else "no (point role without --enable-ssh)")
-    typer.echo(f"  SSH:          {ssh_note}")
+    typer.echo(
+        f"  SSH:          {_flash_ssh_note(role, enable_ssh=enable_ssh, disable_ssh=disable_ssh)}"
+    )
     typer.echo()
 
     try:
@@ -513,6 +566,7 @@ def image_build_cmd(
     ),
 ):
     """Build an EasyMANET-flavored OpenMANET image in Docker."""
+    _maybe_show_update_notice()
     _print_header("Image Build")
     typer.echo(f"  Repo:         {repo_url}")
     typer.echo(f"  Version:      {openmanet_version}")

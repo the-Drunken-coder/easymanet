@@ -105,6 +105,12 @@ Node management settings.
 | `root_password_hash` | string | Hashed root password (from `openssl passwd -6`) |
 | `ssh_authorized_keys` | list[string] | SSH public keys for root login (installed one per line via jsonfilter on the node) |
 
+SSH enable/disable is **not** set in `fleet.yml`. Use `easymanet flash
+--enable-ssh` or `--disable-ssh` (see [flashing.md](flashing.md)). The
+flash command may write `management.ssh_enabled` into the boot-partition
+(when `--enable-ssh` or `--disable-ssh` is used; otherwise first boot uses the role default)
+`provision.json`.
+
 ```yaml
 defaults:
   management:

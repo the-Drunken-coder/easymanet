@@ -410,8 +410,8 @@ def _resolve_base_image(
         typer.secho(f"Saved image URL for {target}. Run --download to fetch now.", fg=typer.colors.BLUE)
         if not download:
             typer.secho(
-                f"Image URL saved but not downloaded. Re-run with --download to fetch the image, "
-                f"or add --base-image to use a local file.",
+                "Image URL saved but not downloaded. Re-run with --download to fetch the image, "
+                "or add --base-image to use a local file.",
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
@@ -502,7 +502,7 @@ def image_cmd(
         typer.secho(f"No image configured for {target}.", fg=typer.colors.YELLOW)
         typer.echo("")
         typer.echo("Configure one with:")
-        typer.echo(f"  easymanet image --set-url <URL>")
+        typer.echo("  easymanet image --set-url <URL>")
         return
 
     _print_header(f"Image config: {target}")
@@ -514,7 +514,7 @@ def image_cmd(
         size = cached.stat().st_size
         typer.echo(f"  Cached:  {cached} ({_human_size(size)})")
     else:
-        typer.echo(f"  Cached:  none")
+        typer.echo("  Cached:  none")
 
 
 @image_app.command(name="build")

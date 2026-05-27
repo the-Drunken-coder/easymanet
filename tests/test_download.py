@@ -16,6 +16,20 @@ def _write_gzip(path, payload=b"image-bytes", corrupt=False, trailing=b""):
             f.write(trailing)
 
 
+def test_get_cached_image_skips_empty_img(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    version_file = tmp_path / "version.json"
+    image = cache / "openmanet-test-rpi4-mm6108-spi.img"
+    image.touch()
+
+    monkeypatch.setattr(download, "CACHE_DIR", cache)
+    monkeypatch.setattr(download, "VERSION_FILE", version_file)
+
+    assert download.get_cached_image("rpi4-mm6108-spi") is None
+    assert download._valid_cached_image(image) is False
+
+
 def test_get_cached_image_skips_corrupt_configured_image(tmp_path, monkeypatch):
     cache = tmp_path / "images"
     cache.mkdir()

@@ -30,6 +30,11 @@ jobs:
     name: Weekly overlay prove build
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      OPENMANET_VERSION: ${{ inputs.openmanet_version || '1.6.5' }}
+      BOARD: ${{ inputs.board || 'ekh-bcm2711' }}
+      TARGET: ${{ inputs.target || 'rpi4-mm6108-spi' }}
+      JOBS: ${{ inputs.jobs || '2' }}
 
     steps:
       - name: Free disk space
@@ -39,10 +44,12 @@ jobs:
           sudo docker image prune --all --force
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
 
@@ -56,34 +63,39 @@ jobs:
 
       - name: Restore OpenMANET build cache
         id: openmanet-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .openmanet-cache
-          key: openmanet-docker-cache-v1-${{ runner.os }}-${{ inputs.board || 'ekh-bcm2711' }}-${{ inputs.openmanet_version || '1.6.5' }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/**') }}
+          key: openmanet-docker-cache-v1-${{ runner.os }}-${{ env.BOARD }}-${{ env.OPENMANET_VERSION }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/**') }}
           restore-keys: |
             openmanet-docker-cache-v1-${{ runner.os }}-
 
       - name: Build EasyMANET-flavored OpenMANET image
         run: |
+          set -euo pipefail
+          case "$OPENMANET_VERSION" in (*[!A-Za-z0-9._/-]*) echo "Invalid openmanet_version"; exit 1;; esac
+          case "$BOARD" in (*[!A-Za-z0-9._-]*) echo "Invalid board"; exit 1;; esac
+          case "$TARGET" in (*[!A-Za-z0-9._-]*) echo "Invalid target"; exit 1;; esac
+          case "$JOBS" in (*[!0-9]*) echo "Invalid jobs"; exit 1;; esac
           easymanet image build \
             --output-dir dist \
-            --openmanet-version "${{ inputs.openmanet_version || '1.6.5' }}" \
-            --board "${{ inputs.board || 'ekh-bcm2711' }}" \
-            --target "${{ inputs.target || 'rpi4-mm6108-spi' }}" \
+            --openmanet-version "$OPENMANET_VERSION" \
+            --board "$BOARD" \
+            --target "$TARGET" \
             --cache-dir .openmanet-cache \
-            --jobs "${{ inputs.jobs || '2' }}"
+            --jobs "$JOBS"
 
       - name: Save OpenMANET build cache
         if: steps.openmanet-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .openmanet-cache
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: openmanet-weekly-${{ inputs.openmanet_version || '1.6.5' }}-${{ inputs.target || 'rpi4-mm6108-spi' }}
+          name: openmanet-weekly-${{ env.OPENMANET_VERSION }}-${{ env.TARGET }}
           path: dist/*.img.gz
           retention-days: 7
           if-no-files-found: error

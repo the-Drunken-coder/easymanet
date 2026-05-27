@@ -420,7 +420,7 @@ mesh for the first time.
 - The Morse MM6108 operates in the sub-1GHz (802.11ah/s1g) band but the
   driver reports a mapped 5GHz channel to the kernel.
 - S1G channel 42 maps to HT channel 159 (~5785 MHz) internally:
-  ```
+  ```text
   wpa_supplicant_s1g: S1G mapped HT channel 159
   ```
 - This is normal — the kernel and iw see a 5GHz channel, but the radio

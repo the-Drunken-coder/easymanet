@@ -16,7 +16,6 @@ from .disks import (
     lookup_device,
     unmount_disk,
     eject_disk,
-    _OVERLAY_WIPE_BLOCK_MIB,
 )
 
 
@@ -53,7 +52,7 @@ def _check_gzip_integrity(image_path: Path) -> None:
         raise FlashError(f"Invalid gzip-compressed image {image_path}: {e}") from e
 
 
-def _check_gzip_payload(image_path: Path) -> None:
+def _gzip_decompressed_bytes(image_path: Path) -> int:
     decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
     total = 0
     with image_path.open("rb") as f:
@@ -65,6 +64,11 @@ def _check_gzip_payload(image_path: Path) -> None:
 
     if not decompressor.eof:
         raise zlib.error("compressed image ended before the gzip stream completed")
+    return total
+
+
+def _check_gzip_payload(image_path: Path) -> None:
+    total = _gzip_decompressed_bytes(image_path)
     if total == 0:
         raise zlib.error("compressed image did not contain a disk image payload")
 
@@ -109,12 +113,12 @@ def flash_image(
         print("Done writing.")
 
         if not skip_overlay_wipe:
-            _clear_stale_overlay(device)
+            _clear_stale_overlay(device, image)
 
     except subprocess.CalledProcessError as e:
-        raise FlashError(f"Flash failed: {e}")
+        raise FlashError(f"Flash failed: {e}") from e
     except Exception as e:
-        raise FlashError(f"Flash failed: {e}")
+        raise FlashError(f"Flash failed: {e}") from e
 
 
 def _write_gz_via_dd(image_path: str, device: str) -> None:
@@ -140,7 +144,20 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
 
 
-def _clear_stale_overlay(device: str) -> None:
+_OVERLAY_WIPE_SECTOR_BYTES = 512
+
+
+def _ceil_div(numerator: int, denominator: int) -> int:
+    return (numerator + denominator - 1) // denominator
+
+
+def _written_image_bytes(image: Path) -> int:
+    if image.suffix.lower() == ".gz":
+        return _gzip_decompressed_bytes(image)
+    return image.stat().st_size
+
+
+def _clear_stale_overlay(device: str, image: Path) -> None:
     wipe_range = get_partition2_wipe_range(device)
     if not wipe_range:
         print(
@@ -149,22 +166,30 @@ def _clear_stale_overlay(device: str) -> None:
         )
         return
 
-    start_bytes, wipe_bytes = wipe_range
-    block_size = _OVERLAY_WIPE_BLOCK_MIB * 1024 * 1024
-    seek_blocks = start_bytes // block_size
-    count = max(1, wipe_bytes // block_size)
-    total_mib = (count * _OVERLAY_WIPE_BLOCK_MIB)
+    tail_start, wipe_bytes = wipe_range
+    written_end = _written_image_bytes(image)
+    start_bytes = max(tail_start, written_end)
+    wipe_bytes = wipe_bytes - (start_bytes - tail_start)
+    if wipe_bytes <= 0:
+        print("Skipping stale overlay wipe; image covers the wipe region.")
+        return
+    sector_bytes = _OVERLAY_WIPE_SECTOR_BYTES
+    seek_sectors = _ceil_div(start_bytes, sector_bytes)
+    aligned_start = seek_sectors * sector_bytes
+    span_bytes = wipe_bytes + (aligned_start - start_bytes)
+    count_sectors = max(1, _ceil_div(span_bytes, sector_bytes))
+    total_mib = count_sectors * sector_bytes / (1024 * 1024)
     print(
-        f"Clearing stale OpenWrt overlay area ({total_mib} MiB at offset {start_bytes} bytes)..."
+        f"Clearing stale OpenWrt overlay area ({total_mib:.1f} MiB at offset {start_bytes} bytes)..."
     )
     subprocess.run(
         [
             "dd",
             "if=/dev/zero",
             f"of={device}",
-            f"bs={_OVERLAY_WIPE_BLOCK_MIB}m",
-            f"seek={seek_blocks}",
-            f"count={count}",
+            f"bs={sector_bytes}",
+            f"seek={seek_sectors}",
+            f"count={count_sectors}",
             "status=progress",
         ],
         check=True,

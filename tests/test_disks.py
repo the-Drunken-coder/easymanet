@@ -252,6 +252,9 @@ def test_lookup_device_lists_default_disks_once(monkeypatch):
 
 
 def test_get_partition2_wipe_range_linux(monkeypatch):
+    part2_start = 270336 * 512
+    part2_size = 10_000_000_000
+    max_wipe = disks._OVERLAY_WIPE_BLOCK_MIB * disks._OVERLAY_WIPE_BLOCKS * 1024 * 1024
     lsblk_output = {
         "blockdevices": [
             {
@@ -259,7 +262,7 @@ def test_get_partition2_wipe_range_linux(monkeypatch):
                 "type": "disk",
                 "children": [
                     {"name": "sdb1", "type": "part", "start": 2048, "size": 268435456},
-                    {"name": "sdb2", "type": "part", "start": 270336, "size": 4500000000},
+                    {"name": "sdb2", "type": "part", "start": 270336, "size": part2_size},
                 ],
             }
         ]
@@ -277,5 +280,6 @@ def test_get_partition2_wipe_range_linux(monkeypatch):
     result = disks.get_partition2_wipe_range("/dev/sdb")
     assert result is not None
     start_bytes, wipe_bytes = result
-    assert start_bytes == 270336 * 512
-    assert wipe_bytes > 0
+    assert wipe_bytes == max_wipe
+    assert start_bytes == part2_start + part2_size - max_wipe
+    assert start_bytes > part2_start

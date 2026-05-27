@@ -137,7 +137,9 @@ easymanet flash \
 ### 7. Boot the node
 
 Insert the SD card into the Raspberry Pi and power it on. The node
-will configure itself and reboot once. After reboot, it joins the mesh.
+applies EasyMANET provisioning on first boot, restarts networking, and
+stays up. Give it about 60 seconds for networking and mesh services to
+settle.
 
 ## Disk Flashing Safety
 
@@ -168,7 +170,7 @@ on `flash` and `image build`.
 1. Flash `gate01` to one SD card.
 2. Flash `point01` to another SD card.
 3. Boot both Raspberry Pis.
-4. Wait ~60 seconds after reboot.
+4. Wait ~60 seconds after first-boot provisioning.
 5. SSH into either node and verify mesh connectivity:
    ```bash
    ssh root@10.41.1.1

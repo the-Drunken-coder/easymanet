@@ -198,11 +198,12 @@ Or enable for subsequent boots:
 
 ---
 
-## Reboot Requirement
+## Restart Behavior
 
-OpenMANET typically requires one reboot after initial configuration
-before the mesh fully forms. This is handled by EasyMANET's
-`provision.sh` which calls `reboot` at the end.
+EasyMANET's current `provision.sh` does not call `reboot`. It applies
+UCI changes, restarts networking, writes boot diagnostics, and leaves
+any later power-cycle to the operator if a specific OpenMANET build or
+field test requires one.
 
 ---
 

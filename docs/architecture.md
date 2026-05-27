@@ -34,7 +34,7 @@ easymanet flash     ──→  write base image + stage boot payload
 /etc/easymanet/provisioned  (marker file, prevents re-run)
     │
     ▼
-reboot ──→ node is ready
+network restart + boot report ──→ node is ready
 ```
 
 ## Component Responsibilities

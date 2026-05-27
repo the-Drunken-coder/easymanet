@@ -423,6 +423,11 @@ def _linux_resolve_findmnt_source(source: str) -> Optional[str]:
         by_uuid = f"/dev/disk/by-uuid/{uuid}"
         if os.path.exists(by_uuid):
             device_path = os.path.realpath(by_uuid)
+    elif source.startswith("PARTUUID="):
+        partuuid = source.split("=", 1)[1]
+        by_partuuid = f"/dev/disk/by-partuuid/{partuuid}"
+        if os.path.exists(by_partuuid):
+            device_path = os.path.realpath(by_partuuid)
     elif source.startswith("/dev/"):
         device_path = os.path.realpath(source)
     else:
@@ -445,7 +450,7 @@ def _linux_resolve_findmnt_source(source: str) -> Optional[str]:
 
 def _linux_root_block_devices() -> set:
     related: set = set()
-    for mount_point in ("/", "/boot", "/boot/efi"):
+    for mount_point in sorted(_SYS_MOUNT_POINTS):
         source = _findmnt_source(mount_point)
         if not source:
             continue

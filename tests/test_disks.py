@@ -132,20 +132,52 @@ def test_linux_root_block_devices_uses_findmnt(monkeypatch):
 
     related = disks._linux_root_block_devices()
 
-    assert calls == ["/", "/boot", "/boot/efi"]
+    assert calls == sorted(disks._SYS_MOUNT_POINTS)
     assert "/dev/nvme0n1p3" in related
     assert "/dev/nvme0n1" in related
+
+
+def test_linux_root_block_devices_includes_separate_home_disk(monkeypatch):
+    def fake_findmnt(mount_point):
+        return {
+            "/": "/dev/nvme0n1p3",
+            "/home": "/dev/sdb1",
+        }.get(mount_point)
+
+    def fake_resolve(source):
+        if source == "/dev/nvme0n1p3":
+            return "/dev/nvme0n1"
+        if source == "/dev/sdb1":
+            return "/dev/sdb"
+        return None
+
+    monkeypatch.setattr(disks, "_findmnt_source", fake_findmnt)
+    monkeypatch.setattr(disks, "_linux_resolve_findmnt_source", fake_resolve)
+    monkeypatch.setattr(disks.os.path, "realpath", lambda path: path)
+    monkeypatch.setattr(
+        disks,
+        "_linux_partitions_for_device",
+        lambda device: {
+            "/dev/nvme0n1": ["/dev/nvme0n1p1", "/dev/nvme0n1p2", "/dev/nvme0n1p3"],
+            "/dev/sdb": ["/dev/sdb1"],
+        }.get(device, []),
+    )
+
+    related = disks._linux_root_block_devices()
+
+    assert "/dev/sdb" in related
+    assert "/dev/sdb1" in related
 
 
 def test_check_linux_system_disk_detects_separate_home_mount(monkeypatch):
     monkeypatch.setattr(
         disks,
         "_linux_root_block_devices",
-        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1"},
+        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1", "/dev/sdb", "/dev/sdb1"},
     )
 
     assert disks._check_linux_system_disk("/dev/sdb", ["/home"]) is True
-    assert disks._check_linux_system_disk("/dev/sdb", []) is False
+    assert disks._check_linux_system_disk("/dev/sdb", []) is True
 
 
 def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypatch):
@@ -157,6 +189,23 @@ def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypa
 
     assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
     assert disks._check_linux_system_disk("/dev/sdb", []) is False
+
+
+def test_linux_resolve_findmnt_source_handles_partuuid(monkeypatch):
+    partuuid_path = "/dev/disk/by-partuuid/abc-01"
+
+    monkeypatch.setattr(
+        disks.os.path,
+        "exists",
+        lambda path: path == partuuid_path,
+    )
+    monkeypatch.setattr(
+        disks.os.path,
+        "realpath",
+        lambda path: "/dev/nvme0n1p2" if path == partuuid_path else path,
+    )
+
+    assert disks._linux_resolve_findmnt_source("PARTUUID=abc-01") == "/dev/nvme0n1"
 
 
 def test_linux_resolve_findmnt_source_maps_mapper_to_base_disk(monkeypatch):

@@ -173,11 +173,7 @@ def test_warning_no_ssh_keys():
 
 
 def test_warning_empty_root_password():
-    config = VALID_CONFIG.replace(
-        'root_password_hash: ""',
-        'root_password_hash: ""'
-    )
-    path = _write_config(config)
+    path = _write_config(VALID_CONFIG)
     m = load_manifest(path)
     result = validate(m)
     assert result.valid

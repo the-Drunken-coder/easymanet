@@ -23,6 +23,10 @@ def _packaged_overlay_paths() -> set[str]:
 
 def main() -> int:
     packaged = _packaged_overlay_paths()
+    if not OVERLAY.is_dir():
+        print(f"Overlay directory not found: {OVERLAY}", file=sys.stderr)
+        return 1
+
     overlay_files = sorted(
         path.relative_to(ROOT).as_posix()
         for path in OVERLAY.rglob("*")

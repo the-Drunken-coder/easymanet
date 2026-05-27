@@ -132,7 +132,9 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
     dd_return = dd_proc.wait()
     gzip_return = gzip_proc.wait()
 
-    if gzip_return != 0:
+    # OpenWrt/OpenMANET sysupgrade metadata after the gzip stream can yield exit 2
+    # ("trailing garbage ignored"); payload integrity is validated by _check_gzip_payload.
+    if gzip_return not in (0, 2):
         raise subprocess.CalledProcessError(gzip_return, ["gzip", "-dc", image_path])
     if dd_return != 0:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])

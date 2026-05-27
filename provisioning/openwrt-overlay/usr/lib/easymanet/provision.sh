@@ -171,7 +171,7 @@ if [ "$NODE_ROLE" = "gate" ]; then
 fi
 
 SSH_ENABLED=0
-if [ "$NODE_ROLE" = "gate" ] || json_bool management ssh_enabled; then
+if json_bool management ssh_enabled; then
     SSH_ENABLED=1
 fi
 

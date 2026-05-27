@@ -111,7 +111,8 @@ def test_firstboot_installs_ssh_keys_via_jsonfilter_array():
 def test_firstboot_honors_ssh_enabled_flag():
     text = PROVISION_SCRIPT.read_text()
     assert "SSH_ENABLED=0" in text
-    assert 'if [ "$NODE_ROLE" = "gate" ] || json_bool management ssh_enabled; then' in text
+    assert 'if json_bool management ssh_enabled; then' in text
+    assert 'if [ "$NODE_ROLE" = "gate" ] || json_bool management ssh_enabled' not in text
     assert "/etc/init.d/dropbear enable" in text
     assert "/etc/init.d/dropbear disable" in text
     assert "/etc/init.d/dropbear stop" in text

@@ -136,6 +136,8 @@ def test_inject_patches_usb_sda_root_to_partuuid(monkeypatch, tmp_path):
     results = inject("/dev/disk4", manifest, "node01")
 
     assert "root=PARTUUID=b3c4d5e6-02" in cmdline.read_text()
+    assert "root=/dev/sda2" not in cmdline.read_text()
+    assert (boot_mount / "cmdline.txt.easymanet.bak").read_text().startswith("console=ttyAMA0")
     assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=b3c4d5e6-02", True)
     os.unlink(path)
 

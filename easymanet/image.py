@@ -5,7 +5,6 @@ verify/sync, and clean unmount/eject.
 """
 
 import os
-import shlex
 import subprocess
 import zlib
 from pathlib import Path
@@ -133,7 +132,7 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
     dd_return = dd_proc.wait()
     gzip_return = gzip_proc.wait()
 
-    if gzip_return not in (0, 2):
+    if gzip_return != 0:
         raise subprocess.CalledProcessError(gzip_return, ["gzip", "-dc", image_path])
     if dd_return != 0:
         raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
@@ -171,8 +170,16 @@ def _clear_stale_overlay(device: str) -> None:
 
 
 def _write_raw_via_dd(image_path: str, device: str) -> None:
-    cmd = f"dd if={shlex.quote(str(image_path))} of={shlex.quote(device)} bs=16m status=progress 2>&1"
-    subprocess.run(cmd, shell=True, check=True)
+    subprocess.run(
+        [
+            "dd",
+            f"if={image_path}",
+            f"of={device}",
+            "bs=16m",
+            "status=progress",
+        ],
+        check=True,
+    )
 
 
 def finish_flash(device: str, eject: bool = True) -> None:

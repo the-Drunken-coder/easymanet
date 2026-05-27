@@ -113,6 +113,33 @@ def test_inject_patches_rpi_boot_root_to_partuuid(monkeypatch, tmp_path):
     os.unlink(path)
 
 
+def test_inject_patches_usb_sda_root_to_partuuid(monkeypatch, tmp_path):
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+    cmdline = boot_mount / "cmdline.txt"
+    cmdline.write_text(
+        "console=ttyAMA0 root=/dev/sda2 rootfstype=squashfs rootwait\n"
+    )
+    (boot_mount / "partuuid.txt").write_text("b3c4d5e6\n")
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), False),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda _device, _mount_point, _mounted_here: None,
+    )
+
+    results = inject("/dev/disk4", manifest, "node01")
+
+    assert "root=PARTUUID=b3c4d5e6-02" in cmdline.read_text()
+    assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=b3c4d5e6-02", True)
+    os.unlink(path)
+
+
 def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
     path = _write_config(VALID_CONFIG)
     manifest = load_manifest(path)

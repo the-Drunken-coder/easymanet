@@ -2,6 +2,7 @@
 
 import os
 import plistlib
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,7 +12,7 @@ from .manifest import Manifest
 from .platform import is_linux, is_macos
 from .render import render
 
-SD_ROOT_DEVICE = "/dev/mmcblk0p2"
+ROOT_BLOCK_DEVICE_PATTERN = re.compile(r"root=(/dev/[^\s]+)")
 
 
 class InjectError(Exception):
@@ -68,6 +69,16 @@ def inject_dry_run_info(manifest: Manifest, node_name: str) -> str:
     return "\n".join(lines)
 
 
+def _root_device_partuuid_suffix(dev_path: str) -> Optional[str]:
+    match = re.match(r"/dev/(?:mmcblk\d+)p(\d+)$", dev_path)
+    if match:
+        return f"-{int(match.group(1)):02d}"
+    match = re.match(r"/dev/[a-z]+(\d+)$", dev_path)
+    if match:
+        return f"-{int(match.group(1)):02d}"
+    return None
+
+
 def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
     cmdline_path = boot_root / "cmdline.txt"
     partuuid_path = boot_root / "partuuid.txt"
@@ -75,20 +86,30 @@ def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
         return None
 
     cmdline = cmdline_path.read_text()
-    if f"root={SD_ROOT_DEVICE}" not in cmdline:
+    if "root=PARTUUID=" in cmdline:
         return None
 
+    match = ROOT_BLOCK_DEVICE_PATTERN.search(cmdline)
+    if not match:
+        return None
+
+    root_device = match.group(1)
     partuuid = partuuid_path.read_text().strip()
     if not partuuid:
         return None
 
-    root_partuuid = f"{partuuid}-02"
+    part_suffix = _root_device_partuuid_suffix(root_device)
+    if not part_suffix:
+        return None
+
+    root_partuuid = f"PARTUUID={partuuid}{part_suffix}"
     backup_path = boot_root / "cmdline.txt.easymanet.bak"
     if not backup_path.exists():
         backup_path.write_text(cmdline)
 
-    cmdline_path.write_text(cmdline.replace(f"root={SD_ROOT_DEVICE}", f"root=PARTUUID={root_partuuid}"))
-    return f"/boot/cmdline.txt root=PARTUUID={root_partuuid}"
+    updated = cmdline.replace(f"root={root_device}", f"root={root_partuuid}", 1)
+    cmdline_path.write_text(updated)
+    return f"/boot/cmdline.txt root={root_partuuid}"
 
 
 def _mount_boot_partition(device: str) -> Tuple[str, bool]:

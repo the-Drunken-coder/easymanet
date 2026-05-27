@@ -59,10 +59,32 @@ Steps:
 3. Enforce disk safety checks (or require `--force`).
 4. Unmount all partitions of the target device.
 5. Stream (decompress if `.gz`) the image to the raw device via `dd`.
-6. Wipe stale overlay data on partition 2 (when layout is detected).
+6. Wipe stale overlay data on partition 2 (when layout is detected; see
+   [Security](#security) and [Stale overlay wipe](#stale-overlay-wipe)).
 7. Mount the FAT boot partition.
 8. Write `/easymanet/provision.json`.
 9. Unmount and eject.
+
+### SSH at flash time
+
+SSH (dropbear) is chosen when you flash, not in `fleet.yml`. The flash
+command writes `management.ssh_enabled` into `provision.json` on the boot
+partition; first boot enables or disables dropbear from that field.
+
+| Flags | Result |
+|-------|--------|
+| (none) | Gate nodes: SSH on. Point nodes: SSH off. |
+| `--enable-ssh` | SSH on for any role. |
+| `--disable-ssh` | SSH off for any role (including gates). |
+
+`--enable-ssh` and `--disable-ssh` cannot be used together.
+
+Example — point node with SSH:
+
+```bash
+easymanet flash --config fleet.yml --node manet02 --device /dev/sdb \
+  --base-image ./openmanet.img.gz --enable-ssh --yes
+```
 
 ### Safety
 
@@ -94,16 +116,17 @@ Same command as macOS. Streams the image with `gzip | dd` or `dd`.
 
 ### Safety
 
-- System disks are detected by mount points (`/`, `/boot`, `/home`,
-  `/var`, `/usr`).
+- System disks are detected via `findmnt` on `/` and `/boot` (with a
+  mount-point fallback), not only partition mount lists.
 - Large internal fixed disks and devices not in the default list are blocking.
 - `--yes` is required.
 - `--force` overrides all blocking warnings.
 
 ### Permissions
 
-Flashing requires write access to the target block device, typically
-meaning the command must be run as root or with `sudo`.
+Flashing requires write access to the target block device. On Linux,
+members of the `disk` group may flash without root if the device is
+writable. Otherwise run with `sudo`.
 
 ## Recovery: inject only
 
@@ -139,6 +162,28 @@ Outputs the complete flash plan without writing anything:
 - Resolved `provision.json`
 - The boot-partition payload that would be written
 - Disk safety warnings (same checks as a real flash)
+
+## Stale overlay wipe
+
+After the base image is written, EasyMANET zeros partition 2 (the
+OpenWrt rootfs/overlay region) so an old `provisioned` flag and f2fs
+overlay from a previous flash cannot survive. The wipe uses the partition
+layout from `diskutil` or `lsblk`, seeks to partition 2, and zeros up to
+the partition size (capped at 4608 MiB). See step 6 in the flash flow
+above.
+
+## Security
+
+Secrets from `fleet.yml` (mesh password, Wi‑Fi passwords,
+`root_password_hash`, SSH public keys) are rendered into
+`/easymanet/provision.json` on the **unencrypted FAT boot partition**
+while you flash. Anyone with physical access to the card can read that
+file before first boot. After provisioning, a copy lives under
+`/etc/easymanet/provision.json` with mode `0600`, but the boot copy may
+remain on the FAT volume.
+
+Treat flashed SD cards and USB drives as sensitive. Re-flash or securely
+wipe media when decommissioning nodes.
 
 ## Troubleshooting
 

@@ -1,5 +1,9 @@
 """Tests for Docker-backed image builds."""
 
+import subprocess
+import tempfile
+from pathlib import Path
+
 from easymanet import build
 
 
@@ -96,6 +100,26 @@ def test_docker_run_command_uses_bind_cache_dir(monkeypatch, tmp_path):
     )
 
     assert f"type=bind,source={cache},target=/cache" in command
+
+
+def test_container_script_passes_bash_syntax_check():
+    script = build._container_script(
+        repo_url=build.DEFAULT_OPENMANET_REPO,
+        openmanet_version=build.DEFAULT_OPENMANET_VERSION,
+        board=build.DEFAULT_BOARD,
+        target=build.DEFAULT_TARGET,
+        jobs=4,
+        clean=False,
+        extra_packages=["iperf3"],
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+        handle.write(script)
+        path = Path(handle.name)
+
+    try:
+        subprocess.run(["bash", "-n", str(path)], check=True)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_container_script_builds_expected_artifact():

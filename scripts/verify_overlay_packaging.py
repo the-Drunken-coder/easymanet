@@ -3,28 +3,43 @@
 
 from pathlib import Path
 import sys
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "provisioning" / "openwrt-overlay"
-PYPROJECT = (ROOT / "pyproject.toml").read_text()
+PYPROJECT_PATH = ROOT / "pyproject.toml"
+
+
+def _packaged_overlay_paths() -> set[str]:
+    data = tomllib.loads(PYPROJECT_PATH.read_text())
+    packaged: set[str] = set()
+    overlay_prefix = "provisioning/openwrt-overlay/"
+    for filenames in data["tool"]["setuptools"]["data-files"].values():
+        for name in filenames:
+            if name.startswith(overlay_prefix):
+                packaged.add(name)
+    return packaged
 
 
 def main() -> int:
-    missing = []
-    for path in sorted(OVERLAY.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(ROOT).as_posix()
-        if rel not in PYPROJECT:
-            missing.append(rel)
+    packaged = _packaged_overlay_paths()
+    overlay_files = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in OVERLAY.rglob("*")
+        if path.is_file()
+    )
+    missing = [rel for rel in overlay_files if rel not in packaged]
 
     if missing:
-        print("Overlay files missing from pyproject.toml [tool.setuptools.data-files]:", file=sys.stderr)
+        print(
+            "Overlay files missing from pyproject.toml [tool.setuptools.data-files]:",
+            file=sys.stderr,
+        )
         for rel in missing:
             print(f"  {rel}", file=sys.stderr)
         return 1
 
-    print(f"All {len(list(OVERLAY.rglob('*')))} overlay paths are referenced in pyproject.toml")
+    print(f"All {len(overlay_files)} overlay files are listed in pyproject.toml")
     return 0
 
 

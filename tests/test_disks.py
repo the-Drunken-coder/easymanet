@@ -105,6 +105,65 @@ def test_linux_disk_from_lsblk_marks_mmc_removable():
     assert disk.removable is True
 
 
+def test_linux_root_block_devices_uses_findmnt(monkeypatch):
+    calls = []
+
+    def fake_findmnt(mount_point):
+        calls.append(mount_point)
+        return {
+            "/": "/dev/nvme0n1p3",
+            "/boot": None,
+        }.get(mount_point)
+
+    monkeypatch.setattr(disks, "_findmnt_source", fake_findmnt)
+    monkeypatch.setattr(
+        disks,
+        "_linux_partitions_for_device",
+        lambda device: ["/dev/nvme0n1p1", "/dev/nvme0n1p2", "/dev/nvme0n1p3"]
+        if device == "/dev/nvme0n1"
+        else [],
+    )
+
+    related = disks._linux_root_block_devices()
+
+    assert calls == ["/", "/boot"]
+    assert "/dev/nvme0n1p3" in related
+    assert "/dev/nvme0n1" in related
+
+
+def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypatch):
+    monkeypatch.setattr(
+        disks,
+        "_linux_root_block_devices",
+        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1"},
+    )
+
+    assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
+    assert disks._check_linux_system_disk("/dev/sdb", []) is False
+
+
+def test_lookup_device_lists_default_disks_once(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_list(include_all=False):
+        calls["count"] += 1
+        assert include_all is False
+        return [disks.DiskInfo(device="/dev/sdb", size_bytes=32 * 1024**3, removable=True)]
+
+    monkeypatch.setattr(disks, "list_disks", fake_list)
+    monkeypatch.setattr(disks, "is_macos", lambda: False)
+    monkeypatch.setattr(disks, "is_linux", lambda: True)
+    monkeypatch.setattr(
+        disks,
+        "lookup_device_linux",
+        lambda device: disks.DiskInfo(device=device, size_bytes=32 * 1024**3, removable=True),
+    )
+
+    disks.lookup_device("/dev/sdc")
+
+    assert calls["count"] == 1
+
+
 def test_get_partition2_wipe_range_linux(monkeypatch):
     lsblk_output = {
         "blockdevices": [

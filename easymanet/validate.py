@@ -149,7 +149,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                 ips_seen[ip] = name
 
         local_ap = node.get("local_ap", {})
-        if isinstance(local_ap, dict) and local_ap.get("enabled", True):
+        if isinstance(local_ap, dict) and local_ap.get("enabled", False):
             ap_password = local_ap.get("password", default_local_ap.get("password", ""))
             if ap_password and len(ap_password) < 8:
                 result.add_error(

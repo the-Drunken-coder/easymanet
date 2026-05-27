@@ -6,7 +6,7 @@ Returns a list of errors and warnings.
 
 import ipaddress
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from .manifest import Manifest
 
@@ -91,6 +91,13 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     ips_seen: dict = {}
     node_names_lower = set()
 
+    default_gateway = manifest.defaults.get("gateway", {})
+    if not isinstance(default_gateway, dict):
+        result.add_error(
+            f"defaults.gateway must be a mapping, got {type(default_gateway).__name__}"
+        )
+        default_gateway = {}
+
     for name in nodes:
         if name.lower() in node_names_lower:
             result.add_error(f"Duplicate node name (case-insensitive): {name}")
@@ -143,9 +150,13 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                     f"Node '{name}': local_ap.password must be at least 8 characters"
                 )
 
-        default_gateway = manifest.defaults.get("gateway", {})
         node_gateway = node.get("gateway", {})
-        if isinstance(default_gateway, dict) or isinstance(node_gateway, dict):
+        if not isinstance(node_gateway, dict):
+            result.add_error(
+                f"Node '{name}': gateway must be a mapping, got {type(node_gateway).__name__}"
+            )
+            node_gateway = {}
+        if isinstance(default_gateway, dict) and isinstance(node_gateway, dict):
             resolved_gateway = {**default_gateway, **node_gateway}
             if resolved_gateway.get("enabled") and role == "gate":
                 uplink = resolved_gateway.get("uplink_interface")
@@ -225,6 +236,10 @@ def resolve_node(manifest: Manifest, node_name: str) -> dict:
 
     default_local_ap = defaults.get("local_ap", {})
     node_local_ap = node.get("local_ap", {})
+    if not isinstance(default_local_ap, dict):
+        default_local_ap = {}
+    if not isinstance(node_local_ap, dict):
+        node_local_ap = {}
     resolved_local_ap = {**default_local_ap, **node_local_ap}
     if "enabled" not in resolved_local_ap:
         resolved_local_ap["enabled"] = False
@@ -234,6 +249,10 @@ def resolve_node(manifest: Manifest, node_name: str) -> dict:
 
     default_gateway = defaults.get("gateway", {})
     node_gateway = node.get("gateway", {})
+    if not isinstance(default_gateway, dict):
+        default_gateway = {}
+    if not isinstance(node_gateway, dict):
+        node_gateway = {}
     resolved_gateway = {**default_gateway, **node_gateway}
     if resolved["role"] == "gate":
         resolved_gateway.setdefault("enabled", True)

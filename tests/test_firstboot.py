@@ -106,6 +106,29 @@ def test_firstboot_installs_ssh_keys_via_jsonfilter_array():
     text = PROVISION_SCRIPT.read_text()
     assert "@.management.ssh_authorized_keys[*]" in text
     assert "jsonfilter -i \"$PROVISION_JSON\" -e '@.management.ssh_authorized_keys[*]'" in text
+    assert "chmod 0600 /etc/dropbear/authorized_keys" in text
+    assert "chown root /etc/dropbear/authorized_keys" in text
+
+
+def test_firstboot_fails_if_root_password_hash_not_applied():
+    text = PROVISION_SCRIPT.read_text()
+    assert "failed to set root password hash in /etc/shadow" in text
+    shadow_block = text.split("Setting root password hash")[1].split("Configuring mesh")[0]
+    assert 'sed -i "s|^root:.*|root:${ROOT_PW_HASH}' in shadow_block
+    assert "/etc/shadow; then" in shadow_block
+    assert "|| true" not in shadow_block
+
+
+def test_uci_defaults_propagates_provision_failure_rc():
+    defaults = OVERLAY / "etc" / "uci-defaults" / "99-easymanet"
+    text = defaults.read_text()
+    assert "set -eu" in text
+    assert '/bin/sh "$PROVISION_SCRIPT"' in text
+    assert "rc=$?" in text
+    assert 'if [ "$rc" -eq 0 ]; then' in text
+    assert 'if /bin/sh "$PROVISION_SCRIPT"; then' not in text
+    assert "provisioning failed with rc=" in text
+    assert 'exit "$rc"' in text
 
 
 def test_firstboot_honors_ssh_enabled_flag():
@@ -140,6 +163,8 @@ def test_management_lan_repair_hook_is_packaged_and_enabled():
     assert "uci -q delete network.wan" in helper_text
     assert "uci -q delete network.wan6" in helper_text
     assert 'uci add_list network."$bridge".ports="$port"' in helper_text
+    assert "ports='${port}'" in helper_text
+    assert 'uci -q delete network."$bridge".ports' not in helper_text
     assert "brctl addif br-lan" in helper_text
     assert "uci set network.lan=interface" in helper_text
     assert 'uci set network.lan.device="br-lan"' in helper_text
@@ -169,7 +194,11 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "batctl-originators.txt" in report_text
     assert "mesh11sd-status.txt" in report_text
     assert "uci-mesh11sd.txt" in report_text
-    assert "wpa_supplicant-wlan0.conf" in report_text
+    assert "easymanet_redact_uci_wireless" in report_text
+    assert "<redacted>" in report_text
+    assert 'cp /etc/easymanet/provision.json' not in report_text
+    assert 'cp /etc/config/wireless' not in report_text
+    assert "wpa_supplicant-wlan0.conf" not in report_text
     assert "/etc/init.d/easymanet-boot-report enable" in defaults.read_text()
     assert "write_easymanet_boot_report provisioned" in PROVISION_SCRIPT.read_text()
     assert "easymanet-network.log" in report_text

@@ -25,9 +25,26 @@ class Manifest:
             raise ManifestError(f"Config file not found: {self.path}")
         try:
             with open(self.path, "r") as f:
-                self.data = yaml.safe_load(f) or {}
+                raw = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            raise ManifestError(f"Invalid YAML in {self.path}: {e}")
+            raise ManifestError(f"Invalid YAML in {self.path}: {e}") from e
+        self.data = self._validate_structure(raw)
+
+    def _validate_structure(self, raw: Any) -> Dict[str, Any]:
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            raise ManifestError(
+                f"Manifest root must be a mapping, got {type(raw).__name__}"
+            )
+        for section in ("mesh", "defaults", "nodes"):
+            value = raw.get(section)
+            if value is not None and not isinstance(value, dict):
+                raise ManifestError(
+                    f"Manifest section '{section}' must be a mapping, "
+                    f"got {type(value).__name__}"
+                )
+        return raw
 
     @property
     def version(self) -> int:

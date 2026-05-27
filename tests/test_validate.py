@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from easymanet.manifest import load_manifest
-from easymanet.validate import validate
+from easymanet.validate import resolve_node, validate
 
 
 VALID_CONFIG = """
@@ -230,6 +230,49 @@ def test_invalid_country_code():
     result = validate(m)
     assert not result.valid
     assert any("mesh.country" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_defaults_gateway_must_be_mapping():
+    config = VALID_CONFIG.replace(
+        "defaults:\n  target: rpi4-mm6108-spi",
+        "defaults:\n  target: rpi4-mm6108-spi\n  gateway: not-a-mapping",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("defaults.gateway must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_node_gateway_must_be_mapping():
+    config = VALID_CONFIG.replace(
+        "    gateway:\n      enabled: true\n      uplink_interface: eth0",
+        '    gateway: "not-a-mapping"',
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("Node 'node01': gateway must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_resolve_node_non_dict_local_ap_and_gateway():
+    config = VALID_CONFIG.replace(
+        "    local_ap:\n      ssid: node01-local",
+        "    local_ap: true",
+    ).replace(
+        "    gateway:\n      enabled: true\n      uplink_interface: eth0",
+        "    gateway: disabled",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    resolved = resolve_node(m, "node01")
+    assert isinstance(resolved["local_ap"], dict)
+    assert isinstance(resolved["gateway"], dict)
+    assert resolved["local_ap"]["ssid"] == "node01-local"
     os.unlink(path)
 
 

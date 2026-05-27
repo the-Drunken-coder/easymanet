@@ -15,7 +15,7 @@ inspection of OpenMANET images and documentation.
 
 The wizard configures the mesh radio and optional local AP:
 
-```
+```conf
 config wifi-device 'radio0'
     option type 'mac80211'
     option channel '42'
@@ -48,7 +48,7 @@ OpenMANET uses BATMAN-adv over the 802.11s HaLow interface. The
 802.11s interface is a BATMAN hard interface; node IPs belong on
 `bat0`, not directly on `wlan0`:
 
-```
+```conf
 config interface 'bat0'
     option proto 'batadv'
     option routing_algo 'BATMAN_V'
@@ -76,7 +76,7 @@ config interface 'wan'           # Only on gate nodes
 
 Hostname and timezone:
 
-```
+```conf
 config system
     option hostname '<hostname>'
     option timezone 'UTC'
@@ -88,7 +88,7 @@ config system
 state keeps Morse mesh forwarding disabled at the 802.11s layer and
 lets BATMAN-adv carry the mesh:
 
-```
+```conf
 config mesh11sd 'setup'
     option enabled '1'
 
@@ -116,7 +116,7 @@ Do not set `dot11MeshHWMPRootMode=1`; it caused
 
 Mesh IP interface is excluded from DHCP serving:
 
-```
+```conf
 config dhcp 'meship'
     option interface 'meship'
     option ignore '1'
@@ -126,7 +126,7 @@ config dhcp 'meship'
 
 Mesh zone (open between mesh nodes):
 
-```
+```conf
 config zone
     option name 'mesh'
     option network 'meship'
@@ -181,7 +181,7 @@ avoid conflicts and ensure idempotent provisioning.
 
 After configuration changes, the following services need restart:
 
-```
+```text
 /etc/init.d/network restart
 /etc/init.d/mesh11sd enable
 /etc/init.d/mesh11sd restart
@@ -190,7 +190,7 @@ After configuration changes, the following services need restart:
 
 Or enable for subsequent boots:
 
-```
+```text
 /etc/init.d/network enable
 /etc/init.d/mesh11sd enable
 /etc/init.d/openmanetd enable

@@ -12,7 +12,7 @@ if [ ! -x "$PROVISION_SCRIPT" ]; then
 fi
 
 /bin/sh "$PROVISION_SCRIPT"
-rc="$?"
+rc=$?
 if [ "$rc" -eq 0 ]; then
     logger -t easymanet "provisioning complete"
     exit 0

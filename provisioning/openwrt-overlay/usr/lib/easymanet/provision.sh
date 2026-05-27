@@ -190,7 +190,10 @@ fi
 ROOT_PW_HASH="$(json_val management root_password_hash 2>/dev/null || true)"
 if [ -n "$ROOT_PW_HASH" ]; then
     echo "Setting root password hash..." >> "$LOG_FILE"
-    sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" /etc/shadow 2>/dev/null || true
+    if ! sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" /etc/shadow; then
+        echo "FATAL: failed to set root password hash in /etc/shadow" | tee -a "$LOG_FILE"
+        exit 1
+    fi
 fi
 
 if jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys' >/dev/null 2>&1; then
@@ -199,6 +202,8 @@ if jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys' >/dev/n
         [ -z "$key" ] && continue
         echo "$key" >> /etc/dropbear/authorized_keys
     done
+    chmod 0600 /etc/dropbear/authorized_keys
+    chown root /etc/dropbear/authorized_keys
 fi
 
 echo "Configuring mesh wireless..." >> "$LOG_FILE"

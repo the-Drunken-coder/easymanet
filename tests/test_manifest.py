@@ -1,8 +1,10 @@
 """Tests for manifest loading and parsing."""
 
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
+import yaml
 
 from easymanet.manifest import load_manifest, ManifestError
 
@@ -71,7 +73,29 @@ def test_load_missing_file():
 
 def test_load_invalid_yaml():
     path = _write_config(": invalid: yaml: [")
-    with pytest.raises(ManifestError, match="Invalid YAML"):
+    with pytest.raises(ManifestError, match="Invalid YAML") as exc_info:
+        load_manifest(path)
+    assert isinstance(exc_info.value.__cause__, yaml.YAMLError)
+    os.unlink(path)
+
+
+def test_load_non_mapping_root():
+    path = _write_config("not a mapping\n")
+    with pytest.raises(ManifestError, match="root must be a mapping"):
+        load_manifest(path)
+    os.unlink(path)
+
+
+def test_load_non_mapping_section():
+    path = _write_config("version: 1\nmesh: not-a-mapping\n")
+    with pytest.raises(ManifestError, match="'mesh' must be a mapping"):
+        load_manifest(path)
+    os.unlink(path)
+
+
+def test_load_nodes_must_be_mapping():
+    path = _write_config("version: 1\nnodes:\n  - node01\n")
+    with pytest.raises(ManifestError, match="'nodes' must be a mapping"):
         load_manifest(path)
     os.unlink(path)
 

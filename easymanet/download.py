@@ -205,7 +205,10 @@ def get_cached_image(target: str) -> Optional[Path]:
 def _valid_cached_image(path: Path) -> bool:
     suffix = path.suffix.lower()
     if suffix == ".img":
-        return True
+        try:
+            return path.stat().st_size > 0
+        except OSError:
+            return False
     if suffix != ".gz" or not path.stem.lower().endswith(".img"):
         return False
     try:

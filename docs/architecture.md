@@ -9,7 +9,7 @@ provisions each node from that file.
 
 ## Data Flow
 
-```
+```text
 fleet.yml (user writes this)
     │
     ▼
@@ -89,7 +89,7 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 
 ## File Layout on Flashed Drive
 
-```
+```text
 /boot/
     easymanet/
         provision.json      ← generated from fleet.yml for this node

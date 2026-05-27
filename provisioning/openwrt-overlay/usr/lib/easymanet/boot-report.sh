@@ -44,6 +44,10 @@ run_report_cmd() {
     } > "$out"
 }
 
+easymanet_redact_uci_wireless() {
+    uci show wireless 2>/dev/null | sed -E "s/(\.(key|password)=)'[^']*'/\1='<redacted>'/g" || true
+}
+
 write_easymanet_boot_report() {
     reason="${1:-boot}"
     report_dir="$(find_boot_report_dir)" || return 0
@@ -80,7 +84,7 @@ write_easymanet_boot_report() {
     run_report_cmd "$latest/batctl-ifaces.txt" batctl if
     run_report_cmd "$latest/mesh11sd-status.txt" mesh11sd status
     run_report_cmd "$latest/wifi-status.txt" wifi status
-    run_report_cmd "$latest/uci-wireless.txt" uci show wireless
+    run_report_cmd "$latest/uci-wireless.txt" easymanet_redact_uci_wireless
     run_report_cmd "$latest/uci-network.txt" uci show network
     run_report_cmd "$latest/uci-mesh11sd.txt" uci show mesh11sd
     run_report_cmd "$latest/uci-dhcp.txt" uci show dhcp
@@ -90,14 +94,11 @@ write_easymanet_boot_report() {
 
     cp /var/log/easymanet.log "$latest/easymanet.log" 2>/dev/null || true
     cp /var/log/easymanet-network.log "$latest/easymanet-network.log" 2>/dev/null || true
-    cp /etc/easymanet/provision.json "$latest/provision.json" 2>/dev/null || true
     cp /etc/easymanet/provisioned "$latest/provisioned" 2>/dev/null || true
-    cp /etc/config/wireless "$latest/config-wireless" 2>/dev/null || true
     cp /etc/config/network "$latest/config-network" 2>/dev/null || true
     cp /etc/config/mesh11sd "$latest/config-mesh11sd" 2>/dev/null || true
     cp /etc/config/dhcp "$latest/config-dhcp" 2>/dev/null || true
     cp /etc/config/firewall "$latest/config-firewall" 2>/dev/null || true
-    cp /var/run/wpa_supplicant-wlan0.conf "$latest/wpa_supplicant-wlan0.conf" 2>/dev/null || true
 
     cp -R "$latest"/. "$current"/ 2>/dev/null || true
     sync

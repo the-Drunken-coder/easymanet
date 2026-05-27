@@ -15,7 +15,8 @@ PYPROJECT_PATH = ROOT / "pyproject.toml"
 
 
 def _packaged_overlay_paths() -> set[str]:
-    data = tomllib.loads(PYPROJECT_PATH.read_text())
+    with PYPROJECT_PATH.open("rb") as f:
+        data = tomllib.load(f)
     packaged: set[str] = set()
     overlay_prefix = "provisioning/openwrt-overlay/"
     for filenames in data["tool"]["setuptools"]["data-files"].values():

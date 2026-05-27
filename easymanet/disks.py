@@ -583,7 +583,11 @@ def get_macos_partitions(device: str) -> List[str]:
 
 
 def get_partition2_wipe_range(device: str) -> Optional[Tuple[int, int]]:
-    """Return (start_byte_offset, wipe_bytes) for partition 2 overlay wipe."""
+    """Return (start_byte_offset, wipe_bytes) for partition 2 stale-overlay tail wipe.
+
+    Targets the tail of partition 2 only (up to max_wipe), preserving the rootfs
+    at the partition start that a fresh image write just placed there.
+    """
     max_wipe = _OVERLAY_WIPE_BLOCK_MIB * _OVERLAY_WIPE_BLOCKS * 1024 * 1024
 
     if is_linux():
@@ -620,7 +624,8 @@ def _linux_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     # lsblk -b reports START in 512-byte sectors on Linux.
     start_bytes = start * 512
     wipe_bytes = min(size, max_wipe)
-    return (start_bytes, wipe_bytes)
+    tail_start = start_bytes + size - wipe_bytes
+    return (tail_start, wipe_bytes)
 
 
 def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[int, int]]:
@@ -647,7 +652,8 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     if start <= 0 or size <= 0:
         return None
     wipe_bytes = min(size, max_wipe)
-    return (start, wipe_bytes)
+    tail_start = start + size - wipe_bytes
+    return (tail_start, wipe_bytes)
 
 
 def eject_disk(device: str) -> None:

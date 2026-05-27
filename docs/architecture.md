@@ -67,11 +67,14 @@ display. Handles unmounting, sync, and eject.
 Mounts only the FAT boot partition after flashing and writes the
 node-specific `/easymanet/provision.json` payload there.
 
-### First-boot scripts (`firstboot/`)
-- `99-easymanet`: UCI defaults trigger that calls `provision.sh`.
-- `provision.sh`: Generic shell script that finds the boot-partition
-  payload, copies it into overlay storage, and applies UCI/OpenMANET
-  configuration automatically.
+### First-boot scripts (`provisioning/openwrt-overlay/`)
+Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
+- `etc/uci-defaults/99-easymanet`: UCI defaults trigger that calls `provision.sh`.
+- `usr/lib/easymanet/provision.sh`: Generic shell script that finds the
+  boot-partition payload, copies it into overlay storage, and applies
+  UCI/OpenMANET configuration automatically.
+- `usr/lib/easymanet/network.sh`, `boot-report.sh`: helpers for management
+  LAN repair and post-boot diagnostics (see init.d hooks in the same overlay).
 
 ## Design Principles
 

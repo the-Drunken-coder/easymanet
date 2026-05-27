@@ -45,7 +45,7 @@ run_report_cmd() {
 }
 
 easymanet_redact_uci_wireless() {
-    uci show wireless 2>/dev/null | sed -E "s/(\.(key|password)=)'[^']*'/\1='<redacted>'/g" || true
+    uci show wireless 2>/dev/null | sed -E "s/(\.(key|password)=)'[^']*'/\1'<redacted>'/g" || true
 }
 
 write_easymanet_boot_report() {

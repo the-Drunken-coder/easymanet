@@ -123,8 +123,10 @@ def test_uci_defaults_propagates_provision_failure_rc():
     defaults = OVERLAY / "etc" / "uci-defaults" / "99-easymanet"
     text = defaults.read_text()
     assert "set -eu" in text
+    assert "set +e" in text
     assert '/bin/sh "$PROVISION_SCRIPT"' in text
     assert "rc=$?" in text
+    assert "set -e" in text.split("rc=$?")[1]
     assert 'if [ "$rc" -eq 0 ]; then' in text
     assert 'if /bin/sh "$PROVISION_SCRIPT"; then' not in text
     assert "provisioning failed with rc=" in text
@@ -163,7 +165,8 @@ def test_management_lan_repair_hook_is_packaged_and_enabled():
     assert "uci -q delete network.wan" in helper_text
     assert "uci -q delete network.wan6" in helper_text
     assert 'uci add_list network."$bridge".ports="$port"' in helper_text
-    assert "ports='${port}'" in helper_text
+    assert 'case " $ports "' in helper_text
+    assert 'uci -q get network."$bridge".ports' in helper_text
     assert 'uci -q delete network."$bridge".ports' not in helper_text
     assert "brctl addif br-lan" in helper_text
     assert "uci set network.lan=interface" in helper_text
@@ -195,7 +198,8 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "mesh11sd-status.txt" in report_text
     assert "uci-mesh11sd.txt" in report_text
     assert "easymanet_redact_uci_wireless" in report_text
-    assert "<redacted>" in report_text
+    assert "\\1'<redacted>'" in report_text
+    assert "\\1='<redacted>'" not in report_text
     assert 'cp /etc/easymanet/provision.json' not in report_text
     assert 'cp /etc/config/wireless' not in report_text
     assert "wpa_supplicant-wlan0.conf" not in report_text

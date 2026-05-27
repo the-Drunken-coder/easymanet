@@ -48,9 +48,11 @@ easymanet_ensure_lan_bridge_port() {
         uci set network.lan.netmask="255.255.255.0" >> "$EASYMANET_NETWORK_LOG" 2>&1
     fi
 
-    if ! uci show network."$bridge" 2>/dev/null | grep -q "ports='${port}'"; then
-        uci add_list network."$bridge".ports="$port" >> "$EASYMANET_NETWORK_LOG" 2>&1
-    fi
+    ports="$(uci -q get network."$bridge".ports 2>/dev/null || true)"
+    case " $ports " in
+        *" $port "*) ;;
+        *) uci add_list network."$bridge".ports="$port" >> "$EASYMANET_NETWORK_LOG" 2>&1 ;;
+    esac
 }
 
 easymanet_repair_management_lan() {

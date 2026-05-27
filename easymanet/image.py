@@ -52,7 +52,7 @@ def _check_gzip_integrity(image_path: Path) -> None:
         raise FlashError(f"Invalid gzip-compressed image {image_path}: {e}") from e
 
 
-def _check_gzip_payload(image_path: Path) -> None:
+def _gzip_decompressed_bytes(image_path: Path) -> int:
     decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
     total = 0
     with image_path.open("rb") as f:
@@ -64,6 +64,11 @@ def _check_gzip_payload(image_path: Path) -> None:
 
     if not decompressor.eof:
         raise zlib.error("compressed image ended before the gzip stream completed")
+    return total
+
+
+def _check_gzip_payload(image_path: Path) -> None:
+    total = _gzip_decompressed_bytes(image_path)
     if total == 0:
         raise zlib.error("compressed image did not contain a disk image payload")
 
@@ -148,18 +153,7 @@ def _ceil_div(numerator: int, denominator: int) -> int:
 
 def _written_image_bytes(image: Path) -> int:
     if image.suffix.lower() == ".gz":
-        proc = subprocess.run(
-            ["gzip", "-l", str(image)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            lines = proc.stdout.strip().splitlines()
-            if len(lines) >= 2:
-                parts = lines[1].split()
-                if len(parts) >= 2:
-                    return int(parts[1])
+        return _gzip_decompressed_bytes(image)
     return image.stat().st_size
 
 

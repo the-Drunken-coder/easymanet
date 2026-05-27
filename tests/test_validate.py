@@ -233,6 +233,22 @@ def test_invalid_country_code():
     os.unlink(path)
 
 
+def test_defaults_local_ap_must_be_mapping():
+    config = VALID_CONFIG.replace(
+        """  local_ap:
+    enabled: true
+    password: "ap-password\"""",
+        "  local_ap: not-a-mapping",
+        1,
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("defaults.local_ap must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_defaults_gateway_must_be_mapping():
     config = VALID_CONFIG.replace(
         "defaults:\n  target: rpi4-mm6108-spi",

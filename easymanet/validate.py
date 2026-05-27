@@ -98,6 +98,13 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         )
         default_gateway = {}
 
+    default_local_ap = manifest.defaults.get("local_ap", {})
+    if not isinstance(default_local_ap, dict):
+        result.add_error(
+            f"defaults.local_ap must be a mapping, got {type(default_local_ap).__name__}"
+        )
+        default_local_ap = {}
+
     for name in nodes:
         if name.lower() in node_names_lower:
             result.add_error(f"Duplicate node name (case-insensitive): {name}")
@@ -143,8 +150,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
 
         local_ap = node.get("local_ap", {})
         if isinstance(local_ap, dict) and local_ap.get("enabled", True):
-            ap_password = local_ap.get("password",
-                                         manifest.defaults.get("local_ap", {}).get("password", ""))
+            ap_password = local_ap.get("password", default_local_ap.get("password", ""))
             if ap_password and len(ap_password) < 8:
                 result.add_error(
                     f"Node '{name}': local_ap.password must be at least 8 characters"

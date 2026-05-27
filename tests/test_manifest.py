@@ -100,6 +100,20 @@ def test_load_nodes_must_be_mapping():
     os.unlink(path)
 
 
+def test_load_defaults_must_be_mapping():
+    path = _write_config("version: 1\ndefaults: not-a-mapping\n")
+    with pytest.raises(ManifestError, match="'defaults' must be a mapping"):
+        load_manifest(path)
+    os.unlink(path)
+
+
+def test_load_node_entry_must_be_mapping():
+    path = _write_config("version: 1\nnodes:\n  node01: not-a-mapping\n")
+    with pytest.raises(ManifestError, match="node 'node01' must be a mapping"):
+        load_manifest(path)
+    os.unlink(path)
+
+
 def test_get_node():
     path = _write_config(VALID_CONFIG)
     m = load_manifest(path)

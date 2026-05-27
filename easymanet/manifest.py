@@ -44,6 +44,14 @@ class Manifest:
                     f"Manifest section '{section}' must be a mapping, "
                     f"got {type(value).__name__}"
                 )
+        nodes = raw.get("nodes", {})
+        if isinstance(nodes, dict):
+            for name, node in nodes.items():
+                if not isinstance(node, dict):
+                    raise ManifestError(
+                        f"Manifest node '{name}' must be a mapping, "
+                        f"got {type(node).__name__}"
+                    )
         return raw
 
     @property

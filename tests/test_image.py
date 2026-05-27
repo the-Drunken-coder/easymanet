@@ -4,7 +4,12 @@ import gzip
 
 import pytest
 
-from easymanet.image import FlashError, _check_image, _clear_stale_overlay
+from easymanet.image import (
+    FlashError,
+    _check_image,
+    _clear_stale_overlay,
+    _written_image_bytes,
+)
 
 
 def test_check_image_accepts_valid_gzip(tmp_path):
@@ -23,6 +28,42 @@ def test_check_image_accepts_openwrt_trailing_metadata(tmp_path):
         f.write(b'{"metadata": "openwrt sysupgrade trailer"}')
 
     assert _check_image(str(image)) == image
+
+
+def test_written_image_bytes_counts_decompressed_payload_with_trailing_metadata(tmp_path):
+    payload = b"image-bytes"
+    image = tmp_path / "openmanet.img.gz"
+    with gzip.open(image, "wb") as f:
+        f.write(payload)
+    with image.open("ab") as f:
+        f.write(b'{"metadata": "openwrt sysupgrade trailer"}')
+
+    assert _written_image_bytes(image) == len(payload)
+    assert _written_image_bytes(image) < image.stat().st_size
+
+
+def test_clear_stale_overlay_skips_trailing_metadata_gzip_when_payload_covers_region(
+    monkeypatch, capsys, tmp_path
+):
+    payload = b"x" * 4096
+    image = tmp_path / "openmanet.img.gz"
+    with gzip.open(image, "wb") as f:
+        f.write(payload)
+    with image.open("ab") as f:
+        f.write(b'{"metadata": "openwrt sysupgrade trailer"}')
+
+    monkeypatch.setattr(
+        "easymanet.image.get_partition2_wipe_range",
+        lambda _d: (1024, 2048),
+    )
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("dd should not run")),
+    )
+
+    _clear_stale_overlay("/dev/disk4", image)
+    captured = capsys.readouterr()
+    assert "Skipping stale overlay wipe" in captured.out
 
 
 def test_check_image_rejects_corrupt_gzip(tmp_path):

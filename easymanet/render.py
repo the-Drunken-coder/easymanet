@@ -17,8 +17,12 @@ def render(
     resolved_node = resolve_node(manifest, node_name)
     management = manifest.defaults.get("management", {})
 
-    if ssh_enabled is None:
-        ssh_enabled = resolved_node.get("role") == "gate"
+    management_block: Dict[str, Any] = {
+        "root_password_hash": management.get("root_password_hash", ""),
+        "ssh_authorized_keys": management.get("ssh_authorized_keys", []),
+    }
+    if ssh_enabled is not None:
+        management_block["ssh_enabled"] = bool(ssh_enabled)
 
     provision: Dict[str, Any] = {
         "version": 1,
@@ -30,11 +34,7 @@ def render(
             "country": mesh.get("country", ""),
         },
         "node": resolved_node,
-        "management": {
-            "root_password_hash": management.get("root_password_hash", ""),
-            "ssh_authorized_keys": management.get("ssh_authorized_keys", []),
-            "ssh_enabled": bool(ssh_enabled),
-        },
+        "management": management_block,
     }
 
     return json.dumps(provision, indent=2)

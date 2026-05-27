@@ -90,7 +90,11 @@ jobs:
               clean=False,
               extra_packages=["iperf3"],
           )
-          path = Path(tempfile.mkstemp(suffix=".sh")[1])
-          path.write_text(script)
-          subprocess.run(["bash", "-n", str(path)], check=True)
+          with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+              handle.write(script)
+              path = Path(handle.name)
+          try:
+              subprocess.run(["bash", "-n", str(path)], check=True)
+          finally:
+              path.unlink(missing_ok=True)
           PY

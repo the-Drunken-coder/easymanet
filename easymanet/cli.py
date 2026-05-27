@@ -71,16 +71,15 @@ def _maybe_show_update_notice() -> None:
 
 
 def _resolve_flash_ssh_enabled(
-    role: str,
     *,
     enable_ssh: bool,
     disable_ssh: bool,
-) -> bool:
+) -> Optional[bool]:
     if disable_ssh:
         return False
     if enable_ssh:
         return True
-    return role == "gate"
+    return None
 
 
 def _flash_ssh_note(
@@ -265,9 +264,8 @@ def flash(
     Use --no-download to disable auto-download (requires --base-image).
 
     SSH is chosen at flash time: --enable-ssh, --disable-ssh, or the role
-    default (gate on, point off). The choice is written to provision.json.
+    default (gate on, point off) when the field is omitted from provision.json.
     """
-    _maybe_show_update_notice()
     check_platform()
     if enable_ssh and disable_ssh:
         typer.secho(
@@ -278,6 +276,8 @@ def flash(
     if not yes and not dry_run:
         typer.secho("--yes is required to flash. Use --dry-run to preview first.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
+
+    _maybe_show_update_notice()
 
     try:
         manifest = load_manifest(config)
@@ -296,7 +296,7 @@ def flash(
     target = resolved["node"]["target"]
     role = resolved["node"]["role"]
     ssh_enabled = _resolve_flash_ssh_enabled(
-        role, enable_ssh=enable_ssh, disable_ssh=disable_ssh
+        enable_ssh=enable_ssh, disable_ssh=disable_ssh
     )
 
     if inject_only:

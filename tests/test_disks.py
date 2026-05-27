@@ -118,6 +118,12 @@ def test_linux_root_block_devices_uses_findmnt(monkeypatch):
     monkeypatch.setattr(disks, "_findmnt_source", fake_findmnt)
     monkeypatch.setattr(
         disks,
+        "_linux_resolve_findmnt_source",
+        lambda source: "/dev/nvme0n1" if source == "/dev/nvme0n1p3" else None,
+    )
+    monkeypatch.setattr(disks.os.path, "realpath", lambda path: path)
+    monkeypatch.setattr(
+        disks,
         "_linux_partitions_for_device",
         lambda device: ["/dev/nvme0n1p1", "/dev/nvme0n1p2", "/dev/nvme0n1p3"]
         if device == "/dev/nvme0n1"
@@ -126,9 +132,20 @@ def test_linux_root_block_devices_uses_findmnt(monkeypatch):
 
     related = disks._linux_root_block_devices()
 
-    assert calls == ["/", "/boot"]
+    assert calls == ["/", "/boot", "/boot/efi"]
     assert "/dev/nvme0n1p3" in related
     assert "/dev/nvme0n1" in related
+
+
+def test_check_linux_system_disk_detects_separate_home_mount(monkeypatch):
+    monkeypatch.setattr(
+        disks,
+        "_linux_root_block_devices",
+        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1"},
+    )
+
+    assert disks._check_linux_system_disk("/dev/sdb", ["/home"]) is True
+    assert disks._check_linux_system_disk("/dev/sdb", []) is False
 
 
 def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypatch):
@@ -140,6 +157,27 @@ def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypa
 
     assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
     assert disks._check_linux_system_disk("/dev/sdb", []) is False
+
+
+def test_linux_resolve_findmnt_source_maps_mapper_to_base_disk(monkeypatch):
+    monkeypatch.setattr(
+        disks.os.path,
+        "realpath",
+        lambda path: "/dev/dm-0" if path == "/dev/mapper/vg-root" else path,
+    )
+    monkeypatch.setattr(disks, "_linux_lsblk_pkname", lambda device: "/dev/nvme0n1" if device == "/dev/dm-0" else None)
+
+    assert disks._linux_resolve_findmnt_source("/dev/mapper/vg-root") == "/dev/nvme0n1"
+
+
+def test_check_linux_system_disk_detects_mapper_backed_root(monkeypatch):
+    monkeypatch.setattr(
+        disks,
+        "_linux_root_block_devices",
+        lambda: {"/dev/nvme0n1", "/dev/nvme0n1p3"},
+    )
+
+    assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
 
 
 def test_lookup_device_lists_default_disks_once(monkeypatch):

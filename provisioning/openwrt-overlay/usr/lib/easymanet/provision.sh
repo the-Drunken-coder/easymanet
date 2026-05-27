@@ -171,7 +171,9 @@ if [ "$NODE_ROLE" = "gate" ]; then
 fi
 
 SSH_ENABLED=0
-if json_bool management ssh_enabled; then
+if [ -n "$(json_val management ssh_enabled)" ]; then
+    json_bool management ssh_enabled && SSH_ENABLED=1
+elif [ "$NODE_ROLE" = "gate" ]; then
     SSH_ENABLED=1
 fi
 

@@ -67,13 +67,15 @@ Steps:
 
 ### SSH at flash time
 
-SSH (dropbear) is chosen when you flash, not in `fleet.yml`. The flash
-command writes `management.ssh_enabled` into `provision.json` on the boot
-partition; first boot enables or disables dropbear from that field.
+SSH (dropbear) is chosen when you flash, not in `fleet.yml`. With no SSH
+flags, `management.ssh_enabled` is omitted from `provision.json` and first
+boot applies the role default (gate on, point off). With
+`--enable-ssh` or `--disable-ssh`, the flash command writes an explicit
+`management.ssh_enabled` value for first boot.
 
 | Flags | Result |
 |-------|--------|
-| (none) | Gate nodes: SSH on. Point nodes: SSH off. |
+| (none) | Omitted from JSON; gate on, point off at first boot. |
 | `--enable-ssh` | SSH on for any role. |
 | `--disable-ssh` | SSH off for any role (including gates). |
 
@@ -82,7 +84,7 @@ partition; first boot enables or disables dropbear from that field.
 Example — point node with SSH:
 
 ```bash
-easymanet flash --config fleet.yml --node manet02 --device /dev/sdb \
+easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
   --base-image ./openmanet.img.gz --enable-ssh --yes
 ```
 

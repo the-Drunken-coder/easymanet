@@ -17,6 +17,8 @@ from .platform import is_macos, is_linux
 DISK_WARN_THRESHOLD_GB = 128
 DISK_SUSPICIOUS_SIZE_GB = 256
 
+_SYS_MOUNT_POINTS = frozenset({"/", "/boot", "/boot/efi", "/home", "/var", "/usr"})
+
 
 class DiskInfo:
     def __init__(
@@ -399,35 +401,80 @@ def _linux_base_block_device(source: str) -> Optional[str]:
     return None
 
 
+def _linux_lsblk_pkname(device: str) -> Optional[str]:
+    try:
+        output = subprocess.check_output(
+            ["lsblk", "-no", "PKNAME", device],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).decode()
+        name = output.strip()
+        if name:
+            return f"/dev/{name}"
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return None
+
+
+def _linux_resolve_findmnt_source(source: str) -> Optional[str]:
+    device_path: Optional[str] = None
+    if source.startswith("UUID="):
+        uuid = source.split("=", 1)[1]
+        by_uuid = f"/dev/disk/by-uuid/{uuid}"
+        if os.path.exists(by_uuid):
+            device_path = os.path.realpath(by_uuid)
+    elif source.startswith("/dev/"):
+        device_path = os.path.realpath(source)
+    else:
+        return None
+
+    if not device_path:
+        return None
+
+    current = device_path
+    for _ in range(8):
+        base = _linux_base_block_device(current)
+        if base:
+            return base
+        parent = _linux_lsblk_pkname(current)
+        if not parent or parent == current:
+            break
+        current = parent
+    return None
+
+
 def _linux_root_block_devices() -> set:
-    related = set()
-    for mount_point in ("/", "/boot"):
+    related: set = set()
+    for mount_point in ("/", "/boot", "/boot/efi"):
         source = _findmnt_source(mount_point)
         if not source:
             continue
-        related.add(source)
-        base = _linux_base_block_device(source)
-        if base:
-            related.add(base)
-            related.update(_linux_partitions_for_device(base))
+        base = _linux_resolve_findmnt_source(source)
+        if not base:
+            continue
+        related.add(base)
+        related.update(_linux_partitions_for_device(base))
+        if source.startswith("/dev/"):
+            resolved = os.path.realpath(source)
+            if resolved.startswith("/dev/"):
+                related.add(resolved)
     return related
 
 
 def _check_linux_system_disk(dev_path: str, mounts: List[str]) -> bool:
+    if any(mp in _SYS_MOUNT_POINTS for mp in mounts):
+        return True
+
     root_related = _linux_root_block_devices()
-    if root_related:
-        if dev_path in root_related:
-            return True
-        if set(_linux_partitions_for_device(dev_path)) & root_related:
-            return True
-        for entry in root_related:
-            if _linux_base_block_device(entry) == dev_path:
-                return True
+    if not root_related:
         return False
 
-    sys_mounts = {"/", "/boot", "/home", "/var", "/usr"}
-    for mp in mounts:
-        if mp in sys_mounts:
+    if dev_path in root_related:
+        return True
+    if set(_linux_partitions_for_device(dev_path)) & root_related:
+        return True
+    for entry in root_related:
+        if _linux_base_block_device(entry) == dev_path:
             return True
     return False
 

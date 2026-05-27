@@ -73,6 +73,9 @@ def _root_device_partuuid_suffix(dev_path: str) -> Optional[str]:
     match = re.match(r"/dev/(?:mmcblk\d+)p(\d+)$", dev_path)
     if match:
         return f"-{int(match.group(1)):02d}"
+    match = re.match(r"/dev/(?:nvme\d+n\d+)p(\d+)$", dev_path)
+    if match:
+        return f"-{int(match.group(1)):02d}"
     match = re.match(r"/dev/[a-z]+(\d+)$", dev_path)
     if match:
         return f"-{int(match.group(1)):02d}"

@@ -95,10 +95,14 @@ jobs:
           REBUILD_BUILDER: ${{ inputs.rebuild_builder }}
         run: |
           set -euo pipefail
-          case "$OPENMANET_VERSION" in (*[!A-Za-z0-9._/-]*) echo "Invalid openmanet_version"; exit 1;; esac
-          case "$BOARD" in (*[!A-Za-z0-9._-]*) echo "Invalid board"; exit 1;; esac
-          case "$TARGET" in (*[!A-Za-z0-9._-]*) echo "Invalid target"; exit 1;; esac
-          case "$JOBS" in (*[!0-9]*) echo "Invalid jobs"; exit 1;; esac
+          case "$OPENMANET_VERSION" in (""|*[!A-Za-z0-9._/-]*) echo "Invalid openmanet_version"; exit 1;; esac
+          case "$BOARD" in (""|*[!A-Za-z0-9._-]*) echo "Invalid board"; exit 1;; esac
+          case "$TARGET" in (""|*[!A-Za-z0-9._-]*) echo "Invalid target"; exit 1;; esac
+          case "$JOBS" in (""|*[!0-9]*) echo "Invalid jobs"; exit 1;; esac
+          if [ "$JOBS" -lt 1 ]; then
+            echo "Invalid jobs"
+            exit 1
+          fi
           args=(
             image build
             --output-dir dist

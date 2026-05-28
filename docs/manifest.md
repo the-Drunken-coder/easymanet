@@ -200,7 +200,7 @@ Priority (highest to lowest):
 | Hostnames must be unique | Error |
 | IP addresses must be unique and valid | Error |
 | role must be gate or point | Error |
-|| target must be one of the supported targets (e.g., rpi4-mm6108-spi) | Error |
+| target must be one of the supported targets (e.g., rpi4-mm6108-spi) | Error |
 | local_ap.password min 8 chars when enabled | Error |
 | Selected node must exist in manifest | Error |
 | Invalid SSH key format | Error |

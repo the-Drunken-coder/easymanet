@@ -245,6 +245,16 @@ def test_defaults_local_ap_must_be_mapping():
     os.unlink(path)
 
 
+def test_defaults_local_ap_password_validated_when_inherited():
+    config = VALID_CONFIG.replace('password: "ap-password"', 'password: "short"', 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("local_ap.password must be at least 8 characters" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_defaults_gateway_must_be_mapping():
     config = VALID_CONFIG.replace(
         "defaults:\n  target: rpi4-mm6108-spi",

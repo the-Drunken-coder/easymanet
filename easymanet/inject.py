@@ -34,6 +34,8 @@ def inject(
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
 
+    mount_point: Optional[str] = None
+    mounted_here = False
     mount_point, mounted_here = _mount_boot_partition(device)
     try:
         boot_root = Path(mount_point)
@@ -202,12 +204,9 @@ def _find_boot_partition(device: str) -> Optional[str]:
                 for partition in entry.get("Partitions", []):
                     if partition.get("FilesystemType") in {"msdos", "vfat", "fat32"}:
                         return f"/dev/{partition.get('DeviceIdentifier', '')}"
-                partitions = entry.get("Partitions", [])
-                if partitions:
-                    return f"/dev/{partitions[0].get('DeviceIdentifier', '')}"
+            return None
         except Exception:
             return None
-        return None
 
     if is_linux():
         for suffix in ["1", "p1"]:

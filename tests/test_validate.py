@@ -173,11 +173,7 @@ def test_warning_no_ssh_keys():
 
 
 def test_warning_empty_root_password():
-    config = VALID_CONFIG.replace(
-        'root_password_hash: ""',
-        'root_password_hash: ""'
-    )
-    path = _write_config(config)
+    path = _write_config(VALID_CONFIG)
     m = load_manifest(path)
     result = validate(m)
     assert result.valid
@@ -246,6 +242,16 @@ def test_defaults_local_ap_must_be_mapping():
     result = validate(m)
     assert not result.valid
     assert any("defaults.local_ap must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_defaults_local_ap_password_validated_when_inherited():
+    config = VALID_CONFIG.replace('password: "ap-password"', 'password: "short"', 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("local_ap.password must be at least 8 characters" in e for e in result.errors)
     os.unlink(path)
 
 

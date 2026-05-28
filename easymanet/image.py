@@ -128,7 +128,7 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
     )
     assert gzip_proc.stdout is not None
     dd_proc = subprocess.Popen(
-        ["dd", f"of={device}", "bs=16m", "status=progress"],
+        ["dd", f"of={device}", "bs=16M", "status=progress"],
         stdin=gzip_proc.stdout,
     )
     gzip_proc.stdout.close()
@@ -202,7 +202,7 @@ def _write_raw_via_dd(image_path: str, device: str) -> None:
             "dd",
             f"if={image_path}",
             f"of={device}",
-            "bs=16m",
+            "bs=16M",
             "status=progress",
         ],
         check=True,

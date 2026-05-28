@@ -148,9 +148,12 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             else:
                 ips_seen[ip] = name
 
-        local_ap = node.get("local_ap", {})
-        if isinstance(local_ap, dict) and local_ap.get("enabled", True):
-            ap_password = local_ap.get("password", default_local_ap.get("password", ""))
+        node_local_ap = node.get("local_ap", {})
+        if not isinstance(node_local_ap, dict):
+            node_local_ap = {}
+        resolved_local_ap = {**default_local_ap, **node_local_ap}
+        if resolved_local_ap.get("enabled", False):
+            ap_password = resolved_local_ap.get("password", "")
             if ap_password and len(ap_password) < 8:
                 result.add_error(
                     f"Node '{name}': local_ap.password must be at least 8 characters"

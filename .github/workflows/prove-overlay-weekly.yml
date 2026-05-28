@@ -86,7 +86,7 @@ jobs:
             --jobs "$JOBS"
 
       - name: Save OpenMANET build cache
-        if: steps.openmanet-cache.outputs.cache-hit != 'true'
+        if: success() && steps.openmanet-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .openmanet-cache

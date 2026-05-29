@@ -4,6 +4,7 @@ import os
 import plistlib
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -13,6 +14,23 @@ from .platform import is_linux, is_macos
 from .render import render
 
 ROOT_BLOCK_DEVICE_PATTERN = re.compile(r"root=(/dev/[^\s]+)")
+
+_SUBPROCESS_ERRORS = (
+    subprocess.CalledProcessError,
+    subprocess.TimeoutExpired,
+    FileNotFoundError,
+)
+_BOOT_PARTITION_PARSE_ERRORS = (
+    *_SUBPROCESS_ERRORS,
+    OSError,
+    ValueError,
+    UnicodeDecodeError,
+    plistlib.InvalidFileException,
+)
+
+
+def _debug_note(message: str) -> None:
+    print(f"easymanet: {message}", file=sys.stderr)
 
 
 class InjectError(Exception):
@@ -205,7 +223,8 @@ def _find_boot_partition(device: str) -> Optional[str]:
                     if partition.get("FilesystemType") in {"msdos", "vfat", "fat32"}:
                         return f"/dev/{partition.get('DeviceIdentifier', '')}"
             return None
-        except Exception:
+        except _BOOT_PARTITION_PARSE_ERRORS as exc:
+            _debug_note(f"boot partition lookup failed for {device}: {exc}")
             return None
 
     if is_linux():
@@ -237,7 +256,8 @@ def _find_boot_mount(device: str) -> Optional[str]:
 def _find_mount_for_partition(partition: str) -> Optional[str]:
     try:
         output = subprocess.check_output(["mount"], timeout=5).decode()
-    except Exception:
+    except _BOOT_PARTITION_PARSE_ERRORS as exc:
+        _debug_note(f"mount output unavailable: {exc}")
         return None
 
     real_partition = os.path.realpath(partition)

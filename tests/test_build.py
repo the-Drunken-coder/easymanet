@@ -161,6 +161,10 @@ def test_overlay_dir_falls_back_to_installed_data(monkeypatch, tmp_path):
     assert build._overlay_dir() == installed / "openwrt-overlay"
 
 
+def test_read_extra_packages_missing_file_returns_empty():
+    assert build._read_extra_packages(Path("/nonexistent/extra-packages.txt")) == []
+
+
 def test_read_extra_packages_strips_comments_and_blanks(tmp_path):
     package_file = tmp_path / "extra-packages.txt"
     package_file.write_text("\n# comment\niperf3\n tcpdump  # diagnostic\n")

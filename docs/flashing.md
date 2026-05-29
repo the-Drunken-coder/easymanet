@@ -180,12 +180,13 @@ Secrets from `fleet.yml` (mesh password, Wi‑Fi passwords,
 `root_password_hash`, SSH public keys) are rendered into
 `/easymanet/provision.json` on the **unencrypted FAT boot partition**
 while you flash. Anyone with physical access to the card can read that
-file before first boot. After provisioning, a copy lives under
-`/etc/easymanet/provision.json` with mode `0600`, but the boot copy may
-remain on the FAT volume.
+file until successful first boot. After provisioning, a copy lives under
+`/etc/easymanet/provision.json` with mode `0600`, and `provision.sh`
+removes the boot-partition copy on success.
 
-Treat flashed SD cards and USB drives as sensitive. Re-flash or securely
-wipe media when decommissioning nodes.
+Treat flashed SD cards and USB drives as sensitive until the node has
+completed first-boot provisioning. Re-flash or securely wipe media when
+decommissioning nodes.
 
 ## Troubleshooting
 

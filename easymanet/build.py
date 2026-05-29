@@ -1,5 +1,6 @@
 """Docker-backed OpenMANET firmware builds."""
 
+import os
 import shlex
 import subprocess
 import sys
@@ -79,8 +80,6 @@ def build_image(
     builder_image: str = DEFAULT_BUILDER_IMAGE,
     cache_dir: Optional[str] = None,
 ) -> Path:
-    import os
-
     jobs = jobs or max(os.cpu_count() or 1, 1)
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -210,8 +209,6 @@ def _docker_run_command(
     cache_dir: Optional[Path] = None,
     extra_packages: Optional[list[str]] = None,
 ) -> list[str]:
-    import os
-
     uid = getattr(os, "getuid", lambda: 0)()
     gid = getattr(os, "getgid", lambda: 0)()
 

@@ -167,7 +167,12 @@ def _uci_get(uci_state: Path, key: str, env: dict) -> str:
     return result.stdout.strip()
 
 
-def _run_provision(prefix: Path, provision_data: dict, uci_state: Path) -> subprocess.CompletedProcess:
+def _run_provision(
+    prefix: Path,
+    provision_data: dict,
+    uci_state: Path,
+    extra_env: dict | None = None,
+) -> subprocess.CompletedProcess:
     boot_json = prefix / "boot" / "easymanet" / "provision.json"
     boot_json.parent.mkdir(parents=True, exist_ok=True)
     boot_json.write_text(json.dumps(provision_data, indent=2))
@@ -177,6 +182,8 @@ def _run_provision(prefix: Path, provision_data: dict, uci_state: Path) -> subpr
     env = _harness_env(uci_state)
     env["EASYMANET_PREFIX"] = str(prefix)
     env["EASYMANET_NETWORK_HELPERS"] = str(network_stub)
+    if extra_env:
+        env.update(extra_env)
 
     return subprocess.run(
         ["sh", str(PROVISION_SCRIPT)],
@@ -226,3 +233,36 @@ def test_provision_point_node_disables_ssh(tmp_path):
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
     assert "disabled" in dropbear_state
+
+
+def test_provision_removes_boot_json_after_success(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    boot_json = prefix / "boot" / "easymanet" / "provision.json"
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not boot_json.exists()
+
+    overlay_json = prefix / "etc" / "easymanet" / "provision.json"
+    assert overlay_json.exists()
+    assert (overlay_json.stat().st_mode & 0o777) == 0o600
+
+
+def test_em_mesh_encryption_override_propagates_to_uci(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(
+        prefix,
+        _gate_provision_json(),
+        uci_state,
+        extra_env={"EM_MESH_ENCRYPTION": "psk2"},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.mesh0.encryption", env) == "psk2"

@@ -17,6 +17,30 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 # shellcheck source=provision-lib.sh
 . "$SCRIPT_DIR/provision-lib.sh"
 
+# OpenMANET-coupled defaults — override via environment when upstream changes.
+: "${EM_MESH_BCF:=bcf_fgh100mhaamd.bin}"
+: "${EM_MESH_ENCRYPTION:=sae}"
+: "${EM_MESH_FWDING:=0}"
+: "${EM_LOCAL_AP_ENCRYPTION:=psk2}"
+: "${EM_WIFI_UPLINK_ENCRYPTION_DEFAULT:=psk2}"
+: "${EM_BATMAN_ROUTING_ALGO:=BATMAN_V}"
+: "${EM_MESH_NETMASK:=255.255.0.0}"
+: "${EM_LAN_FALLBACK_IP:=10.41.254.1}"
+: "${EM_LAN_NETMASK:=255.255.255.0}"
+: "${EM_UPLINK_DNS:=1.1.1.1 8.8.8.8}"
+: "${EM_MESH11SD_MESH_FWDING:=0}"
+: "${EM_MESH11SD_MAX_PEER_LINKS:=10}"
+: "${EM_MESH11SD_RSSI_THRESHOLD:=0}"
+: "${EM_MESH11SD_HWMP_ROOTMODE:=0}"
+: "${EM_MESH11SD_NOLEARN:=0}"
+: "${EM_MESH11SD_DYNAMIC_PEERING:=1}"
+: "${EM_MESH11SD_BEACON_LESS_MODE:=0}"
+: "${EM_MESH11SD_MBCA_CONFIG:=1}"
+: "${EM_MESH11SD_BEACON_TIMING_REPORT_INT:=10}"
+: "${EM_MESH11SD_MBSS_START_SCAN_MS:=2048}"
+: "${EM_MESH11SD_MBCA_MIN_BEACON_GAP_MS:=25}"
+: "${EM_MESH11SD_MBCA_TBTT_ADJ_INTERVAL_SEC:=60}"
+
 LOG_FILE="$(_prefix_path /var/log/easymanet.log)"
 PROVISIONED_FLAG="$(_prefix_path /etc/easymanet/provisioned)"
 PROVISION_DIR="$(_prefix_path /etc/easymanet)"
@@ -39,6 +63,21 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+wipe_boot_provision_json() {
+    if [ "$BOOT_MOUNTED_TMP" -eq 1 ]; then
+        return 0
+    fi
+    for candidate in \
+        "$(_prefix_path /boot/easymanet/provision.json)" \
+        "$(_prefix_path /boot/firmware/easymanet/provision.json)"
+    do
+        if [ -f "$candidate" ]; then
+            rm -f "$candidate"
+            echo "Removed boot payload: $candidate" >> "$LOG_FILE"
+        fi
+    done
+}
 
 uci_set() {
     uci set "$@" >> "$LOG_FILE" 2>&1
@@ -178,7 +217,7 @@ uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
 uci_set wireless."$MESH_RADIO".s1g_chanbw="$MESH_BW"
 uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true
 uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
-uci_set wireless."$MESH_RADIO".bcf="bcf_fgh100mhaamd.bin"
+uci_set wireless."$MESH_RADIO".bcf="$EM_MESH_BCF"
 uci_set wireless."$MESH_RADIO".disabled="0"
 
 uci_set wireless.mesh0=wifi-iface
@@ -187,9 +226,9 @@ uci_set wireless.mesh0.ifname="wlan0"
 uci_set wireless.mesh0.network="mesh"
 uci_set wireless.mesh0.mode="mesh"
 uci_set wireless.mesh0.mesh_id="$MESH_ID"
-uci_set wireless.mesh0.encryption="sae"
+uci_set wireless.mesh0.encryption="$EM_MESH_ENCRYPTION"
 uci_set wireless.mesh0.key="$MESH_PASSWORD"
-uci_set wireless.mesh0.mesh_fwding="0"
+uci_set wireless.mesh0.mesh_fwding="$EM_MESH_FWDING"
 
 if json_bool node local_ap enabled && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
@@ -205,7 +244,7 @@ if json_bool node local_ap enabled && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
         uci_set wireless.ap0.network="lan"
         uci_set wireless.ap0.mode="ap"
         uci_set wireless.ap0.ssid="$LOCAL_AP_SSID"
-        uci_set wireless.ap0.encryption="psk2"
+        uci_set wireless.ap0.encryption="$EM_LOCAL_AP_ENCRYPTION"
         uci_set wireless.ap0.key="$LOCAL_AP_PASSWORD"
     else
         echo "WARNING: local_ap enabled but no mac80211 wifi-device was found; skipping local AP" >> "$LOG_FILE"
@@ -217,7 +256,7 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     WIFI_UPLINK_PASSWORD="$(json_val node gateway wifi password)"
     WIFI_UPLINK_ENCRYPTION="$(json_val node gateway wifi encryption)"
     if [ -z "$WIFI_UPLINK_ENCRYPTION" ]; then
-        WIFI_UPLINK_ENCRYPTION="psk2"
+        WIFI_UPLINK_ENCRYPTION="$EM_WIFI_UPLINK_ENCRYPTION_DEFAULT"
     fi
     if [ -z "$WIFI_UPLINK_SSID" ] || [ -z "$WIFI_UPLINK_PASSWORD" ]; then
         echo "FATAL: gateway.wifi.enabled requires gateway.wifi.ssid and gateway.wifi.password" | tee -a "$LOG_FILE"
@@ -247,7 +286,7 @@ uci_commit wireless
 echo "Configuring network..." >> "$LOG_FILE"
 uci_set network.bat0=interface
 uci_set network.bat0.proto="batadv"
-uci_set network.bat0.routing_algo="BATMAN_V"
+uci_set network.bat0.routing_algo="$EM_BATMAN_ROUTING_ALGO"
 uci_set network.bat0.bridge_loop_avoidance="1"
 uci_set network.bat0.distributed_arp_table="1"
 uci_set network.bat0.multicast_mode="1"
@@ -263,7 +302,7 @@ uci_set network.meship=interface
 uci_set network.meship.proto="static"
 uci_set network.meship.device="bat0"
 uci_set network.meship.ipaddr="$NODE_IP"
-uci_set network.meship.netmask="255.255.0.0"
+uci_set network.meship.netmask="$EM_MESH_NETMASK"
 
 if ! uci -q get network.lan >/dev/null 2>&1; then
     uci_set network.lan=interface
@@ -271,9 +310,9 @@ fi
 uci_set network.lan.device="br-lan"
 uci_set network.lan.proto="static"
 if [ -z "$(uci -q get network.lan.ipaddr)" ]; then
-    uci_set network.lan.ipaddr="10.41.254.1"
+    uci_set network.lan.ipaddr="$EM_LAN_FALLBACK_IP"
 fi
-uci_set network.lan.netmask="255.255.255.0"
+uci_set network.lan.netmask="$EM_LAN_NETMASK"
 uci_commit network
 
 uci -q delete dhcp.mesh 2>/dev/null || true
@@ -298,22 +337,22 @@ uci_commit firewall
 uci_set mesh11sd.setup=mesh11sd
 uci_set mesh11sd.setup.enabled="1"
 uci_set mesh11sd.mesh_params=mesh11sd
-uci_set mesh11sd.mesh_params.mesh_fwding="0"
-uci_set mesh11sd.mesh_params.mesh_max_peer_links="10"
-uci_set mesh11sd.mesh_params.mesh_rssi_threshold="0"
-uci_set mesh11sd.mesh_params.mesh_hwmp_rootmode="0"
+uci_set mesh11sd.mesh_params.mesh_fwding="$EM_MESH11SD_MESH_FWDING"
+uci_set mesh11sd.mesh_params.mesh_max_peer_links="$EM_MESH11SD_MAX_PEER_LINKS"
+uci_set mesh11sd.mesh_params.mesh_rssi_threshold="$EM_MESH11SD_RSSI_THRESHOLD"
+uci_set mesh11sd.mesh_params.mesh_hwmp_rootmode="$EM_MESH11SD_HWMP_ROOTMODE"
 uci_set mesh11sd.mesh_params.mesh_gate_announcements="$MESH_GATE_ANNOUNCEMENTS"
-uci_set mesh11sd.mesh_params.mesh_nolearn="0"
+uci_set mesh11sd.mesh_params.mesh_nolearn="$EM_MESH11SD_NOLEARN"
 uci_set mesh11sd.mesh_dynamic_peering=mesh11sd
-uci_set mesh11sd.mesh_dynamic_peering.enabled="1"
+uci_set mesh11sd.mesh_dynamic_peering.enabled="$EM_MESH11SD_DYNAMIC_PEERING"
 uci_set mesh11sd.mesh_beaconless=mesh11sd
-uci_set mesh11sd.mesh_beaconless.mesh_beacon_less_mode="0"
+uci_set mesh11sd.mesh_beaconless.mesh_beacon_less_mode="$EM_MESH11SD_BEACON_LESS_MODE"
 uci_set mesh11sd.mbca=mesh11sd
-uci_set mesh11sd.mbca.mbca_config="1"
-uci_set mesh11sd.mbca.mesh_beacon_timing_report_int="10"
-uci_set mesh11sd.mbca.mbss_start_scan_duration_ms="2048"
-uci_set mesh11sd.mbca.mbca_min_beacon_gap_ms="25"
-uci_set mesh11sd.mbca.mbca_tbtt_adj_interval_sec="60"
+uci_set mesh11sd.mbca.mbca_config="$EM_MESH11SD_MBCA_CONFIG"
+uci_set mesh11sd.mbca.mesh_beacon_timing_report_int="$EM_MESH11SD_BEACON_TIMING_REPORT_INT"
+uci_set mesh11sd.mbca.mbss_start_scan_duration_ms="$EM_MESH11SD_MBSS_START_SCAN_MS"
+uci_set mesh11sd.mbca.mbca_min_beacon_gap_ms="$EM_MESH11SD_MBCA_MIN_BEACON_GAP_MS"
+uci_set mesh11sd.mbca.mbca_tbtt_adj_interval_sec="$EM_MESH11SD_MBCA_TBTT_ADJ_INTERVAL_SEC"
 uci_commit mesh11sd
 
 echo "Ensuring eth0 stays on br-lan for management..." >> "$LOG_FILE"
@@ -330,7 +369,7 @@ if [ "$NODE_ROLE" = "gate" ]; then
         uci_set network.wan.device="$UPLINK"
         uci_set network.wan.ifname="$UPLINK"
         uci_set network.wan.peerdns="0"
-        uci_set network.wan.dns="1.1.1.1 8.8.8.8"
+        uci_set network.wan.dns="$EM_UPLINK_DNS"
         uci_commit network
     fi
 fi
@@ -341,7 +380,7 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     uci -q delete network.wan.device 2>/dev/null || true
     uci -q delete network.wan.ifname 2>/dev/null || true
     uci_set network.wan.peerdns="0"
-    uci_set network.wan.dns="1.1.1.1 8.8.8.8"
+    uci_set network.wan.dns="$EM_UPLINK_DNS"
     uci -q delete network.wan6 2>/dev/null || true
     uci_commit network
 
@@ -405,6 +444,8 @@ echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
 echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"
 echo "ip: $NODE_IP" >> "$PROVISIONED_FLAG"
 echo "=== EasyMANET provisioning complete $(date) ===" >> "$LOG_FILE"
+
+wipe_boot_provision_json
 
 if [ -f "$BOOT_REPORT_SCRIPT" ]; then
     # shellcheck source=boot-report.sh

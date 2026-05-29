@@ -33,7 +33,7 @@ jobs:
         run: python -c "import easymanet; from easymanet.cli import app"
 
       - name: Run unit tests
-        run: pytest -q
+        run: pytest -q --cov=easymanet --cov-report=term-missing --cov-fail-under=50
 
       - name: Syntax-check overlay shell scripts
         run: find provisioning/openwrt-overlay -name '*.sh' -print0 | xargs -0 sh -n

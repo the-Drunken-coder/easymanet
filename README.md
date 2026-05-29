@@ -159,8 +159,10 @@ settle.
   (gate nodes default to SSH on; point nodes default to off). See
   [docs/flashing.md](docs/flashing.md).
 - **Boot-partition secrets:** `provision.json` on the FAT boot volume contains
-  fleet secrets in cleartext until first boot. Treat flashed media as sensitive.
-  See [docs/flashing.md](docs/flashing.md#security).
+  fleet secrets in cleartext until successful first boot, when `provision.sh`
+  removes the boot copy. The overlay copy at `/etc/easymanet/provision.json`
+  (mode `0600`) remains. Treat flashed media as sensitive until the node has
+  provisioned. See [docs/flashing.md](docs/flashing.md#security).
 
 Set `EASYMANET_SKIP_UPDATE_CHECK=1` to skip the optional GitHub release check
 on `flash` and `image build`.

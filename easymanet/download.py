@@ -18,6 +18,7 @@ Or pass --image-url to flash command.
 
 import json
 import os
+import sys
 import urllib.request
 import urllib.error
 import zlib
@@ -33,6 +34,19 @@ VERSION_FILE = Path.home() / ".easymanet" / "version.json"
 
 DEFAULT_EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
 DEFAULT_OPENMANET_GITHUB = "OpenMANET/firmware"
+
+_GITHUB_API_ERRORS = (
+    urllib.error.URLError,
+    json.JSONDecodeError,
+    OSError,
+    TimeoutError,
+    ValueError,
+)
+
+
+def _debug_note(message: str) -> None:
+    print(f"easymanet: {message}", file=sys.stderr)
+
 
 DEFAULT_IMAGES = {
     "rpi4-mm6108-spi": {
@@ -87,7 +101,8 @@ def _fetch_github_release(repo: str) -> Optional[dict]:
         api_url = f"https://api.github.com/repos/{repo}/releases/latest"
         with urllib.request.urlopen(api_url, timeout=15) as resp:
             return json.loads(resp.read().decode())
-    except Exception:
+    except _GITHUB_API_ERRORS as exc:
+        _debug_note(f"GitHub release lookup failed for {repo}: {exc}")
         return None
 
 
@@ -254,6 +269,6 @@ def check_easymanet_update() -> Optional[str]:
         latest = data.get("tag_name", "").lstrip("v")
         if latest and latest != __version__:
             return latest
-    except Exception:
-        pass
+    except _GITHUB_API_ERRORS as exc:
+        _debug_note(f"EasyMANET update check failed for {repo}: {exc}")
     return None

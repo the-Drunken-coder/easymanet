@@ -1,6 +1,7 @@
 """Tests for image validation before flashing."""
 
 import gzip
+import subprocess
 
 import pytest
 
@@ -8,6 +9,9 @@ from easymanet.image import (
     FlashError,
     _check_image,
     _clear_stale_overlay,
+    _write_gz_via_dd,
+    _write_raw_via_dd,
+    flash_image,
 )
 
 
@@ -145,6 +149,99 @@ def test_clear_stale_overlay_raises_when_no_partition_layout(monkeypatch, tmp_pa
 
     with pytest.raises(FlashError, match="stale OpenWrt overlay"):
         _clear_stale_overlay("/dev/disk4", 64)
+
+
+def _patch_flash_safety(monkeypatch, tmp_path):
+    device = tmp_path / "fake-disk"
+    device.write_bytes(b"\x00" * 65536)
+
+    monkeypatch.setattr("easymanet.image.assert_flash_allowed", lambda _d, force=False: None)
+    monkeypatch.setattr("easymanet.image.lookup_device", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", lambda _d: (8192, 4096))
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    return device
+
+
+def test_write_raw_via_dd_writes_payload(tmp_path):
+    device = tmp_path / "disk.img"
+    device.write_bytes(b"\x00" * 4096)
+    image = tmp_path / "firmware.img"
+    payload = b"EASYMANET-RAW-IMAGE" * 32
+    image.write_bytes(payload)
+
+    _write_raw_via_dd(str(image), str(device))
+
+    written = device.read_bytes()
+    assert written[: len(payload)] == payload
+
+
+def test_write_gz_via_dd_writes_decompressed_payload(tmp_path):
+    device = tmp_path / "disk.img"
+    device.write_bytes(b"\x00" * 4096)
+    image = tmp_path / "firmware.img.gz"
+    payload = b"EASYMANET-GZ-IMAGE" * 32
+    with gzip.open(image, "wb") as handle:
+        handle.write(payload)
+
+    _write_gz_via_dd(str(image), str(device))
+
+    written = device.read_bytes()
+    assert written[: len(payload)] == payload
+
+
+def test_flash_image_writes_raw_file(monkeypatch, tmp_path):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img"
+    payload = b"FLASH-RAW" * 128
+    image.write_bytes(payload)
+
+    flash_image(str(device), str(image), force=True, skip_overlay_wipe=True)
+
+    assert device.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_image_writes_gzip_file(monkeypatch, tmp_path):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img.gz"
+    payload = b"FLASH-GZ" * 128
+    with gzip.open(image, "wb") as handle:
+        handle.write(payload)
+
+    flash_image(str(device), str(image), force=True, skip_overlay_wipe=True)
+
+    assert device.read_bytes()[: len(payload)] == payload
+
+
+def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
+    device = tmp_path / "disk.img"
+    image = tmp_path / "firmware.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"payload")
+    with image.open("ab") as handle:
+        handle.write(b'{"metadata": "trailer"}')
+
+    import io
+
+    class FakeProc:
+        def __init__(self, returncode, stdout=None):
+            self.returncode = returncode
+            self.stdout = stdout
+
+        def wait(self):
+            return self.returncode
+
+    gzip_stdout = io.BytesIO(b"payload")
+    procs = [FakeProc(2, gzip_stdout), FakeProc(0)]
+
+    def fake_popen(cmd, **kwargs):
+        if cmd[0] == "gzip":
+            return procs[0]
+        return procs[1]
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    _write_gz_via_dd(str(image), str(device))
 
 
 def test_check_device_safety_requires_force_for_blocking_disk(monkeypatch):

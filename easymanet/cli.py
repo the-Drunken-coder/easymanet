@@ -39,6 +39,7 @@ from .build import (
     DEFAULT_TARGET,
 )
 from .privileges import check_privileges, PrivilegeError
+from .format import human_size
 
 
 app = typer.Typer(
@@ -243,6 +244,11 @@ def flash(
     no_eject: bool = typer.Option(
         False, "--no-eject", help="Do not eject disk after flashing"
     ),
+    skip_overlay_wipe: bool = typer.Option(
+        False,
+        "--skip-overlay-wipe",
+        help="Skip wiping stale OpenWrt overlay data after writing the image (not recommended)",
+    ),
     enable_ssh: bool = typer.Option(
         False,
         "--enable-ssh",
@@ -356,7 +362,12 @@ def flash(
 
     if not inject_only:
         try:
-            flash_image(device=device, image_path=image_path, force=force)
+            flash_image(
+                device=device,
+                image_path=image_path,
+                force=force,
+                skip_overlay_wipe=skip_overlay_wipe,
+            )
         except FlashError as e:
             typer.secho(f"Flash error: {e}", fg=typer.colors.RED)
             raise typer.Exit(1)
@@ -512,7 +523,7 @@ def image_cmd(
         typer.echo(f"  Desc:    {info.get('description', '')}")
     if cached:
         size = cached.stat().st_size
-        typer.echo(f"  Cached:  {cached} ({_human_size(size)})")
+        typer.echo(f"  Cached:  {cached} ({human_size(size)})")
     else:
         typer.echo("  Cached:  none")
 
@@ -596,17 +607,6 @@ def image_build_cmd(
 
     typer.secho("Build complete.", fg=typer.colors.GREEN)
     typer.echo(f"  Image: {artifact}")
-
-
-def _human_size(n: int) -> str:
-    if n < 1024:
-        return f"{n} B"
-    elif n < 1024**2:
-        return f"{n/1024:.1f} KB"
-    elif n < 1024**3:
-        return f"{n/1024**2:.1f} MB"
-    else:
-        return f"{n/1024**3:.1f} GB"
 
 
 def main():

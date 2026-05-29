@@ -1,0 +1,228 @@
+"""Behavior tests for first-boot provisioning shell scripts."""
+
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+OVERLAY = ROOT / "provisioning" / "openwrt-overlay"
+PROVISION_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "provision-lib.sh"
+PROVISION_SCRIPT = OVERLAY / "usr" / "lib" / "easymanet" / "provision.sh"
+HARNESS = Path(__file__).resolve().parent / "shell_harness"
+
+
+def _harness_env(uci_state: Path, extra: dict | None = None) -> dict:
+    env = os.environ.copy()
+    env["PATH"] = f"{HARNESS}:{env.get('PATH', '')}"
+    env["UCI_STATE_FILE"] = str(uci_state)
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _seed_wireless_radios(uci_state: Path) -> None:
+    lines = [
+        "wireless.radio2.type='morse'",
+        "wireless.radio0.type='mac80211'",
+        "wireless.radio3.type='mac80211'",
+        "wireless.radio3.path='platform/soc/fe300000.mmcnr/mmc_host/mmc1/mmc1:0001/mmc1:0001:1'",
+        "wireless.radio3.band='2g'",
+    ]
+    uci_state.write_text("\n".join(lines) + "\n")
+
+
+def _run_sh(script_body: str, env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["sh", "-c", script_body],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_find_morse_radio_prefers_morse_type(tmp_path):
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    env = _harness_env(uci_state)
+    result = _run_sh(
+        f'. "{PROVISION_LIB}"; find_morse_radio',
+        env,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "radio2"
+
+
+def test_find_local_ap_radio_prefers_mmc_mac80211(tmp_path):
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    env = _harness_env(uci_state)
+    result = _run_sh(
+        f'. "{PROVISION_LIB}"; find_local_ap_radio',
+        env,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "radio3"
+
+
+def test_json_bool(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(
+        json.dumps(
+            {
+                "management": {"ssh_enabled": True},
+                "node": {"gateway": {"wifi": {"enabled": False}}},
+            }
+        )
+    )
+    env = _harness_env(tmp_path / "uci-unused")
+    env["PROVISION_JSON"] = str(provision_json)
+    script = f'''
+. "{PROVISION_LIB}"
+if json_bool management ssh_enabled; then echo ssh_on; else echo ssh_off; fi
+if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; fi
+'''
+    result = _run_sh(script, env)
+    assert result.returncode == 0
+    assert "ssh_on" in result.stdout
+    assert "wifi_off" in result.stdout
+
+
+def _gate_provision_json() -> dict:
+    return {
+        "version": 1,
+        "mesh": {
+            "id": "test-mesh",
+            "password": "mesh-password-123",
+            "channel": 42,
+            "bandwidth_mhz": 2,
+            "country": "US",
+        },
+        "node": {
+            "name": "gate01",
+            "hostname": "gate01",
+            "role": "gate",
+            "target": "rpi4-mm6108-spi",
+            "ip": "10.41.1.1",
+            "local_ap": {"enabled": False},
+            "gateway": {"enabled": True, "uplink_interface": "eth0"},
+        },
+        "management": {
+            "root_password_hash": "",
+            "ssh_authorized_keys": [],
+            "ssh_enabled": True,
+        },
+    }
+
+
+def _point_provision_json() -> dict:
+    data = _gate_provision_json()
+    data["node"] = {
+        "name": "point01",
+        "hostname": "point01",
+        "role": "point",
+        "target": "rpi4-mm6108-spi",
+        "ip": "10.41.2.1",
+        "local_ap": {"enabled": False},
+        "gateway": {"enabled": False},
+    }
+    data["management"] = {
+        "root_password_hash": "",
+        "ssh_authorized_keys": [],
+        "ssh_enabled": False,
+    }
+    return data
+
+
+def _write_dropbear_stub(prefix: Path) -> None:
+    init_dir = prefix / "etc" / "init.d"
+    init_dir.mkdir(parents=True, exist_ok=True)
+    state_file = prefix / "var" / "dropbear-state"
+    stub = init_dir / "dropbear"
+    stub.write_text(
+        f"""#!/bin/sh
+state_file="{state_file}"
+case "$1" in
+  enable) echo enabled >> "$state_file" ;;
+  disable) echo disabled >> "$state_file" ;;
+  stop) echo stopped >> "$state_file" ;;
+esac
+"""
+    )
+    stub.chmod(0o755)
+
+
+def _uci_get(uci_state: Path, key: str, env: dict) -> str:
+    result = subprocess.run(
+        ["uci", "-q", "get", key],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip()
+
+
+def _run_provision(prefix: Path, provision_data: dict, uci_state: Path) -> subprocess.CompletedProcess:
+    boot_json = prefix / "boot" / "easymanet" / "provision.json"
+    boot_json.parent.mkdir(parents=True, exist_ok=True)
+    boot_json.write_text(json.dumps(provision_data, indent=2))
+
+    _write_dropbear_stub(prefix)
+    network_stub = HARNESS / "network-stub.sh"
+    env = _harness_env(uci_state)
+    env["EASYMANET_PREFIX"] = str(prefix)
+    env["EASYMANET_NETWORK_HELPERS"] = str(network_stub)
+
+    return subprocess.run(
+        ["sh", str(PROVISION_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def test_provision_gate_node_smoke(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.mesh0.device", env) == "radio2"
+    assert _uci_get(uci_state, "wireless.mesh0.mesh_id", env) == "test-mesh"
+    assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "server"
+    assert _uci_get(uci_state, "network.meship.ipaddr", env) == "10.41.1.1"
+    assert _uci_get(uci_state, "mesh11sd.mesh_params.mesh_gate_announcements", env) == "1"
+
+    dropbear_state = (prefix / "var" / "dropbear-state").read_text()
+    assert "enabled" in dropbear_state
+
+    provisioned = (prefix / "etc" / "easymanet" / "provisioned").read_text()
+    assert "hostname: gate01" in provisioned
+    assert "role: gate" in provisioned
+
+
+def test_provision_point_node_disables_ssh(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "client"
+    assert _uci_get(uci_state, "network.meship.ipaddr", env) == "10.41.2.1"
+    assert _uci_get(uci_state, "mesh11sd.mesh_params.mesh_gate_announcements", env) == "0"
+
+    dropbear_state = (prefix / "var" / "dropbear-state").read_text()
+    assert "disabled" in dropbear_state

@@ -4,21 +4,21 @@
 EASYMANET_NETWORK_LOG="${EASYMANET_NETWORK_LOG:-/var/log/easymanet-network.log}"
 EASYMANET_PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+# shellcheck source=provision-lib.sh
+. "$SCRIPT_DIR/provision-lib.sh"
+PROVISION_JSON="$EASYMANET_PROVISION_JSON"
+
 easymanet_log_network() {
     echo "[$(date)] $*" >> "$EASYMANET_NETWORK_LOG"
 }
 
 easymanet_json_path() {
-    path="@"
-    for key in "$@"; do
-        path="${path}.${key}"
-    done
-    printf '%s' "$path"
+    json_path "$@"
 }
 
 easymanet_json_val() {
-    [ -s "$EASYMANET_PROVISION_JSON" ] || return 0
-    jsonfilter -i "$EASYMANET_PROVISION_JSON" -e "$(easymanet_json_path "$@")" 2>/dev/null || true
+    json_val "$@"
 }
 
 easymanet_find_lan_bridge_section() {

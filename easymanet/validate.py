@@ -17,7 +17,11 @@ VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 
 SSH_KEY_PATTERN = re.compile(
-    r"^(ssh-(?:ed25519|rsa|ecdsa|dss)\s+[A-Za-z0-9+/]+={0,2}(\s+\S+)?)$"
+    r"^(?:"
+    r"ssh-(?:ed25519|rsa|ecdsa|dss)|"
+    r"ecdsa-sha2-nistp(?:256|384|521)|"
+    r"sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com"
+    r")\s+[A-Za-z0-9+/]+={0,2}(?:\s+.+)?$"
 )
 
 
@@ -154,7 +158,11 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         resolved_local_ap = {**default_local_ap, **node_local_ap}
         if resolved_local_ap.get("enabled", False):
             ap_password = resolved_local_ap.get("password", "")
-            if ap_password and len(ap_password) < 8:
+            if not ap_password:
+                result.add_error(
+                    f"Node '{name}': local_ap.enabled requires local_ap.password"
+                )
+            elif len(ap_password) < 8:
                 result.add_error(
                     f"Node '{name}': local_ap.password must be at least 8 characters"
                 )
@@ -197,7 +205,11 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             resolved = resolve_node(manifest, node_name)
             if isinstance(resolved.get("local_ap"), dict) and resolved["local_ap"].get("enabled"):
                 pw = resolved["local_ap"].get("password", "")
-                if pw and len(pw) < 8:
+                if not pw:
+                    result.add_error(
+                        f"Node '{node_name}': resolved local_ap.enabled requires local_ap.password"
+                    )
+                elif len(pw) < 8:
                     result.add_error(
                         f"Node '{node_name}': resolved local_ap.password must be at least 8 characters"
                     )

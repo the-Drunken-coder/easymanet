@@ -17,6 +17,7 @@ Or pass --image-url to flash command.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 import zlib
@@ -24,12 +25,13 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from . import __version__
+from .format import human_size
 
 CACHE_DIR = Path.home() / ".easymanet" / "images"
 IMAGES_MANIFEST = Path.home() / ".easymanet" / "images.json"
 VERSION_FILE = Path.home() / ".easymanet" / "version.json"
 
-EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
+DEFAULT_EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
 DEFAULT_OPENMANET_GITHUB = "OpenMANET/firmware"
 
 DEFAULT_IMAGES = {
@@ -167,7 +169,7 @@ def download_image(
                         pct = int(downloaded / total * 100)
                         print(
                             f"\r  Progress: {pct}% "
-                            f"({_human_size(downloaded)}/{_human_size(total)})",
+                            f"({human_size(downloaded)}/{human_size(total)})",
                             end="",
                             flush=True,
                         )
@@ -237,20 +239,16 @@ def _save_version(target: str, version: str) -> None:
     VERSION_FILE.write_text(json.dumps(data, indent=2))
 
 
-def _human_size(n: int) -> str:
-    if n < 1024:
-        return f"{n} B"
-    elif n < 1024**2:
-        return f"{n/1024:.1f} KB"
-    elif n < 1024**3:
-        return f"{n/1024**2:.1f} MB"
-    else:
-        return f"{n/1024**3:.1f} GB"
+def easymanet_update_repo() -> str:
+    return os.environ.get("EASYMANET_UPDATE_REPO", DEFAULT_EASYMANET_GITHUB_REPO).strip()
 
 
 def check_easymanet_update() -> Optional[str]:
+    repo = easymanet_update_repo()
+    if not repo:
+        return None
     try:
-        url = f"https://api.github.com/repos/{EASYMANET_GITHUB_REPO}/releases/latest"
+        url = f"https://api.github.com/repos/{repo}/releases/latest"
         with urllib.request.urlopen(url, timeout=10) as resp:
             data = json.loads(resp.read().decode())
         latest = data.get("tag_name", "").lstrip("v")

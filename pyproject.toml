@@ -69,6 +69,7 @@ include = ["easymanet*"]
 "share/easymanet/provisioning/openwrt-overlay/usr/lib/easymanet" = [
     "provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
     "provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
+    "provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
     "provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
 ]
 

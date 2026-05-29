@@ -7,16 +7,27 @@
 
 set -eu
 
-LOG_FILE="/var/log/easymanet.log"
-PROVISIONED_FLAG="/etc/easymanet/provisioned"
-PROVISION_DIR="/etc/easymanet"
+: "${EASYMANET_PREFIX:=}"
+
+_prefix_path() {
+    printf '%s%s' "$EASYMANET_PREFIX" "$1"
+}
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+# shellcheck source=provision-lib.sh
+. "$SCRIPT_DIR/provision-lib.sh"
+
+LOG_FILE="$(_prefix_path /var/log/easymanet.log)"
+PROVISIONED_FLAG="$(_prefix_path /etc/easymanet/provisioned)"
+PROVISION_DIR="$(_prefix_path /etc/easymanet)"
 PROVISION_JSON="$PROVISION_DIR/provision.json"
-BOOT_REPORT_SCRIPT="/usr/lib/easymanet/boot-report.sh"
-NETWORK_HELPERS="/usr/lib/easymanet/network.sh"
-BOOT_MOUNT_TMP="/tmp/easymanet-boot"
+BOOT_REPORT_SCRIPT="$(_prefix_path /usr/lib/easymanet/boot-report.sh)"
+NETWORK_HELPERS="${EASYMANET_NETWORK_HELPERS:-$(_prefix_path /usr/lib/easymanet/network.sh)}"
+BOOT_MOUNT_TMP="$(_prefix_path /tmp/easymanet-boot)"
 BOOT_JSON=""
 BOOT_MOUNTED_TMP=0
 
+mkdir -p "$(dirname "$LOG_FILE")"
 exec 2>>"$LOG_FILE"
 echo "=== EasyMANET provisioning started $(date) ===" >> "$LOG_FILE"
 
@@ -29,25 +40,6 @@ cleanup() {
 
 trap cleanup EXIT
 
-json_path() {
-    path="@"
-    for key in "$@"; do
-        path="${path}.${key}"
-    done
-    printf '%s' "$path"
-}
-
-json_val() {
-    jsonfilter -i "$PROVISION_JSON" -e "$(json_path "$@")" 2>/dev/null || true
-}
-
-json_bool() {
-    case "$(json_val "$@")" in
-        1|true|TRUE|yes|YES) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 uci_set() {
     uci set "$@" >> "$LOG_FILE" 2>&1
 }
@@ -56,58 +48,20 @@ uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
 }
 
-find_morse_radio() {
-    radio="$(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='morse'$/\1/p" | head -n 1)"
-    if [ -n "$radio" ]; then
-        printf '%s' "$radio"
-        return 0
-    fi
-
-    uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.hwmode='11ah'$/\1/p" | head -n 1
-}
-
-find_local_ap_radio() {
-    for radio in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p"); do
-        path="$(uci -q get wireless."$radio".path || true)"
-        band="$(uci -q get wireless."$radio".band || true)"
-        case "$path" in
-            *mmc_host*|*mmc1*)
-                if [ "$band" = "2g" ] || [ "$band" = "5g" ]; then
-                    printf '%s' "$radio"
-                    return 0
-                fi
-                ;;
-        esac
-    done
-
-    for radio in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p"); do
-        band="$(uci -q get wireless."$radio".band || true)"
-        if [ "$band" = "2g" ]; then
-            printf '%s' "$radio"
-            return 0
-        fi
-    done
-
-    uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='mac80211'$/\1/p" | head -n 1
-}
-
-delete_ifaces_for_radio() {
-    radio="$1"
-    for iface in $(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.device='$radio'$/\1/p"); do
-        uci -q delete wireless."$iface"
-    done
-}
-
 find_boot_json() {
     for candidate in \
-        /boot/easymanet/provision.json \
-        /boot/firmware/easymanet/provision.json
+        "$(_prefix_path /boot/easymanet/provision.json)" \
+        "$(_prefix_path /boot/firmware/easymanet/provision.json)"
     do
         if [ -s "$candidate" ]; then
             BOOT_JSON="$candidate"
             return 0
         fi
     done
+
+    if [ -n "$EASYMANET_PREFIX" ]; then
+        return 1
+    fi
 
     mkdir -p "$BOOT_MOUNT_TMP"
     for dev in /dev/mmcblk0p1 /dev/sda1 /dev/nvme0n1p1; do
@@ -181,29 +135,34 @@ echo "Setting hostname to $HOSTNAME..." >> "$LOG_FILE"
 uci_set system.@system[0].hostname="$HOSTNAME"
 uci_set system.@system[0].timezone="UTC"
 uci_commit system
-echo "$HOSTNAME" > /proc/sys/kernel/hostname 2>/dev/null || true
+echo "$HOSTNAME" > "$(_prefix_path /proc/sys/kernel/hostname)" 2>/dev/null || true
 
-if command -v dropbear >/dev/null 2>&1; then
-    mkdir -p /etc/dropbear
+if command -v dropbear >/dev/null 2>&1 || [ -x "$(_prefix_path /etc/init.d/dropbear)" ]; then
+    mkdir -p "$(_prefix_path /etc/dropbear)"
 fi
 
 ROOT_PW_HASH="$(json_val management root_password_hash 2>/dev/null || true)"
 if [ -n "$ROOT_PW_HASH" ]; then
     echo "Setting root password hash..." >> "$LOG_FILE"
-    if ! sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" /etc/shadow; then
+    shadow_path="$(_prefix_path /etc/shadow)"
+    if [ ! -f "$shadow_path" ]; then
+        printf 'root::0:0:99999:7:::\n' > "$shadow_path"
+    fi
+    if ! sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" "$shadow_path"; then
         echo "FATAL: failed to set root password hash in /etc/shadow" | tee -a "$LOG_FILE"
         exit 1
     fi
 fi
 
 if jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys' >/dev/null 2>&1; then
-    : > /etc/dropbear/authorized_keys
+    auth_keys="$(_prefix_path /etc/dropbear/authorized_keys)"
+    : > "$auth_keys"
     jsonfilter -i "$PROVISION_JSON" -e '@.management.ssh_authorized_keys[*]' | while IFS= read -r key; do
         [ -z "$key" ] && continue
-        echo "$key" >> /etc/dropbear/authorized_keys
+        echo "$key" >> "$auth_keys"
     done
-    chmod 0600 /etc/dropbear/authorized_keys
-    chown root /etc/dropbear/authorized_keys
+    chmod 0600 "$auth_keys"
+    chown root "$auth_keys" 2>/dev/null || true
 fi
 
 echo "Configuring mesh wireless..." >> "$LOG_FILE"
@@ -359,7 +318,7 @@ uci_commit mesh11sd
 
 echo "Ensuring eth0 stays on br-lan for management..." >> "$LOG_FILE"
 if [ -f "$NETWORK_HELPERS" ]; then
-    EASYMANET_NETWORK_LOG="$LOG_FILE" . "$NETWORK_HELPERS"
+    EASYMANET_NETWORK_LOG="$LOG_FILE" EASYMANET_PROVISION_JSON="$PROVISION_JSON" . "$NETWORK_HELPERS"
     easymanet_repair_management_lan firstboot
 fi
 
@@ -398,19 +357,21 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
     uci_commit firewall
 fi
 
-if [ -x /etc/init.d/dropbear ]; then
+dropbear_init="$(_prefix_path /etc/init.d/dropbear)"
+if [ -x "$dropbear_init" ]; then
     if [ "$SSH_ENABLED" -eq 1 ]; then
         echo "Enabling SSH (dropbear)..." >> "$LOG_FILE"
-        /etc/init.d/dropbear enable 2>/dev/null || true
+        "$dropbear_init" enable 2>/dev/null || true
     else
         echo "Disabling SSH (dropbear) for this node..." >> "$LOG_FILE"
-        /etc/init.d/dropbear stop 2>/dev/null || true
-        /etc/init.d/dropbear disable 2>/dev/null || true
+        "$dropbear_init" stop 2>/dev/null || true
+        "$dropbear_init" disable 2>/dev/null || true
     fi
 fi
 
-if [ -f /etc/openmanetd/config.yml ]; then
-    cat > /etc/openmanetd/config.yml <<EOF
+openmanetd_config="$(_prefix_path /etc/openmanetd/config.yml)"
+if [ -f "$openmanetd_config" ]; then
+    cat > "$openmanetd_config" <<EOF
 mesh:
   id: "${MESH_ID}"
   password: "${MESH_PASSWORD}"
@@ -425,22 +386,28 @@ node:
 EOF
 fi
 
-/etc/init.d/network enable 2>/dev/null || true
-if [ -f /etc/init.d/mesh11sd ]; then
-    /etc/init.d/mesh11sd enable 2>/dev/null || true
+network_init="$(_prefix_path /etc/init.d/network)"
+if [ -x "$network_init" ]; then
+    "$network_init" enable 2>/dev/null || true
+    "$network_init" restart 2>/dev/null || true
 fi
-/etc/init.d/network restart 2>/dev/null || true
-if [ -f /etc/init.d/openmanetd ]; then
-    /etc/init.d/openmanetd enable 2>/dev/null || true
+mesh11sd_init="$(_prefix_path /etc/init.d/mesh11sd)"
+if [ -x "$mesh11sd_init" ]; then
+    "$mesh11sd_init" enable 2>/dev/null || true
+fi
+openmanetd_init="$(_prefix_path /etc/init.d/openmanetd)"
+if [ -x "$openmanetd_init" ]; then
+    "$openmanetd_init" enable 2>/dev/null || true
 fi
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PROVISIONED_FLAG"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" > "$PROVISIONED_FLAG"
 echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
 echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"
 echo "ip: $NODE_IP" >> "$PROVISIONED_FLAG"
 echo "=== EasyMANET provisioning complete $(date) ===" >> "$LOG_FILE"
 
 if [ -f "$BOOT_REPORT_SCRIPT" ]; then
+    # shellcheck source=boot-report.sh
     . "$BOOT_REPORT_SCRIPT"
     write_easymanet_boot_report provisioned || true
 fi

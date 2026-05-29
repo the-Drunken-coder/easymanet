@@ -255,6 +255,28 @@ def test_defaults_local_ap_password_validated_when_inherited():
     os.unlink(path)
 
 
+def test_local_ap_enabled_requires_password():
+    config = VALID_CONFIG.replace('password: "ap-password"', "", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("local_ap.enabled requires local_ap.password" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_validate_ssh_key_accepts_sk_and_ecdsa_types():
+    from easymanet.validate import validate_ssh_key
+
+    assert validate_ssh_key(
+        "sk-ssh-ed25519@openssh.com AAAAC3NzaC1lZDI1NTE5AAAAIComment"
+    ) is None
+    assert validate_ssh_key(
+        "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTIybnRzdDI1NgIComment with spaces"
+    ) is None
+    assert validate_ssh_key("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIkm8 key comment") is None
+
+
 def test_defaults_gateway_must_be_mapping():
     config = VALID_CONFIG.replace(
         "defaults:\n  target: rpi4-mm6108-spi",

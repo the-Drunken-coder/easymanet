@@ -1,14 +1,14 @@
 """Image flashing — write OpenMANET images to SD cards/USB drives.
 
-Handles .img and .img.gz, streaming decompression, progress display,
-verify/sync, and clean unmount/eject.
+Handles .img and .img.gz, streaming decompression, verify/sync,
+and clean unmount/eject.
 """
 
 import os
 import subprocess
 import zlib
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional, Tuple
 
 from .disks import (
     assert_flash_allowed,
@@ -17,6 +17,7 @@ from .disks import (
     unmount_disk,
     eject_disk,
 )
+from .platform import is_linux, is_macos
 
 
 class FlashError(Exception):
@@ -28,28 +29,6 @@ def _check_device_safety(device: str, force: bool = False) -> None:
         assert_flash_allowed(device, force=force)
     except ValueError as e:
         raise FlashError(str(e)) from e
-
-
-def _check_image(image_path: str) -> Path:
-    p = Path(image_path)
-    if not p.exists():
-        raise FlashError(f"Base image not found: {image_path}")
-    suffix = p.suffix.lower()
-    if suffix == ".gz":
-        if p.stem.lower().endswith(".img"):
-            _check_gzip_integrity(p)
-            return p
-        raise FlashError(f"Expected .img.gz file, got: {image_path}")
-    if suffix == ".img":
-        return p
-    raise FlashError(f"Unsupported image format: {image_path}. Expected .img or .img.gz")
-
-
-def _check_gzip_integrity(image_path: Path) -> None:
-    try:
-        _check_gzip_payload(image_path)
-    except (OSError, zlib.error) as e:
-        raise FlashError(f"Invalid gzip-compressed image {image_path}: {e}") from e
 
 
 def _gzip_decompressed_bytes(image_path: Path) -> int:
@@ -67,10 +46,50 @@ def _gzip_decompressed_bytes(image_path: Path) -> int:
     return total
 
 
-def _check_gzip_payload(image_path: Path) -> None:
+def _check_gzip_payload(image_path: Path) -> int:
     total = _gzip_decompressed_bytes(image_path)
     if total == 0:
         raise zlib.error("compressed image did not contain a disk image payload")
+    return total
+
+
+def _check_image(image_path: str) -> Tuple[Path, Optional[int]]:
+    """Return (image path, decompressed byte count for .img.gz else None)."""
+    p = Path(image_path)
+    if not p.exists():
+        raise FlashError(f"Base image not found: {image_path}")
+    suffix = p.suffix.lower()
+    if suffix == ".gz":
+        if p.stem.lower().endswith(".img"):
+            try:
+                written_bytes = _check_gzip_payload(p)
+            except (OSError, zlib.error) as e:
+                raise FlashError(f"Invalid gzip-compressed image {image_path}: {e}") from e
+            return p, written_bytes
+        raise FlashError(f"Expected .img.gz file, got: {image_path}")
+    if suffix == ".img":
+        return p, None
+    raise FlashError(f"Unsupported image format: {image_path}. Expected .img or .img.gz")
+
+
+def _reread_partition_table(device: str) -> None:
+    if is_linux():
+        subprocess.run(
+            ["blockdev", "--rereadpt", device],
+            capture_output=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["partprobe", device],
+            capture_output=True,
+            timeout=30,
+        )
+    elif is_macos():
+        subprocess.run(
+            ["diskutil", "list", device],
+            capture_output=True,
+            timeout=30,
+        )
 
 
 def flash_image(
@@ -78,11 +97,9 @@ def flash_image(
     image_path: str,
     dry_run: bool = False,
     force: bool = False,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
     skip_overlay_wipe: bool = False,
 ) -> None:
-    del progress_callback
-    image = _check_image(image_path)
+    image, gzip_written_bytes = _check_image(image_path)
     _check_device_safety(device, force=force)
 
     if dry_run:
@@ -113,10 +130,13 @@ def flash_image(
         print("Done writing.")
 
         if not skip_overlay_wipe:
-            _clear_stale_overlay(device, image)
+            written_bytes = gzip_written_bytes if gzip_written_bytes is not None else image.stat().st_size
+            _clear_stale_overlay(device, written_bytes)
 
     except subprocess.CalledProcessError as e:
         raise FlashError(f"Flash failed: {e}") from e
+    except FlashError:
+        raise
     except Exception as e:
         raise FlashError(f"Flash failed: {e}") from e
 
@@ -151,24 +171,19 @@ def _ceil_div(numerator: int, denominator: int) -> int:
     return (numerator + denominator - 1) // denominator
 
 
-def _written_image_bytes(image: Path) -> int:
-    if image.suffix.lower() == ".gz":
-        return _gzip_decompressed_bytes(image)
-    return image.stat().st_size
-
-
-def _clear_stale_overlay(device: str, image: Path) -> None:
+def _clear_stale_overlay(device: str, written_bytes: int) -> None:
+    _reread_partition_table(device)
     wipe_range = get_partition2_wipe_range(device)
     if not wipe_range:
-        print(
-            "Warning: Could not determine partition 2 layout; "
-            "skipping stale overlay wipe."
+        raise FlashError(
+            f"Image was written to {device}, but the stale OpenWrt overlay area "
+            f"could not be wiped (partition layout unknown).\n"
+            f"Re-flash with a known-good image, manually zero partition 2, or re-run with "
+            f"--skip-overlay-wipe only if you accept stale config on the drive."
         )
-        return
 
     tail_start, wipe_bytes = wipe_range
-    written_end = _written_image_bytes(image)
-    start_bytes = max(tail_start, written_end)
+    start_bytes = max(tail_start, written_bytes)
     wipe_bytes = wipe_bytes - (start_bytes - tail_start)
     if wipe_bytes <= 0:
         print("Skipping stale overlay wipe; image covers the wipe region.")

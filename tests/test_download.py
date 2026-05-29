@@ -112,11 +112,31 @@ def test_pick_release_asset_uses_fuzzy_match_when_exact_name_missing(capsys):
     assert "Using release asset" in capsys.readouterr().out
 
 
-def test_check_easymanet_update_uses_configured_repo(monkeypatch):
+def test_check_easymanet_update_respects_env_repo(monkeypatch):
+    payload = json.dumps({"tag_name": "v9.9.9"}).encode()
+    monkeypatch.setenv("EASYMANET_UPDATE_REPO", "org/custom-easymanet")
+
+    def fake_urlopen(url, timeout=10):
+        assert "org/custom-easymanet" in url
+        class Resp:
+            def read(self):
+                return payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+        return Resp()
+
+    monkeypatch.setattr(download, "__version__", "0.1.0")
+    monkeypatch.setattr(download.urllib.request, "urlopen", fake_urlopen)
+    assert download.check_easymanet_update() == "9.9.9"
+
+
+def test_check_easymanet_update_uses_default_repo(monkeypatch):
     payload = json.dumps({"tag_name": "v9.9.9"}).encode()
 
     def fake_urlopen(url, timeout=10):
-        assert download.EASYMANET_GITHUB_REPO in url
+        assert download.easymanet_update_repo() in url
         class Resp:
             def read(self):
                 return payload

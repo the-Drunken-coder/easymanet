@@ -154,6 +154,9 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
 
         node_local_ap = node.get("local_ap", {})
         if not isinstance(node_local_ap, dict):
+            result.add_error(
+                f"Node '{name}': local_ap must be a mapping, got {type(node_local_ap).__name__}"
+            )
             node_local_ap = {}
         resolved_local_ap = {**default_local_ap, **node_local_ap}
         if resolved_local_ap.get("enabled", False):

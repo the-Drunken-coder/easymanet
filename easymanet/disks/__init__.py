@@ -42,6 +42,8 @@ from .linux import (
 from .macos import (
     _macos_partition2_wipe_range,
     get_macos_partitions,
+    list_disks_macos,
+    lookup_device_macos,
     unmount_disk_macos,
 )
 from .core import _is_block_device

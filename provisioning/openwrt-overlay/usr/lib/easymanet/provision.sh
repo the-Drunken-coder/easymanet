@@ -401,6 +401,7 @@ if [ -x "$dropbear_init" ]; then
     if [ "$SSH_ENABLED" -eq 1 ]; then
         echo "Enabling SSH (dropbear)..." >> "$LOG_FILE"
         "$dropbear_init" enable 2>/dev/null || true
+        "$dropbear_init" restart 2>/dev/null || "$dropbear_init" start 2>/dev/null || true
     else
         echo "Disabling SSH (dropbear) for this node..." >> "$LOG_FILE"
         "$dropbear_init" stop 2>/dev/null || true

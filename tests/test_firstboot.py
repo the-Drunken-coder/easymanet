@@ -56,6 +56,8 @@ def test_firstboot_honors_ssh_enabled_flag():
     assert 'elif [ "$NODE_ROLE" = "gate" ]; then' in text
     assert 'dropbear_init=' in text
     assert '"$dropbear_init" enable' in text
+    assert '"$dropbear_init" restart' in text
+    assert '"$dropbear_init" start' in text
     assert '"$dropbear_init" disable' in text
 
 

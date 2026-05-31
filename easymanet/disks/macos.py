@@ -203,6 +203,45 @@ def _check_macos_system(mounts: List[str]) -> bool:
     return False
 
 
+def _macos_partition_index(partition: dict) -> int:
+    dev_id = partition.get("DeviceIdentifier", "")
+    match = re.search(r"s(\d+)$", dev_id)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def _macos_partition_byte_offset(partition: dict) -> Optional[int]:
+    """Byte offset of a partition on its parent disk."""
+    offset = partition.get("PartitionOffset")
+    if offset is not None:
+        off = int(offset)
+        if off > 0:
+            return off
+
+    dev_id = partition.get("DeviceIdentifier", "")
+    if not dev_id:
+        return None
+
+    try:
+        output = subprocess.check_output(
+            ["diskutil", "info", "-plist", f"/dev/{dev_id}"],
+            timeout=15,
+        )
+        info = plistlib.loads(output)
+    except DISK_PARSE_ERRORS as exc:
+        debug_note(f"diskutil info failed for /dev/{dev_id}: {exc}")
+        return None
+
+    for key in ("PartitionMapPartitionOffset", "PartitionOffset"):
+        value = info.get(key)
+        if value is not None:
+            off = int(value)
+            if off > 0:
+                return off
+    return None
+
+
 def get_macos_partitions(device: str) -> List[str]:
     try:
         output = subprocess.check_output(
@@ -241,10 +280,10 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     if len(partitions) < 2:
         return None
 
-    part2 = sorted(partitions, key=lambda p: int(p.get("PartitionOffset", 0) or 0))[1]
-    start = int(part2.get("PartitionOffset", 0) or 0)
+    part2 = sorted(partitions, key=_macos_partition_index)[1]
+    start = _macos_partition_byte_offset(part2)
     size = int(part2.get("Size", 0) or 0)
-    if start <= 0 or size <= 0:
+    if start is None or start <= 0 or size <= 0:
         return None
     wipe_bytes = min(size, max_wipe)
     tail_start = start + size - wipe_bytes
@@ -252,4 +291,14 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
 
 
 def unmount_disk_macos(device: str) -> None:
-    subprocess.run(["diskutil", "unmountDisk", device], capture_output=True, timeout=60)
+    result = subprocess.run(
+        ["diskutil", "unmountDisk", device],
+        capture_output=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        subprocess.run(
+            ["diskutil", "unmountDisk", "force", device],
+            capture_output=True,
+            timeout=60,
+        )

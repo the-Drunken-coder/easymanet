@@ -251,6 +251,55 @@ def test_lookup_device_lists_default_disks_once(monkeypatch):
     assert calls["count"] == 1
 
 
+def test_get_partition2_wipe_range_macos_without_list_offset(monkeypatch):
+    list_plist = {
+        "AllDisksAndPartitions": [
+            {
+                "DeviceIdentifier": "disk4",
+                "Partitions": [
+                    {
+                        "DeviceIdentifier": "disk4s1",
+                        "Size": 67108864,
+                    },
+                    {
+                        "DeviceIdentifier": "disk4s2",
+                        "Size": 4290772992,
+                    },
+                ],
+            }
+        ]
+    }
+    info_by_dev = {
+        "disk4s1": {"PartitionMapPartitionOffset": 4194304},
+        "disk4s2": {"PartitionMapPartitionOffset": 75497472},
+    }
+
+    monkeypatch.setattr(disks, "is_linux", lambda: False)
+    monkeypatch.setattr(disks, "is_macos", lambda: True)
+
+    def fake_check_output(cmd, timeout=15):
+        if cmd[:3] == ["diskutil", "list", "-plist"]:
+            import plistlib
+
+            return plistlib.dumps(list_plist)
+        if cmd[:3] == ["diskutil", "info", "-plist"]:
+            import plistlib
+
+            dev = cmd[3].replace("/dev/", "")
+            return plistlib.dumps(info_by_dev[dev])
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(disks.subprocess, "check_output", fake_check_output)
+
+    result = disks.get_partition2_wipe_range("/dev/disk4")
+    assert result is not None
+    start_bytes, wipe_bytes = result
+    max_wipe = disks._OVERLAY_WIPE_BLOCK_MIB * disks._OVERLAY_WIPE_BLOCKS * 1024 * 1024
+    part2_size = 4290772992
+    assert wipe_bytes == min(part2_size, max_wipe)
+    assert start_bytes == 75497472 + part2_size - wipe_bytes
+
+
 def test_get_partition2_wipe_range_linux(monkeypatch):
     part2_start = 270336 * 512
     part2_size = 10_000_000_000

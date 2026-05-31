@@ -131,6 +131,8 @@ def flash_image(
 
         if not skip_overlay_wipe:
             written_bytes = gzip_written_bytes if gzip_written_bytes is not None else image.stat().st_size
+            # macOS (and sometimes Linux) auto-mounts partitions after dd; unmount before raw wipe.
+            unmount_disk(device)
             _clear_stale_overlay(device, written_bytes)
 
     except subprocess.CalledProcessError as e:
@@ -165,10 +167,38 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
 
 
 _OVERLAY_WIPE_SECTOR_BYTES = 512
+_OVERLAY_WIPE_BULK_BYTES = 16 * 1024 * 1024
+
+
+def _dd_device_path(device: str) -> str:
+    if is_macos() and device.startswith("/dev/disk"):
+        return device.replace("/dev/disk", "/dev/rdisk", 1)
+    return device
 
 
 def _ceil_div(numerator: int, denominator: int) -> int:
     return (numerator + denominator - 1) // denominator
+
+
+def _run_zero_dd(device: str, block_bytes: int, seek_blocks: int, count_blocks: int) -> None:
+    if count_blocks <= 0:
+        return
+
+    # macOS may auto-mount partitions between wipe phases (especially after long writes).
+    unmount_disk(device)
+    output_device = _dd_device_path(device)
+    subprocess.run(
+        [
+            "dd",
+            "if=/dev/zero",
+            f"of={output_device}",
+            f"bs={block_bytes}",
+            f"seek={seek_blocks}",
+            f"count={count_blocks}",
+            "status=progress",
+        ],
+        check=True,
+    )
 
 
 def _clear_stale_overlay(device: str, written_bytes: int) -> None:
@@ -188,7 +218,9 @@ def _clear_stale_overlay(device: str, written_bytes: int) -> None:
     if wipe_bytes <= 0:
         print("Skipping stale overlay wipe; image covers the wipe region.")
         return
+
     sector_bytes = _OVERLAY_WIPE_SECTOR_BYTES
+    bulk_bytes = _OVERLAY_WIPE_BULK_BYTES
     seek_sectors = _ceil_div(start_bytes, sector_bytes)
     aligned_start = seek_sectors * sector_bytes
     span_bytes = wipe_bytes + (aligned_start - start_bytes)
@@ -197,26 +229,34 @@ def _clear_stale_overlay(device: str, written_bytes: int) -> None:
     print(
         f"Clearing stale OpenWrt overlay area ({total_mib:.1f} MiB at offset {start_bytes} bytes)..."
     )
-    subprocess.run(
-        [
-            "dd",
-            "if=/dev/zero",
-            f"of={device}",
-            f"bs={sector_bytes}",
-            f"seek={seek_sectors}",
-            f"count={count_sectors}",
-            "status=progress",
-        ],
-        check=True,
-    )
+
+    total_bytes = count_sectors * sector_bytes
+    cursor = aligned_start
+    if cursor % bulk_bytes:
+        prefix_bytes = min(total_bytes, bulk_bytes - (cursor % bulk_bytes))
+        prefix_sectors = _ceil_div(prefix_bytes, sector_bytes)
+        _run_zero_dd(device, sector_bytes, cursor // sector_bytes, prefix_sectors)
+        prefix_written = prefix_sectors * sector_bytes
+        cursor += prefix_written
+        total_bytes -= prefix_written
+
+    bulk_blocks = total_bytes // bulk_bytes
+    _run_zero_dd(device, bulk_bytes, cursor // bulk_bytes, bulk_blocks)
+    bulk_written = bulk_blocks * bulk_bytes
+    cursor += bulk_written
+    total_bytes -= bulk_written
+
+    tail_sectors = total_bytes // sector_bytes
+    _run_zero_dd(device, sector_bytes, cursor // sector_bytes, tail_sectors)
 
 
 def _write_raw_via_dd(image_path: str, device: str) -> None:
+    output_device = _dd_device_path(device)
     subprocess.run(
         [
             "dd",
             f"if={image_path}",
-            f"of={device}",
+            f"of={output_device}",
             "bs=16M",
             "status=progress",
         ],

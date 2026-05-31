@@ -155,11 +155,6 @@ def register_flash_command(app: typer.Typer) -> None:
             "--force",
             help="Override blocking disk safety checks (system disk, large fixed disk, device not in default list)",
         ),
-        inject_only: bool = typer.Option(
-            False,
-            "--inject-only",
-            help="Skip writing the base image; only stage provision.json on the boot partition (recovery)",
-        ),
         no_eject: bool = typer.Option(
             False, "--no-eject", help="Do not eject disk after flashing"
         ),
@@ -216,12 +211,9 @@ def register_flash_command(app: typer.Typer) -> None:
             enable_ssh=enable_ssh, disable_ssh=disable_ssh
         )
 
-        if inject_only:
-            image_path = base_image or "(skipped — --inject-only)"
-        else:
-            image_path = resolve_base_image(
-                target, base_image, image_url, download, no_download, dry_run
-            )
+        image_path = resolve_base_image(
+            target, base_image, image_url, download, no_download, dry_run
+        )
 
         print_header("Flash Plan")
         typer.echo(f"  Config:       {config}")
@@ -273,19 +265,16 @@ def register_flash_command(app: typer.Typer) -> None:
             typer.secho(str(e), fg=typer.colors.RED)
             raise typer.Exit(1)
 
-        if not inject_only:
-            try:
-                flash_image(
-                    device=device,
-                    image_path=image_path,
-                    force=force,
-                    skip_overlay_wipe=skip_overlay_wipe,
-                )
-            except FlashError as e:
-                typer.secho(f"Flash error: {e}", fg=typer.colors.RED)
-                raise typer.Exit(1)
-        else:
-            typer.secho("Skipping base image write (--inject-only).", fg=typer.colors.BLUE)
+        try:
+            flash_image(
+                device=device,
+                image_path=image_path,
+                force=force,
+                skip_overlay_wipe=skip_overlay_wipe,
+            )
+        except FlashError as e:
+            typer.secho(f"Flash error: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1)
 
         typer.echo()
         print_header("Writing boot-partition payload")
@@ -303,16 +292,9 @@ def register_flash_command(app: typer.Typer) -> None:
         except InjectError as e:
             typer.secho(f"Boot payload error: {e}", fg=typer.colors.RED)
             typer.secho(
-                "Image was flashed but node provisioning could not be staged on the boot partition.",
+                "Image was written but boot-partition provisioning failed. "
+                "Re-run the full flash command (same --base-image or cached image) after fixing the issue.",
                 fg=typer.colors.YELLOW,
-            )
-            typer.secho(
-                "Re-run with --inject-only to retry boot-partition staging only:",
-                fg=typer.colors.YELLOW,
-            )
-            typer.echo(
-                f"  easymanet flash --config {config} --node {node} "
-                f"--device {device} --inject-only --yes"
             )
             raise typer.Exit(1)
 

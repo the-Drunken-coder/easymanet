@@ -151,8 +151,8 @@ settle.
 - **Blocking checks** refuse to flash system disks, large internal drives,
   suspiciously large devices, and devices not in the default list unless
   you pass **`--force`**.
-- **Partial failure recovery:** if the image write succeeds but boot
-  payload staging fails, re-run with `--inject-only`.
+- **Partial failure recovery:** if boot payload staging fails after the
+  image write, re-run the full `easymanet flash` command.
 - **Unmounts partitions** before writing.
 - **Syncs writes** and **ejects** after completion.
 - **SSH at flash time:** use `--enable-ssh` or `--disable-ssh` on `easymanet flash`
@@ -191,7 +191,6 @@ on `flash` and `image build`.
 | `easymanet render --config FILE --node NAME` | Print resolved provision.json |
 | `easymanet image build` | Build an EasyMANET-flavored OpenMANET image with Docker |
 | `easymanet flash --config FILE --node NAME --device DEV --base-image IMG --yes` | Flash and provision |
-| `easymanet flash ... --inject-only --yes` | Stage `provision.json` only (recovery) |
 | `easymanet flash ... --dry-run` | Preview flash without writing |
 
 ## Architecture

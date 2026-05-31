@@ -2,9 +2,15 @@
 
 import json
 import os
+import plistlib
 import tempfile
 
-from easymanet.inject import inject, inject_dry_run_info
+from easymanet.inject import (
+    _find_boot_mount,
+    _find_boot_partition,
+    inject,
+    inject_dry_run_info,
+)
 from easymanet.manifest import load_manifest
 
 
@@ -46,6 +52,39 @@ def _write_config(content: str) -> str:
     with os.fdopen(fd, "w") as f:
         f.write(content)
     return path
+
+
+def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(monkeypatch):
+    list_plist = {
+        "AllDisksAndPartitions": [
+            {
+                "DeviceIdentifier": "disk4",
+                "Partitions": [
+                    {
+                        "DeviceIdentifier": "disk4s1",
+                        "Content": "Windows_FAT_32",
+                        "MountPoint": "/Volumes/boot",
+                    },
+                    {
+                        "DeviceIdentifier": "disk4s2",
+                        "Content": "Linux",
+                    },
+                ],
+            }
+        ]
+    }
+
+    monkeypatch.setattr("easymanet.inject.is_macos", lambda: True)
+    monkeypatch.setattr("easymanet.inject.is_linux", lambda: False)
+
+    def fake_check_output(cmd, timeout=15):
+        assert cmd[:3] == ["diskutil", "list", "-plist"]
+        return plistlib.dumps(list_plist)
+
+    monkeypatch.setattr("easymanet.inject.subprocess.check_output", fake_check_output)
+
+    assert _find_boot_partition("/dev/disk4") == "/dev/disk4s1"
+    assert _find_boot_mount("/dev/disk4") == "/Volumes/boot"
 
 
 def test_inject_dry_run_info_mentions_boot_partition():

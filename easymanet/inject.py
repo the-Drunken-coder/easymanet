@@ -15,6 +15,18 @@ from .render import render
 
 ROOT_BLOCK_DEVICE_PATTERN = re.compile(r"root=(/dev/[^\s]+)")
 
+# diskutil list -plist often omits FilesystemType; Content is set on current macOS.
+_MACOS_FAT_CONTENTS = frozenset(
+    {
+        "Windows_FAT_32",
+        "EFI",
+        "DOS_FAT_12",
+        "DOS_FAT_16",
+        "DOS_FAT_32",
+    }
+)
+_MACOS_FAT_FILESYSTEMS = frozenset({"msdos", "vfat", "fat32", "exfat"})
+
 _SUBPROCESS_ERRORS = (
     subprocess.CalledProcessError,
     subprocess.TimeoutExpired,
@@ -209,23 +221,50 @@ def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
             pass
 
 
+def _macos_partition_index(partition: dict) -> int:
+    dev_id = partition.get("DeviceIdentifier", "")
+    match = re.search(r"s(\d+)$", dev_id)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def _is_macos_fat_partition(partition: dict) -> bool:
+    fs_type = (partition.get("FilesystemType") or "").lower()
+    if fs_type in _MACOS_FAT_FILESYSTEMS:
+        return True
+    content = partition.get("Content") or ""
+    if content in _MACOS_FAT_CONTENTS:
+        return True
+    return "FAT" in content.upper()
+
+
+def _macos_partitions_for_device(device: str) -> List[dict]:
+    try:
+        output = subprocess.check_output(
+            ["diskutil", "list", "-plist", device],
+            timeout=15,
+        )
+        data = plistlib.loads(output)
+    except _BOOT_PARTITION_PARSE_ERRORS as exc:
+        _debug_note(f"boot partition lookup failed for {device}: {exc}")
+        return []
+
+    partitions: List[dict] = []
+    for entry in data.get("AllDisksAndPartitions", []):
+        partitions.extend(entry.get("Partitions", []))
+    return sorted(partitions, key=_macos_partition_index)
+
+
 def _find_boot_partition(device: str) -> Optional[str]:
     if is_macos():
-        try:
-            output = subprocess.check_output(
-                ["diskutil", "list", "-plist", device],
-                timeout=15,
-            )
-            data = plistlib.loads(output)
-            all_disks = data.get("AllDisksAndPartitions", [])
-            for entry in all_disks:
-                for partition in entry.get("Partitions", []):
-                    if partition.get("FilesystemType") in {"msdos", "vfat", "fat32"}:
-                        return f"/dev/{partition.get('DeviceIdentifier', '')}"
-            return None
-        except _BOOT_PARTITION_PARSE_ERRORS as exc:
-            _debug_note(f"boot partition lookup failed for {device}: {exc}")
-            return None
+        for partition in _macos_partitions_for_device(device):
+            if not _is_macos_fat_partition(partition):
+                continue
+            dev_id = partition.get("DeviceIdentifier", "")
+            if dev_id:
+                return f"/dev/{dev_id}"
+        return None
 
     if is_linux():
         for suffix in ["1", "p1"]:
@@ -239,9 +278,17 @@ def _find_boot_partition(device: str) -> Optional[str]:
 
 def _find_boot_mount(device: str) -> Optional[str]:
     if is_macos():
-        partition = _find_boot_partition(device)
-        if partition:
-            return _find_mount_for_partition(partition)
+        for partition in _macos_partitions_for_device(device):
+            if not _is_macos_fat_partition(partition):
+                continue
+            mount_point = partition.get("MountPoint")
+            if mount_point:
+                return mount_point
+            dev_id = partition.get("DeviceIdentifier", "")
+            if dev_id:
+                found = _find_mount_for_partition(f"/dev/{dev_id}")
+                if found:
+                    return found
         return None
 
     if is_linux():

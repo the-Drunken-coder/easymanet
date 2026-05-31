@@ -148,6 +148,8 @@ def _write_dropbear_stub(prefix: Path) -> None:
 state_file="{state_file}"
 case "$1" in
   enable) echo enabled >> "$state_file" ;;
+  restart) echo restarted >> "$state_file" ;;
+  start) echo started >> "$state_file" ;;
   disable) echo disabled >> "$state_file" ;;
   stop) echo stopped >> "$state_file" ;;
 esac
@@ -212,6 +214,7 @@ def test_provision_gate_node_smoke(tmp_path):
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
     assert "enabled" in dropbear_state
+    assert "restarted" in dropbear_state
 
     provisioned = (prefix / "etc" / "easymanet" / "provisioned").read_text()
     assert "hostname: gate01" in provisioned

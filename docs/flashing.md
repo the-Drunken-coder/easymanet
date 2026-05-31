@@ -130,22 +130,6 @@ Flashing requires write access to the target block device. On Linux,
 members of the `disk` group may flash without root if the device is
 writable. Otherwise run with `sudo`.
 
-## Recovery: inject only
-
-If the base image was written but boot-partition staging failed:
-
-```bash
-easymanet flash \
-  --config fleet.yml \
-  --node manet02 \
-  --device /dev/sdb \
-  --inject-only \
-  --yes
-```
-
-This skips the image write and only mounts the boot partition to write
-`/easymanet/provision.json`.
-
 ## Dry Run
 
 ```bash
@@ -195,7 +179,7 @@ decommissioning nodes.
 | Permission denied | Run with `sudo` |
 | Device not found | Use `easymanet disks` or `easymanet disks --all`; if the path is valid but hidden, use `--force` |
 | Blocking disk warning | Verify the correct device; use `--force` only if sure |
-| Boot payload staging failed | Re-run with `--inject-only --yes` after verifying the boot partition mounts |
+| Boot payload staging failed | Re-run the full `easymanet flash` command after verifying the boot partition mounts |
 | Image won't boot | Verify the base image matches your hardware (RPi4 + MM6108 SPI) by writing it directly first, without EasyMANET injection. |
 | `gzip` reports `trailing garbage ignored` for an OpenWrt/OpenMANET sysupgrade image | This is expected. OpenWrt appends sysupgrade metadata after the gzip payload. EasyMANET validates the gzip payload but allows the metadata trailer. |
 | EasyMANET payload is present on the boot partition but the node still launches the normal wizard | The base image does not yet include the EasyMANET first-boot hooks. Rebuild the firmware image with `easymanet image build` or `provisioning/openwrt-overlay/` in the OpenMANET `files/` tree. |

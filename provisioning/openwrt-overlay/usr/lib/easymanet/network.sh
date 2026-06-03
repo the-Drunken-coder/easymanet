@@ -4,7 +4,7 @@
 EASYMANET_NETWORK_LOG="${EASYMANET_NETWORK_LOG:-/var/log/easymanet-network.log}"
 EASYMANET_PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="${EASYMANET_LIB_DIR:-/usr/lib/easymanet}"
 # shellcheck source=provision-lib.sh
 . "$SCRIPT_DIR/provision-lib.sh"
 PROVISION_JSON="$EASYMANET_PROVISION_JSON"

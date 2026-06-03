@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "provisioning" / "openwrt-overlay"
 PROVISION_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "provision-lib.sh"
 PROVISION_SCRIPT = OVERLAY / "usr" / "lib" / "easymanet" / "provision.sh"
+NETWORK_SCRIPT = OVERLAY / "usr" / "lib" / "easymanet" / "network.sh"
 HARNESS = Path(__file__).resolve().parent / "shell_harness"
 
 
@@ -236,6 +237,44 @@ def test_provision_point_node_disables_ssh(tmp_path):
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
     assert "disabled" in dropbear_state
+
+
+def test_late_management_lan_repair_sources_lib_from_explicit_dir(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_point_provision_json(), indent=2))
+    uci_state = tmp_path / "uci-state"
+    uci_state.write_text(
+        "\n".join(
+            [
+                "network.@device[0].name='br-lan'",
+                "network.@device[0].type='bridge'",
+                "network.wan=interface",
+                "network.wan.device='phy1-sta0'",
+            ]
+        )
+        + "\n"
+    )
+    env = _harness_env(
+        uci_state,
+        {
+            "EASYMANET_LIB_DIR": str(NETWORK_SCRIPT.parent),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "EASYMANET_NETWORK_LOG": str(tmp_path / "network.log"),
+        },
+    )
+
+    result = _run_sh(
+        f'''
+cd "{tmp_path}"
+. "{NETWORK_SCRIPT}"
+easymanet_repair_management_lan late-boot
+''',
+        env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert _uci_get(uci_state, "network.lan.device", env) == "br-lan"
+    assert _uci_get(uci_state, "network.lan.ipaddr", env) == "10.41.254.1"
+    assert "network.@device[0].ports='eth0'" in uci_state.read_text()
 
 
 def test_provision_removes_boot_json_after_success(tmp_path):

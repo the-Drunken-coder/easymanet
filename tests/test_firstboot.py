@@ -82,6 +82,7 @@ def test_management_lan_repair_hook_is_packaged_and_enabled():
     assert "brctl addif br-lan" in helper_text
     init_text = init.read_text()
     assert "sleep 25" in init_text
+    assert "EASYMANET_LIB_DIR=/usr/lib/easymanet" in init_text
     assert "write_easymanet_boot_report post-management-lan" in init_text
     assert "/etc/init.d/easymanet-management-lan enable" in defaults.read_text()
 

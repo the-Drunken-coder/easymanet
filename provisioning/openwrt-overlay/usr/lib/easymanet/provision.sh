@@ -87,6 +87,16 @@ uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
 }
 
+configure_mesh_radio_device() {
+    radio="$1"
+    uci_set wireless."$radio".channel="$MESH_CHANNEL"
+    uci_set wireless."$radio".s1g_chanbw="$MESH_BW"
+    uci -q delete wireless."$radio".htmode 2>/dev/null || true
+    uci_set wireless."$radio".country="$MESH_COUNTRY"
+    uci_set wireless."$radio".bcf="$EM_MESH_BCF"
+    uci_set wireless."$radio".disabled="0"
+}
+
 find_boot_json() {
     for candidate in \
         "$(_prefix_path /boot/easymanet/provision.json)" \
@@ -213,12 +223,7 @@ fi
 
 echo "Using Morse HaLow radio $MESH_RADIO..." >> "$LOG_FILE"
 delete_ifaces_for_radio "$MESH_RADIO"
-uci_set wireless."$MESH_RADIO".channel="$MESH_CHANNEL"
-uci_set wireless."$MESH_RADIO".s1g_chanbw="$MESH_BW"
-uci -q delete wireless."$MESH_RADIO".htmode 2>/dev/null || true
-uci_set wireless."$MESH_RADIO".country="$MESH_COUNTRY"
-uci_set wireless."$MESH_RADIO".bcf="$EM_MESH_BCF"
-uci_set wireless."$MESH_RADIO".disabled="0"
+configure_mesh_radio_device "$MESH_RADIO"
 
 uci_set wireless.mesh0=wifi-iface
 uci_set wireless.mesh0.device="$MESH_RADIO"
@@ -412,6 +417,7 @@ fi
 openmanetd_config="$(_prefix_path /etc/openmanetd/config.yml)"
 if [ -f "$openmanetd_config" ]; then
     cat > "$openmanetd_config" <<EOF
+meshNetInterface: "bat0"
 mesh:
   id: "${MESH_ID}"
   password: "${MESH_PASSWORD}"
@@ -430,6 +436,12 @@ network_init="$(_prefix_path /etc/init.d/network)"
 if [ -x "$network_init" ]; then
     "$network_init" enable 2>/dev/null || true
     "$network_init" restart 2>/dev/null || true
+fi
+echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
+configure_mesh_radio_device "$MESH_RADIO"
+uci_commit wireless
+if command -v wifi >/dev/null 2>&1; then
+    wifi reload "$MESH_RADIO" >> "$LOG_FILE" 2>&1 || true
 fi
 mesh11sd_init="$(_prefix_path /etc/init.d/mesh11sd)"
 if [ -x "$mesh11sd_init" ]; then

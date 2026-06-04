@@ -159,6 +159,28 @@ esac
     stub.chmod(0o755)
 
 
+def _write_network_channel_rewrite_stub(prefix: Path, channel: int) -> None:
+    init_dir = prefix / "etc" / "init.d"
+    init_dir.mkdir(parents=True, exist_ok=True)
+    stub = init_dir / "network"
+    stub.write_text(
+        f"""#!/bin/sh
+case "$1" in
+  enable) ;;
+  restart) uci set wireless.radio2.channel="{channel}" ;;
+esac
+"""
+    )
+    stub.chmod(0o755)
+
+
+def _write_openmanetd_config_stub(prefix: Path) -> Path:
+    config = prefix / "etc" / "openmanetd" / "config.yml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("meshNetInterface: \"br-ahwlan\"\n")
+    return config
+
+
 def _uci_get(uci_state: Path, key: str, env: dict) -> str:
     result = subprocess.run(
         ["uci", "-q", "get", key],
@@ -237,6 +259,38 @@ def test_provision_point_node_disables_ssh(tmp_path):
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
     assert "disabled" in dropbear_state
+
+
+def test_provision_reapplies_mesh_channel_after_network_restart(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _write_network_channel_rewrite_stub(prefix, 42)
+    provision_data = _point_provision_json()
+    provision_data["mesh"]["channel"] = 41
+    provision_data["mesh"]["bandwidth_mhz"] = 1
+
+    result = _run_provision(prefix, provision_data, uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.radio2.channel", env) == "41"
+    assert _uci_get(uci_state, "wireless.radio2.s1g_chanbw", env) == "1"
+
+
+def test_provision_sets_openmanetd_mesh_interface_to_bat0(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    config = _write_openmanetd_config_stub(prefix)
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    text = config.read_text()
+    assert 'meshNetInterface: "bat0"' in text
+    assert 'role: "point"' in text
+    assert 'ip: "10.41.2.1"' in text
 
 
 def test_late_management_lan_repair_sources_lib_from_explicit_dir(tmp_path):

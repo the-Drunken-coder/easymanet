@@ -87,6 +87,10 @@ nodes:
       ssid: point01-local
 ```
 
+For a gate, `uplink_interface: eth0` keeps wired management on `br-lan` and
+also runs the WAN DHCP client on that same bridge. That means the upstream
+Ethernet network and the EasyMANET management LAN share one L2 segment.
+
 ### 2. List available disks
 
 ```bash
@@ -119,6 +123,9 @@ easymanet image build
 
 By default this uses Docker, builds OpenMANET `1.6.5` for
 `rpi4-mm6108-spi`, and copies the resulting image into `./dist/`.
+Local builds use a persistent Docker volume for the OpenMANET build cache.
+CI can pass `--cache-dir .openmanet-cache` so GitHub Actions can cache the
+same expensive OpenWrt download, host, and toolchain directories.
 
 ### 6. Flash a node
 
@@ -134,27 +141,47 @@ easymanet flash \
 ### 7. Boot the node
 
 Insert the SD card into the Raspberry Pi and power it on. The node
-will configure itself and reboot once. After reboot, it joins the mesh.
+applies EasyMANET provisioning on first boot, restarts networking, and
+stays up. Give it at least 90–120 seconds for networking and mesh services to
+settle.
 
 ## Disk Flashing Safety
 
 - **Never auto-selects a disk.** You must always provide `--device`.
 - **`--yes` is required** to flash. Use `--dry-run` to preview first.
-- **System disk detection** warns or refuses to flash likely system
-  disks (internal drives with `/`, `/boot`, etc.).
-- **`--force` overrides** system disk detection (use with extreme care).
+- **`easymanet disks`** lists removable, USB, and MMC/SD-like devices on
+  Linux; macOS shows external drives. Use `easymanet disks --all` to list
+  every block device.
+- **Blocking checks** refuse to flash system disks, large internal drives,
+  suspiciously large devices, and devices not in the default list unless
+  you pass **`--force`**.
+- **Partial failure recovery:** if boot payload staging fails after the
+  image write, re-run the full `easymanet flash` command.
 - **Unmounts partitions** before writing.
 - **Syncs writes** and **ejects** after completion.
+- **SSH at flash time:** use `--enable-ssh` or `--disable-ssh` on `easymanet flash`
+  (gate nodes default to SSH on; point nodes default to off). See
+  [docs/flashing.md](docs/flashing.md).
+- **Boot-partition secrets:** `provision.json` on the FAT boot volume contains
+  fleet secrets in cleartext until successful first boot, when `provision.sh`
+  removes the boot copy. The overlay copy at `/etc/easymanet/provision.json`
+  (mode `0600`) remains. Treat flashed media as sensitive until the node has
+  provisioned. See [docs/flashing.md](docs/flashing.md#security).
+
+Set `EASYMANET_SKIP_UPDATE_CHECK=1` to skip the optional GitHub release check
+on `flash` and `image build`.
 
 ## How to Test a Two-Node Mesh
 
 1. Flash `gate01` to one SD card.
 2. Flash `point01` to another SD card.
 3. Boot both Raspberry Pis.
-4. Wait ~60 seconds after reboot.
+4. Wait at least 90–120 seconds after first-boot provisioning.
 5. SSH into either node and verify mesh connectivity:
    ```bash
    ssh root@10.41.1.1
+   ip addr show bat0
+   batctl n
    ping 10.41.2.1
    ```
 
@@ -162,7 +189,7 @@ will configure itself and reboot once. After reboot, it joins the mesh.
 
 | Command | Description |
 |---------|-------------|
-| `easymanet disks` | List external/removable disks |
+| `easymanet disks` | List flashable disks (`--all` for every block device) |
 | `easymanet validate --config FILE` | Validate fleet config |
 | `easymanet validate --config FILE --node NAME` | Validate specific node |
 | `easymanet render --config FILE --node NAME` | Print resolved provision.json |
@@ -184,6 +211,7 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 - [Manifest Reference](docs/manifest.md) — every config field documented
 - [Flashing Guide](docs/flashing.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
+- [Problems](docs/problems/) — short-lived agent notes on active blockers ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
 
 ## Development
 
@@ -191,6 +219,22 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 pip install -e ".[dev]"
 pytest
 ```
+
+Pull requests run the `CI` workflow (unit tests, overlay shell syntax, and
+packaging checks). Full OpenMANET firmware images are built via the
+`Build OpenMANET Image` workflow (manual) or the weekly `Prove Overlay Weekly`
+workflow on `main`. Docker-based `easymanet image build` on Apple Silicon uses
+`linux/amd64` emulation and is slower than on native x86_64 hosts.
+
+## Security Notes
+
+- An empty `root_password_hash` leaves the root password unchanged on the node.
+- `gateway.uplink_interface: eth0` shares wired management and WAN DHCP on
+  `br-lan`; avoid connecting it to an upstream network where the management DHCP
+  service would be inappropriate.
+- Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
+- When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
+  into that file in plaintext (OpenMANET daemon requirement; verify on hardware).
 
 ## OpenMANET Provisioning Status
 

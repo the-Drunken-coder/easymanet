@@ -263,6 +263,9 @@ def test_provision_gate_node_smoke(tmp_path):
     assert _uci_get(uci_state, "wireless.mesh0.mesh_id", env) == "test-mesh"
     assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "server"
     assert _uci_get(uci_state, "network.meship.ipaddr", env) == "10.41.1.1"
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == "br-lan"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "br-lan"
     assert _uci_get(uci_state, "mesh11sd.mesh_params.mesh_gate_announcements", env) == "1"
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
@@ -359,6 +362,73 @@ easymanet_repair_management_lan late-boot
     assert _uci_get(uci_state, "network.lan.device", env) == "br-lan"
     assert _uci_get(uci_state, "network.lan.ipaddr", env) == "10.41.254.1"
     assert "network.@device[0].ports='eth0'" in uci_state.read_text()
+
+
+def test_late_management_lan_repair_preserves_shared_brlan_wan(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_gate_provision_json(), indent=2))
+    uci_state = tmp_path / "uci-state"
+    uci_state.write_text(
+        "\n".join(
+            [
+                "network.@device[0].name='br-lan'",
+                "network.@device[0].type='bridge'",
+                "network.wan=interface",
+                "network.wan.proto='dhcp'",
+                "network.wan.device='br-lan'",
+                "network.wan.ifname='br-lan'",
+            ]
+        )
+        + "\n"
+    )
+    env = _harness_env(
+        uci_state,
+        {
+            "EASYMANET_LIB_DIR": str(NETWORK_SCRIPT.parent),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "EASYMANET_NETWORK_LOG": str(tmp_path / "network.log"),
+        },
+    )
+
+    result = _run_sh(
+        f'''
+cd "{tmp_path}"
+. "{NETWORK_SCRIPT}"
+easymanet_repair_management_lan late-boot
+''',
+        env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert _uci_get(uci_state, "network.wan.device", env) == "br-lan"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "br-lan"
+    assert "network.@device[0].ports='eth0'" in uci_state.read_text()
+
+
+def test_provision_wifi_uplink_keeps_wan_on_wifi_sta_path(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    provision_data["node"]["gateway"] = {
+        "enabled": True,
+        "uplink_interface": "wifi",
+        "wifi": {
+            "enabled": True,
+            "ssid": "upstream",
+            "password": "upstream-password",
+            "encryption": "psk2",
+        },
+    }
+
+    result = _run_provision(prefix, provision_data, uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.wan0.network", env) == "wan"
+    assert _uci_get(uci_state, "wireless.wan0.mode", env) == "sta"
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == ""
+    assert _uci_get(uci_state, "network.wan.ifname", env) == ""
 
 
 def test_provision_removes_boot_json_after_success(tmp_path):

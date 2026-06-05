@@ -104,13 +104,25 @@ def _diskinfo_from_macos_entry(entry: dict, all_mounts: dict) -> Optional[DiskIn
     )
 
 
-def lookup_device_macos(device: str) -> Optional[DiskInfo]:
-    if not os.path.exists(device):
+_MACOS_WHOLE_DISK_RE = re.compile(r"^/dev/r?disk\d+$")
+
+
+def _canonical_macos_whole_disk(device: str) -> Optional[str]:
+    if not _MACOS_WHOLE_DISK_RE.match(device):
         return None
-    info_text = _get_diskutil_info_text(device)
+    return device.replace("/dev/rdisk", "/dev/disk", 1)
+
+
+def lookup_device_macos(device: str) -> Optional[DiskInfo]:
+    dev_path = _canonical_macos_whole_disk(device)
+    if dev_path is None:
+        return None
+    if not os.path.exists(device) and not os.path.exists(dev_path):
+        return None
+    info_text = _get_diskutil_info_text(dev_path)
     if not info_text:
         return None
-    dev_id = device.replace("/dev/", "")
+    dev_id = dev_path.replace("/dev/", "")
     all_mounts = _get_macos_all_mounts()
     size_bytes = _parse_macos_size(_parse_info_field(info_text, "Disk Size"))
     model = _parse_info_field(info_text, "Device / Media Name") or dev_id
@@ -118,7 +130,7 @@ def lookup_device_macos(device: str) -> Optional[DiskInfo]:
     mounted = _find_mounts_for_disk(dev_id, all_mounts)
     is_system = _check_macos_system(mounted)
     return DiskInfo(
-        device=device,
+        device=dev_path,
         size_bytes=size_bytes,
         model=model,
         removable=removable,

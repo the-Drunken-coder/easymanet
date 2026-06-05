@@ -3,6 +3,9 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 build/
 dist/
 .openmanet-cache/

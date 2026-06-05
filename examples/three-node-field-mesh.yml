@@ -30,6 +30,7 @@ nodes:
 
     gateway:
       enabled: true
+      # eth0 is shared: wired management stays on br-lan, WAN DHCP also uses br-lan.
       uplink_interface: eth0
 
   point01:

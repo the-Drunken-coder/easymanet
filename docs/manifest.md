@@ -126,7 +126,7 @@ Default gateway settings for gate nodes.
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | Whether gateway mode is enabled |
-| `uplink_interface` | string | Uplink network interface name |
+| `uplink_interface` | string | Uplink network interface name. `eth0` is shared with wired management by running WAN DHCP on `br-lan`. |
 
 ### `defaults.role` (string)
 
@@ -173,6 +173,10 @@ nodes:
       uplink_interface: eth0
 ```
 
+With `uplink_interface: eth0`, EasyMANET leaves `eth0` on `br-lan` for wired
+management and runs the WAN DHCP client on `br-lan`. The upstream Ethernet
+network and the management LAN therefore share one L2 segment.
+
 ---
 
 ## Resolved Config
@@ -214,6 +218,9 @@ Priority (highest to lowest):
 ## Security
 
 - Empty `root_password_hash` does not set a root password on the node.
+- `gateway.uplink_interface: eth0` shares WAN DHCP and wired management on
+  `br-lan`; use a different uplink or Wi-Fi when the upstream network must not
+  see the management LAN DHCP service.
 - `gateway.wifi.enabled` with SSH enabled opens SSH on the WAN firewall zone.
 - Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext
   when that file exists on the image.

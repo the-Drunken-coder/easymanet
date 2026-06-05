@@ -152,8 +152,10 @@ debugging path.
 - The current fix is intentionally defensive:
   - first-boot provisioning tries to keep `eth0` on `br-lan`
   - a late boot repair service runs after startup and enforces the same state
-  - the repair removes `wan` / `wan6`, commits network config, brings `lan` up,
-    and calls `brctl addif br-lan eth0`
+  - the repair removes stale direct-`eth0` `wan` / `wan6`, commits network
+    config, brings `lan` up, and calls `brctl addif br-lan eth0`
+  - gate nodes with `gateway.uplink_interface: eth0` run WAN DHCP on `br-lan`,
+    so wired management and Ethernet upstream share one L2 segment
 
 - This was necessary because OpenMANET startup can leave `eth0` as `wan`, which
   makes direct Ethernet management unreachable even though Dropbear is running.
@@ -707,6 +709,10 @@ That broke internet/GitHub access from the Mac. Fix on macOS:
 sudo route -n delete default 10.41.0.1
 sudo route -n add default 192.168.1.1
 ```
+
+This is expected with the shared-`br-lan` `eth0` gateway mode: the Mac sees the
+EasyMANET management DHCP service and the upstream Ethernet network on the same
+wire.
 
 ### What To Do Next
 

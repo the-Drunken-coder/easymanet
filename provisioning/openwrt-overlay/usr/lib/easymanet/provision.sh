@@ -364,17 +364,20 @@ if [ -f "$NETWORK_HELPERS" ]; then
     easymanet_repair_management_lan firstboot
 fi
 
-if [ "$NODE_ROLE" = "gate" ]; then
-    UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || echo "eth0")"
-    if [ "$UPLINK" != "eth0" ]; then
-        uci_set network.wan=interface
-        uci_set network.wan.proto="dhcp"
-        uci_set network.wan.device="$UPLINK"
-        uci_set network.wan.ifname="$UPLINK"
-        uci_set network.wan.peerdns="0"
-        uci_set network.wan.dns="$EM_UPLINK_DNS"
-        uci_commit network
+if [ "$NODE_ROLE" = "gate" ] && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
+    UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || true)"
+    [ -n "$UPLINK" ] || UPLINK="eth0"
+    WAN_DEVICE="$UPLINK"
+    if [ "$UPLINK" = "eth0" ]; then
+        WAN_DEVICE="br-lan"
     fi
+    uci_set network.wan=interface
+    uci_set network.wan.proto="dhcp"
+    uci_set network.wan.device="$WAN_DEVICE"
+    uci_set network.wan.ifname="$WAN_DEVICE"
+    uci_set network.wan.peerdns="0"
+    uci_set network.wan.dns="$EM_UPLINK_DNS"
+    uci_commit network
 fi
 
 if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then

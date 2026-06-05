@@ -1,6 +1,7 @@
 import pytest
 
 from easymanet import disks
+from easymanet.disks import macos
 
 
 def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeypatch):
@@ -356,6 +357,48 @@ def test_get_partition2_wipe_range_macos_without_list_offset(monkeypatch):
     part2_size = 4290772992
     assert wipe_bytes == min(part2_size, max_wipe)
     assert start_bytes == 75497472 + part2_size - wipe_bytes
+
+
+def test_lookup_device_macos_rejects_partition_paths_before_diskutil(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(macos.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(
+        macos,
+        "_get_diskutil_info_text",
+        lambda path: calls.append(path) or "Disk Size: 32 GB\n",
+    )
+
+    assert macos.lookup_device_macos("/dev/disk4s1") is None
+    assert calls == []
+
+
+def test_lookup_device_macos_accepts_raw_disk_and_canonicalizes(monkeypatch):
+    seen = []
+
+    monkeypatch.setattr(macos.os.path, "exists", lambda path: path in {"/dev/rdisk4", "/dev/disk4"})
+    monkeypatch.setattr(macos, "_get_macos_all_mounts", lambda: {"disk4": ["/Volumes/BOOT"]})
+
+    def fake_info(path):
+        seen.append(path)
+        return "\n".join(
+            [
+                "Device / Media Name: USB DISK 3.0",
+                "Disk Size: 32 GB",
+                "Removable Media: Removable",
+            ]
+        )
+
+    monkeypatch.setattr(macos, "_get_diskutil_info_text", fake_info)
+
+    disk = macos.lookup_device_macos("/dev/rdisk4")
+
+    assert disk is not None
+    assert disk.device == "/dev/disk4"
+    assert disk.model == "USB DISK 3.0"
+    assert disk.removable is True
+    assert disk.mounted == ["/Volumes/BOOT"]
+    assert seen == ["/dev/disk4"]
 
 
 def test_get_partition2_wipe_range_linux(monkeypatch):

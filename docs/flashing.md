@@ -92,6 +92,8 @@ easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
 
 - Mac internal drives (containing `/` or `/System/Volumes/Data`) are
   blocking unless `--force` is used.
+- Pass the whole disk path such as `/dev/disk4`; partition paths such as
+  `/dev/disk4s1` are rejected before flashing.
 - `--yes` is required. Use `--dry-run` to preview.
 - `--force` overrides all blocking disk warnings (system disk, large
   fixed disk, device not in the default list).

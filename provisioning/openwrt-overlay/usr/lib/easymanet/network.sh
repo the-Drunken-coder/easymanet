@@ -65,9 +65,9 @@ easymanet_repair_management_lan() {
 
     easymanet_log_network "ensuring $mgmt_iface stays on br-lan for management reason=$reason role=$role uplink=$uplink"
 
-    # If wan is currently sitting on the management interface (the gate-eth0
-    # default), tear it down so it doesn't fight br-lan. Wi-Fi-uplink wan on
-    # phy1-sta0 must be left alone.
+    # If wan is currently sitting directly on the management interface, tear it
+    # down so it doesn't fight br-lan. Shared eth0 uplink uses br-lan as the wan
+    # device, and Wi-Fi-uplink wan on phy1-sta0 must be left alone.
     wan_device="$(uci -q get network.wan.device || true)"
     wan_ifname="$(uci -q get network.wan.ifname || true)"
     if [ "$wan_device" = "$mgmt_iface" ] || [ "$wan_ifname" = "$mgmt_iface" ]; then

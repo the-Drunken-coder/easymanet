@@ -87,6 +87,10 @@ nodes:
       ssid: point01-local
 ```
 
+For a gate, `uplink_interface: eth0` keeps wired management on `br-lan` and
+also runs the WAN DHCP client on that same bridge. That means the upstream
+Ethernet network and the EasyMANET management LAN share one L2 segment.
+
 ### 2. List available disks
 
 ```bash
@@ -225,6 +229,9 @@ workflow on `main`. Docker-based `easymanet image build` on Apple Silicon uses
 ## Security Notes
 
 - An empty `root_password_hash` leaves the root password unchanged on the node.
+- `gateway.uplink_interface: eth0` shares wired management and WAN DHCP on
+  `br-lan`; avoid connecting it to an upstream network where the management DHCP
+  service would be inappropriate.
 - Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
 - When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
   into that file in plaintext (OpenMANET daemon requirement; verify on hardware).

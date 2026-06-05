@@ -64,8 +64,6 @@ def inject(
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
 
-    mount_point: Optional[str] = None
-    mounted_here = False
     mount_point, mounted_here = _mount_boot_partition(device)
     try:
         boot_root = Path(mount_point)

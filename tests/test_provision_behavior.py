@@ -93,6 +93,21 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
     assert "wifi_off" in result.stdout
 
 
+def test_uci_harness_escapes_backslashes_in_keys(tmp_path):
+    uci_state = tmp_path / "uci-state"
+    env = _harness_env(uci_state)
+    result = _run_sh(
+        r'''
+uci set 'wireless.foo\bar=value1'
+uci set 'wireless.fooxbar=value2'
+uci -q get 'wireless.foo\bar'
+''',
+        env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.strip() == "value1"
+
+
 def _gate_provision_json() -> dict:
     return {
         "version": 1,
@@ -345,6 +360,19 @@ def test_provision_removes_boot_json_after_success(tmp_path):
     overlay_json = prefix / "etc" / "easymanet" / "provision.json"
     assert overlay_json.exists()
     assert (overlay_json.stat().st_mode & 0o777) == 0o600
+
+
+def test_provision_requires_node_ip(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    del provision_data["node"]["ip"]
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode != 0
+    assert "missing required mesh/node fields" in result.stdout
 
 
 def test_em_mesh_encryption_override_propagates_to_uci(tmp_path):

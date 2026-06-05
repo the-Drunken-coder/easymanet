@@ -71,6 +71,12 @@ def test_load_missing_file():
         load_manifest("/nonexistent/fleet.yml")
 
 
+def test_load_read_error_is_manifest_error(tmp_path):
+    with pytest.raises(ManifestError, match="Could not read config file") as exc_info:
+        load_manifest(str(tmp_path))
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+
 def test_load_invalid_yaml():
     path = _write_config(": invalid: yaml: [")
     with pytest.raises(ManifestError, match="Invalid YAML") as exc_info:

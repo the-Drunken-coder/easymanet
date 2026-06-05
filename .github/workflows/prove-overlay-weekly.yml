@@ -76,7 +76,7 @@ jobs:
           case "$OPENMANET_VERSION" in (*[!A-Za-z0-9._/-]*) echo "Invalid openmanet_version"; exit 1;; esac
           case "$BOARD" in (*[!A-Za-z0-9._-]*) echo "Invalid board"; exit 1;; esac
           case "$TARGET" in (*[!A-Za-z0-9._-]*) echo "Invalid target"; exit 1;; esac
-          case "$JOBS" in (*[!0-9]*) echo "Invalid jobs"; exit 1;; esac
+          case "$JOBS" in (""|0|*[!0-9]*) echo "Invalid jobs"; exit 1;; esac
           easymanet image build \
             --output-dir dist \
             --openmanet-version "$OPENMANET_VERSION" \

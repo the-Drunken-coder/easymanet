@@ -3,6 +3,8 @@
 import gzip
 import json
 
+import pytest
+
 from easymanet import download
 
 
@@ -60,6 +62,13 @@ def test_get_cached_image_returns_valid_matching_image(tmp_path, monkeypatch):
     image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image)
 
+    manifest.write_text(json.dumps({
+        "rpi4-mm6108-spi": {
+            "url": f"https://example.invalid/{image.name}",
+            "version": "test",
+        }
+    }))
+
     monkeypatch.setattr(download, "CACHE_DIR", cache)
     monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
     monkeypatch.setattr(download, "VERSION_FILE", version_file)
@@ -80,6 +89,14 @@ def test_get_cached_image_allows_openwrt_trailing_metadata(tmp_path, monkeypatch
     monkeypatch.setattr(download, "VERSION_FILE", version_file)
 
     assert download.get_cached_image("rpi4-mm6108-spi") == image
+
+
+def test_download_image_rejects_non_http_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
+    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+
+    with pytest.raises(OSError, match="Unsupported image URL scheme"):
+        download.download_image("rpi4-mm6108-spi", "test", "file:///etc/passwd")
 
 
 def test_pick_release_asset_falls_back_to_pattern_match():

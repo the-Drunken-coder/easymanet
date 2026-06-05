@@ -43,10 +43,12 @@ class ValidationResult:
 
 def validate_ip(ip_str: str) -> Optional[str]:
     try:
-        ipaddress.ip_address(ip_str)
-        return None
+        ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return f"Invalid IP address: {ip_str}"
+    if not isinstance(ip, ipaddress.IPv4Address):
+        return f"Invalid IPv4 address: {ip_str}"
+    return None
 
 
 def validate_ssh_key(key: str) -> Optional[str]:
@@ -64,6 +66,8 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     mesh = manifest.mesh
     if not mesh:
         result.add_error("mesh section is required")
+    elif not isinstance(mesh, dict):
+        result.add_error(f"mesh section must be a mapping, got {type(mesh).__name__}")
     else:
         if not mesh.get("id"):
             result.add_error("mesh.id is required")
@@ -90,26 +94,34 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     if not nodes:
         result.add_error("nodes section is required (at least one node must be defined)")
         return result
+    if not isinstance(nodes, dict):
+        result.add_error(f"nodes section must be a mapping, got {type(nodes).__name__}")
+        return result
+
+    defaults = manifest.defaults
+    if not isinstance(defaults, dict):
+        result.add_error(f"defaults section must be a mapping, got {type(defaults).__name__}")
+        defaults = {}
 
     hostnames_seen: dict = {}
     ips_seen: dict = {}
     node_names_lower = set()
 
-    default_gateway = manifest.defaults.get("gateway", {})
+    default_gateway = defaults.get("gateway", {})
     if not isinstance(default_gateway, dict):
         result.add_error(
             f"defaults.gateway must be a mapping, got {type(default_gateway).__name__}"
         )
         default_gateway = {}
 
-    default_local_ap = manifest.defaults.get("local_ap", {})
+    default_local_ap = defaults.get("local_ap", {})
     if not isinstance(default_local_ap, dict):
         result.add_error(
             f"defaults.local_ap must be a mapping, got {type(default_local_ap).__name__}"
         )
         default_local_ap = {}
 
-    management = manifest.defaults.get("management", {})
+    management = defaults.get("management", {})
     if not isinstance(management, dict):
         result.add_error(
             f"defaults.management must be a mapping, got {type(management).__name__}"
@@ -117,17 +129,23 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         management = {}
 
     for name in nodes:
+        if not isinstance(name, str):
+            result.add_error(f"Node name must be a string, got {type(name).__name__}")
+            continue
         if name.lower() in node_names_lower:
             result.add_error(f"Duplicate node name (case-insensitive): {name}")
         node_names_lower.add(name.lower())
 
         node = nodes[name]
+        if not isinstance(node, dict):
+            result.add_error(f"Node '{name}' must be a mapping, got {type(node).__name__}")
+            continue
 
-        role = node.get("role", manifest.defaults.get("role", "point"))
+        role = node.get("role", defaults.get("role", "point"))
         if role not in VALID_ROLES:
             result.add_error(f"Node '{name}': role must be one of {sorted(VALID_ROLES)}, got '{role}'")
 
-        target = node.get("target", manifest.defaults.get("target"))
+        target = node.get("target", defaults.get("target"))
         if target not in VALID_TARGETS:
             result.add_error(
                 f"Node '{name}': target must be one of {sorted(VALID_TARGETS)}, got '{target}'"
@@ -172,6 +190,10 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                 result.add_error(
                     f"Node '{name}': local_ap.enabled requires local_ap.password"
                 )
+            elif not isinstance(ap_password, str):
+                result.add_error(
+                    f"Node '{name}': local_ap.password must be a string"
+                )
             elif len(ap_password) < 8:
                 result.add_error(
                     f"Node '{name}': local_ap.password must be at least 8 characters"
@@ -196,8 +218,17 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     ssh_keys = management.get("ssh_authorized_keys", [])
     if not ssh_keys:
         result.add_warning("No SSH authorized keys provided in defaults.management.ssh_authorized_keys")
+    elif not isinstance(ssh_keys, list):
+        result.add_error(
+            f"defaults.management.ssh_authorized_keys must be a list, got {type(ssh_keys).__name__}"
+        )
     else:
         for key in ssh_keys:
+            if not isinstance(key, str):
+                result.add_error(
+                    f"defaults.management.ssh_authorized_keys entries must be strings, got {type(key).__name__}"
+                )
+                continue
             err = validate_ssh_key(key)
             if err:
                 result.add_error(f"Invalid SSH key: {err}")
@@ -209,14 +240,23 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     if node_name is not None:
         if node_name not in nodes:
             result.add_error(f"Selected node '{node_name}' does not exist in manifest")
+        elif not isinstance(nodes[node_name], dict):
+            result.add_error(
+                f"Selected node '{node_name}' must be a mapping, got {type(nodes[node_name]).__name__}"
+            )
+        elif not isinstance(manifest.defaults, dict):
+            pass
         else:
-            node = nodes[node_name]
             resolved = resolve_node(manifest, node_name)
             if isinstance(resolved.get("local_ap"), dict) and resolved["local_ap"].get("enabled"):
                 pw = resolved["local_ap"].get("password", "")
                 if not pw:
                     result.add_error(
                         f"Node '{node_name}': resolved local_ap.enabled requires local_ap.password"
+                    )
+                elif not isinstance(pw, str):
+                    result.add_error(
+                        f"Node '{node_name}': resolved local_ap.password must be a string"
                     )
                 elif len(pw) < 8:
                     result.add_error(

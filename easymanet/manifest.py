@@ -26,6 +26,8 @@ class Manifest:
         try:
             with open(self.path, "r") as f:
                 raw = yaml.safe_load(f)
+        except OSError as e:
+            raise ManifestError(f"Could not read config file {self.path}: {e}") from e
         except yaml.YAMLError as e:
             raise ManifestError(f"Invalid YAML in {self.path}: {e}") from e
         self.data = self._validate_structure(raw)

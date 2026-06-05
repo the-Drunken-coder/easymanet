@@ -139,6 +139,16 @@ def test_invalid_ip():
     os.unlink(path)
 
 
+def test_ipv6_node_ip_is_invalid():
+    config = VALID_CONFIG.replace("ip: 10.41.2.1", "ip: fd00::1")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("Invalid IPv4 address" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_invalid_role():
     config = VALID_CONFIG.replace("role: point", "role: drone")
     path = _write_config(config)
@@ -230,10 +240,13 @@ def test_invalid_country_code():
 
 
 def test_defaults_local_ap_must_be_mapping():
+    needle = (
+        '  local_ap:\n'
+        '    enabled: true\n'
+        '    password: "ap-password"'
+    )
     config = VALID_CONFIG.replace(
-        """  local_ap:
-    enabled: true
-    password: "ap-password\"""",
+        needle,
         "  local_ap: not-a-mapping",
         1,
     )
@@ -265,6 +278,16 @@ def test_local_ap_enabled_requires_password():
     os.unlink(path)
 
 
+def test_local_ap_password_must_be_string():
+    config = VALID_CONFIG.replace('password: "ap-password"', "password: 12345678", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("local_ap.password must be a string" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_validate_ssh_key_accepts_sk_and_ecdsa_types():
     from easymanet.validate import validate_ssh_key
 
@@ -291,11 +314,14 @@ def test_defaults_gateway_must_be_mapping():
 
 
 def test_defaults_management_must_be_mapping():
+    needle = (
+        '  management:\n'
+        '    root_password_hash: ""\n'
+        '    ssh_authorized_keys:\n'
+        '      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"'
+    )
     config = VALID_CONFIG.replace(
-        """  management:
-    root_password_hash: ""
-    ssh_authorized_keys:
-      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh\"""",
+        needle,
         "  management: not-a-mapping",
     )
     path = _write_config(config)
@@ -303,6 +329,42 @@ def test_defaults_management_must_be_mapping():
     result = validate(m)
     assert not result.valid
     assert any("defaults.management must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_ssh_authorized_keys_must_be_list():
+    config = VALID_CONFIG.replace(
+        'ssh_authorized_keys:\n      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"',
+        "ssh_authorized_keys: not-a-list",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("ssh_authorized_keys must be a list" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_ssh_authorized_keys_entries_must_be_strings():
+    config = VALID_CONFIG.replace(
+        '      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"',
+        "      - 123",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("ssh_authorized_keys entries must be strings" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_node_names_must_be_strings():
+    config = VALID_CONFIG.replace("  node02:", "  2:", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("Node name must be a string" in e for e in result.errors)
     os.unlink(path)
 
 

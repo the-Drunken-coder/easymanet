@@ -72,8 +72,9 @@ case "$1" in
         if [ -z "$pkg" ]; then
             cat "$UCI_STATE_FILE"
         else
-            grep "^${pkg}\." "$UCI_STATE_FILE" 2>/dev/null || true
-            grep "^${pkg}=" "$UCI_STATE_FILE" 2>/dev/null || true
+            esc_pkg="$(_uci_escape_sed "$pkg")"
+            grep "^${esc_pkg}\." "$UCI_STATE_FILE" 2>/dev/null || true
+            grep "^${esc_pkg}=" "$UCI_STATE_FILE" 2>/dev/null || true
         fi
         ;;
     set)
@@ -89,7 +90,8 @@ case "$1" in
                 shift
                 key="$1"
                 _uci_ensure
-                line="$(grep "^${key}=" "$UCI_STATE_FILE" 2>/dev/null | head -n 1)" || true
+                esc_key="$(_uci_escape_sed "$key")"
+                line="$(grep "^${esc_key}=" "$UCI_STATE_FILE" 2>/dev/null | head -n 1)" || true
                 if [ -n "$line" ]; then
                     val="${line#*=}"
                     val="${val#\'}"
@@ -110,8 +112,9 @@ case "$1" in
         shift
         pkg="$1"
         _uci_ensure
+        esc_pkg="$(_uci_escape_sed "$pkg")"
         n=0
-        while grep -q "^${pkg}\.@${pkg}\[${n}\]" "$UCI_STATE_FILE" 2>/dev/null; do
+        while grep -q "^${esc_pkg}\.@${esc_pkg}\[${n}\]" "$UCI_STATE_FILE" 2>/dev/null; do
             n=$((n + 1))
         done
         printf '%s\n' "@${pkg}[${n}]"
@@ -122,7 +125,8 @@ case "$1" in
         value="${1#*=}"
         value="${value#\"}"
         value="${value%\"}"
-        existing="$(grep "^${key}=" "$UCI_STATE_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d "'")"
+        esc_key="$(_uci_escape_sed "$key")"
+        existing="$(grep "^${esc_key}=" "$UCI_STATE_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d "'")"
         if [ -n "$existing" ]; then
             _uci_set_line "$key" "${existing} ${value}"
         else

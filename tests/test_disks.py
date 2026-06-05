@@ -1,3 +1,5 @@
+import pytest
+
 from easymanet import disks
 
 
@@ -17,14 +19,15 @@ def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeyp
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
+        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
 
     monkeypatch.setattr(disks.subprocess, "run", fake_run)
 
     disks.unmount_disk("/dev/sdb")
 
     assert calls == [
-        (["umount", "-l", "/dev/sdb1"], {"capture_output": True, "timeout": 60}),
-        (["umount", "-l", "/dev/sdb2"], {"capture_output": True, "timeout": 60}),
+        (["umount", "-l", "/dev/sdb1"], {"capture_output": True, "text": True, "timeout": 60}),
+        (["umount", "-l", "/dev/sdb2"], {"capture_output": True, "text": True, "timeout": 60}),
     ]
 
 
@@ -34,13 +37,70 @@ def test_linux_unmount_disk_falls_back_to_device_when_no_partitions(monkeypatch)
     monkeypatch.setattr(disks, "is_macos", lambda: False)
     monkeypatch.setattr(disks, "is_linux", lambda: True)
     monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
-    monkeypatch.setattr(disks.subprocess, "run", lambda cmd, **kwargs: calls.append((cmd, kwargs)))
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+
+    monkeypatch.setattr(disks.subprocess, "run", fake_run)
 
     disks.unmount_disk("/dev/mmcblk0")
 
     assert calls == [
-        (["umount", "-l", "/dev/mmcblk0"], {"capture_output": True, "timeout": 60}),
+        (["umount", "-l", "/dev/mmcblk0"], {"capture_output": True, "text": True, "timeout": 60}),
     ]
+
+
+def test_linux_unmount_disk_ignores_not_mounted(monkeypatch):
+    monkeypatch.setattr(disks, "is_macos", lambda: False)
+    monkeypatch.setattr(disks, "is_linux", lambda: True)
+    monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
+
+    def fake_run(cmd, **kwargs):
+        return type(
+            "Result",
+            (),
+            {"returncode": 32, "stderr": "umount: /dev/sdb: not mounted", "stdout": ""},
+        )()
+
+    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+
+    disks.unmount_disk("/dev/sdb")
+
+
+def test_linux_unmount_disk_raises_on_failure(monkeypatch):
+    monkeypatch.setattr(disks, "is_macos", lambda: False)
+    monkeypatch.setattr(disks, "is_linux", lambda: True)
+    monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
+
+    def fake_run(cmd, **kwargs):
+        return type(
+            "Result",
+            (),
+            {"returncode": 32, "stderr": "umount: /dev/sdb: target is busy", "stdout": ""},
+        )()
+
+    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="target is busy"):
+        disks.unmount_disk("/dev/sdb")
+
+
+def test_eject_disk_raises_on_failure(monkeypatch):
+    monkeypatch.setattr(disks, "is_macos", lambda: False)
+    monkeypatch.setattr(disks, "is_linux", lambda: True)
+
+    def fake_run(cmd, **kwargs):
+        assert cmd == ["eject", "/dev/sdb"]
+        return type(
+            "Result",
+            (),
+            {"returncode": 1, "stderr": "eject failed", "stdout": ""},
+        )()
+
+    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="eject failed"):
+        disks.eject_disk("/dev/sdb")
 
 
 def test_blocking_warnings_system_disk():
@@ -75,8 +135,6 @@ def test_blocking_warnings_not_in_default_list():
 
 
 def test_assert_flash_allowed_blocks_without_force(monkeypatch):
-    import pytest
-
     disk = disks.DiskInfo(
         device="/dev/sda",
         size_bytes=500 * 1024**3,

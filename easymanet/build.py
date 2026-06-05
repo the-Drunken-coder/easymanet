@@ -80,7 +80,10 @@ def build_image(
     builder_image: str = DEFAULT_BUILDER_IMAGE,
     cache_dir: Optional[str] = None,
 ) -> Path:
-    jobs = jobs or max(os.cpu_count() or 1, 1)
+    if jobs is None:
+        jobs = max(os.cpu_count() or 1, 1)
+    elif jobs < 1:
+        raise ValueError(f"jobs must be >= 1, got {jobs}")
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +114,7 @@ def build_image(
     )
 
     try:
-        subprocess.run(command, check=True, timeout=None)
+        _run_docker(command, check=True, timeout=None)
     except subprocess.CalledProcessError as e:
         raise BuildError(f"Docker build failed: {e}") from e
 
@@ -156,12 +159,21 @@ def _read_extra_packages(path: Path) -> list[str]:
     return packages
 
 
+def _run_docker(command: list[str], **kwargs) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(command, **kwargs)
+    except OSError as e:
+        raise BuildError(
+            "Failed to execute Docker. Ensure Docker is installed and on PATH."
+        ) from e
+
+
 def _ensure_builder_image(image_name: str, force: bool = False) -> None:
     _ensure_build_dirs()
     if force:
-        subprocess.run(["docker", "image", "rm", "-f", image_name], capture_output=True)
+        _run_docker(["docker", "image", "rm", "-f", image_name], capture_output=True)
 
-    exists = subprocess.run(
+    exists = _run_docker(
         ["docker", "image", "inspect", image_name],
         capture_output=True,
         timeout=30,
@@ -174,7 +186,7 @@ def _ensure_builder_image(image_name: str, force: bool = False) -> None:
     try:
         dockerfile_path = context_dir / "Dockerfile"
         dockerfile_path.write_text(dockerfile)
-        subprocess.run(
+        _run_docker(
             ["docker", "build", "--platform", DEFAULT_DOCKER_PLATFORM, "-t", image_name, str(context_dir)],
             check=True,
             timeout=None,

@@ -708,8 +708,6 @@ sudo route -n delete default 10.41.0.1
 sudo route -n add default 192.168.1.1
 ```
 
-The sudo password used during this session was provided by the user in chat.
-
 ### What To Do Next
 
 When build `25678707977` finishes:

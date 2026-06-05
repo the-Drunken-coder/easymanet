@@ -4,7 +4,9 @@ import json
 import os
 import tempfile
 
-from easymanet.manifest import load_manifest
+import pytest
+
+from easymanet.manifest import ManifestError, load_manifest
 from easymanet.render import render, render_dict
 
 
@@ -182,3 +184,34 @@ nodes:
 
     assert data["node"]["local_ap"]["enabled"] is False
     os.unlink(path)
+
+
+def test_render_rejects_malformed_management_defaults():
+    needle = (
+        '  management:\n'
+        '    root_password_hash: ""\n'
+        '    ssh_authorized_keys:\n'
+        '      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"'
+    )
+    config = VALID_CONFIG.replace(
+        needle,
+        "  management: not-a-mapping",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    with pytest.raises(ManifestError, match="defaults.management must be a mapping"):
+        render(m, "node01")
+    os.unlink(path)
+
+
+def test_render_rejects_malformed_mesh_object():
+    class BadManifest:
+        mesh = "not-a-mapping"
+        defaults = {}
+        nodes = {"node01": {}}
+
+        def get_node(self, name):
+            return self.nodes[name]
+
+    with pytest.raises(ManifestError, match="'mesh' must be a mapping"):
+        render(BadManifest(), "node01")

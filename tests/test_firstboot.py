@@ -61,6 +61,21 @@ def test_firstboot_honors_ssh_enabled_flag():
     assert '"$dropbear_init" disable' in text
 
 
+def test_firstboot_temp_boot_mount_is_writable_for_payload_removal():
+    text = PROVISION_SCRIPT.read_text()
+    assert 'mount -t vfat "$dev" "$BOOT_MOUNT_TMP"' in text
+    assert 'mount -o ro -t vfat "$dev" "$BOOT_MOUNT_TMP"' not in text
+    wipe_block = text.split("wipe_boot_provision_json() {", 1)[1].split("}", 1)[0]
+    assert '"$BOOT_JSON"' in wipe_block
+    assert 'if [ "$BOOT_MOUNTED_TMP" -eq 1 ]' not in wipe_block
+
+
+def test_firstboot_requires_node_ip():
+    text = PROVISION_SCRIPT.read_text()
+    required_block = text.split('if [ -z "$MESH_ID" ]', 1)[1].split("fi", 1)[0]
+    assert '[ -z "$NODE_IP" ]' in required_block
+
+
 def test_firstboot_does_not_auto_reboot_after_provisioning():
     text = PROVISION_SCRIPT.read_text()
     assert "( sleep 5; reboot )" not in text

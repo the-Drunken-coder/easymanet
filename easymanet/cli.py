@@ -49,7 +49,7 @@ def validate_cmd(
         manifest = load_manifest(config)
     except ManifestError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     result = validate(manifest, node_name=node)
     typer.secho(f"Validating: {config}", bold=True)
@@ -74,7 +74,7 @@ def render_cmd(
         manifest = load_manifest(config)
     except ManifestError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     result = validate(manifest, node_name=node)
     if result.errors:

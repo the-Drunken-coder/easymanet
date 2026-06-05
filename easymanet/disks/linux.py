@@ -262,4 +262,16 @@ def _linux_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
 def unmount_disk_linux(device: str) -> None:
     targets = _linux_partitions_for_device(device) or [device]
     for target in targets:
-        subprocess.run(["umount", "-l", target], capture_output=True, timeout=60)
+        result = subprocess.run(
+            ["umount", "-l", target],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            continue
+        detail = (result.stderr or result.stdout or "").strip()
+        if "not mounted" in detail.lower():
+            continue
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Failed to unmount {target}{suffix}")

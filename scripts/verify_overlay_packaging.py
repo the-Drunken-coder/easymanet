@@ -29,9 +29,18 @@ def _packaged_overlay_paths() -> set[str]:
         data = tomllib.load(f)
     packaged: set[str] = set()
     overlay_prefix = "provisioning/openwrt-overlay/"
-    for filenames in data["tool"]["setuptools"]["data-files"].values():
+    data_files = (
+        data.get("tool", {})
+        .get("setuptools", {})
+        .get("data-files", {})
+    )
+    if not isinstance(data_files, dict):
+        return packaged
+    for filenames in data_files.values():
+        if not isinstance(filenames, list):
+            continue
         for name in filenames:
-            if name.startswith(overlay_prefix):
+            if isinstance(name, str) and name.startswith(overlay_prefix):
                 packaged.add(name)
     return packaged
 

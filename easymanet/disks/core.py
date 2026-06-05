@@ -52,7 +52,6 @@ def lookup_device(
     if disk is None:
         return None
 
-    disks_mod = _disks_module()
     disks = (
         default_disks
         if default_disks is not None
@@ -119,6 +118,22 @@ def get_partition2_wipe_range(device: str) -> Optional[Tuple[int, int]]:
 def eject_disk(device: str) -> None:
     disks_mod = _disks_module()
     if disks_mod.is_macos():
-        subprocess.run(["diskutil", "eject", device], capture_output=True)
+        result = subprocess.run(
+            ["diskutil", "eject", device],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
     elif disks_mod.is_linux():
-        subprocess.run(["eject", device], capture_output=True)
+        result = subprocess.run(
+            ["eject", device],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    else:
+        return
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Failed to eject {device}{suffix}")

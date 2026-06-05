@@ -182,6 +182,12 @@ def register_flash_command(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
+        if download and no_download:
+            typer.secho(
+                "Cannot use --download and --no-download together.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
         if not yes and not dry_run:
             typer.secho(
                 "--yes is required to flash. Use --dry-run to preview first.",

@@ -21,6 +21,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 import zlib
 from pathlib import Path
 from typing import Optional, Tuple
@@ -149,12 +150,19 @@ def _url_to_filename(url: str) -> str:
     return parts[-1] if parts else "image.img.gz"
 
 
+def _validate_download_url(url: str) -> None:
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise OSError(f"Unsupported image URL scheme: {scheme or '<none>'}")
+
+
 def download_image(
     target: str,
     version: str,
     url: str,
     force: bool = False,
 ) -> Path:
+    _validate_download_url(url)
     _ensure_cache_dir()
     filename = _url_to_filename(url)
     dest = CACHE_DIR / filename

@@ -40,3 +40,28 @@ def test_flash_ssh_flags_mutually_exclusive():
     )
     assert result.exit_code == 1
     assert "Cannot use --enable-ssh and --disable-ssh" in result.output
+
+
+def test_flash_download_flags_mutually_exclusive():
+    from typer.testing import CliRunner
+
+    from easymanet.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "flash",
+            "--config",
+            "fleet.yml",
+            "--node",
+            "n1",
+            "--device",
+            "/dev/disk4",
+            "--download",
+            "--no-download",
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Cannot use --download and --no-download" in result.output

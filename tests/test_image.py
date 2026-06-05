@@ -109,6 +109,7 @@ def test_clear_stale_overlay_uses_large_bulk_dd(monkeypatch, tmp_path):
     monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", fake_wipe_range)
     monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
     _clear_stale_overlay("/dev/disk4", written_bytes)
 
@@ -297,11 +298,12 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
         return procs[1]
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
     _write_gz_via_dd(str(image), str(device))
 
 
-def test_write_gz_via_dd_keeps_buffered_device_on_macos(monkeypatch, tmp_path):
+def test_write_gz_via_dd_uses_raw_device_on_macos(monkeypatch, tmp_path):
     image = tmp_path / "firmware.img.gz"
     with gzip.open(image, "wb") as handle:
         handle.write(b"payload")
@@ -328,10 +330,11 @@ def test_write_gz_via_dd_keeps_buffered_device_on_macos(monkeypatch, tmp_path):
 
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
     _write_gz_via_dd(str(image), "/dev/disk4")
 
-    assert ["dd", "of=/dev/disk4", "bs=16m", "status=progress"] in popen_calls
+    assert ["dd", "of=/dev/rdisk4", "bs=16m", "status=progress"] in popen_calls
 
 
 def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):
@@ -344,6 +347,7 @@ def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):
 
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr("easymanet.image.subprocess.run", fake_run)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
     _write_raw_via_dd(str(image), "/dev/disk4")
 

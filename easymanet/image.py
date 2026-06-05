@@ -5,6 +5,7 @@ and clean unmount/eject.
 """
 
 import os
+import shutil
 import subprocess
 import zlib
 from pathlib import Path
@@ -22,6 +23,13 @@ from .platform import is_linux, is_macos
 
 class FlashError(Exception):
     pass
+
+
+def _tool_path(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise FlashError(f"Required tool not found on PATH: {name}")
+    return path
 
 
 def _check_device_safety(device: str, force: bool = False) -> None:
@@ -75,18 +83,18 @@ def _check_image(image_path: str) -> Tuple[Path, Optional[int]]:
 def _reread_partition_table(device: str) -> None:
     if is_linux():
         subprocess.run(
-            ["blockdev", "--rereadpt", device],
+            [_tool_path("blockdev"), "--rereadpt", device],
             capture_output=True,
             timeout=30,
         )
         subprocess.run(
-            ["partprobe", device],
+            [_tool_path("partprobe"), device],
             capture_output=True,
             timeout=30,
         )
     elif is_macos():
         subprocess.run(
-            ["diskutil", "list", device],
+            [_tool_path("diskutil"), "list", device],
             capture_output=True,
             timeout=30,
         )
@@ -144,13 +152,21 @@ def flash_image(
 
 
 def _write_gz_via_dd(image_path: str, device: str) -> None:
+    gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
+    output_device = _dd_device_path(device)
+    dd_cmd = [
+        _tool_path("dd"),
+        f"of={output_device}",
+        _write_block_size_arg(),
+        "status=progress",
+    ]
     gzip_proc = subprocess.Popen(
-        ["gzip", "-dc", image_path],
+        gzip_cmd,
         stdout=subprocess.PIPE,
     )
     assert gzip_proc.stdout is not None
     dd_proc = subprocess.Popen(
-        ["dd", f"of={device}", _write_block_size_arg(), "status=progress"],
+        dd_cmd,
         stdin=gzip_proc.stdout,
     )
     gzip_proc.stdout.close()
@@ -161,9 +177,9 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
     # OpenWrt/OpenMANET sysupgrade metadata after the gzip stream can yield exit 2
     # ("trailing garbage ignored"); payload integrity is validated by _check_gzip_payload.
     if gzip_return not in (0, 2):
-        raise subprocess.CalledProcessError(gzip_return, ["gzip", "-dc", image_path])
+        raise subprocess.CalledProcessError(gzip_return, gzip_cmd)
     if dd_return != 0:
-        raise subprocess.CalledProcessError(dd_return, ["dd", f"of={device}"])
+        raise subprocess.CalledProcessError(dd_return, dd_cmd)
 
 
 _OVERLAY_WIPE_SECTOR_BYTES = 512
@@ -193,7 +209,7 @@ def _run_zero_dd(device: str, block_bytes: int, seek_blocks: int, count_blocks: 
     output_device = _dd_device_path(device)
     subprocess.run(
         [
-            "dd",
+            _tool_path("dd"),
             "if=/dev/zero",
             f"of={output_device}",
             f"bs={block_bytes}",
@@ -258,7 +274,7 @@ def _write_raw_via_dd(image_path: str, device: str) -> None:
     output_device = _dd_device_path(device)
     subprocess.run(
         [
-            "dd",
+            _tool_path("dd"),
             f"if={image_path}",
             f"of={output_device}",
             _write_block_size_arg(),

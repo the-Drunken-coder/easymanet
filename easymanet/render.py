@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, Optional
 
-from .manifest import Manifest
+from .manifest import Manifest, ManifestError
 from .validate import resolve_node
 
 
@@ -14,8 +14,19 @@ def render(
     ssh_enabled: Optional[bool] = None,
 ) -> str:
     mesh = manifest.mesh
+    if not isinstance(mesh, dict):
+        raise ManifestError(f"Manifest section 'mesh' must be a mapping, got {type(mesh).__name__}")
+    defaults = manifest.defaults
+    if not isinstance(defaults, dict):
+        raise ManifestError(
+            f"Manifest section 'defaults' must be a mapping, got {type(defaults).__name__}"
+        )
     resolved_node = resolve_node(manifest, node_name)
-    management = manifest.defaults.get("management", {})
+    management = defaults.get("management", {})
+    if not isinstance(management, dict):
+        raise ManifestError(
+            f"defaults.management must be a mapping, got {type(management).__name__}"
+        )
 
     management_block: Dict[str, Any] = {
         "root_password_hash": management.get("root_password_hash", ""),

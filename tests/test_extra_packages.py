@@ -21,4 +21,4 @@ def test_extra_packages_referenced_by_build_workflow():
     text = (root / ".github" / "workflows" / "build-openmanet-image.yml").read_text()
     assert "image build" in text
     assert "easymanet" in text
-    assert "extra-packages.txt" in (root / "easymanet" / "build.py").read_text()
+    assert "extra-packages.txt" in text

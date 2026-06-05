@@ -65,10 +65,8 @@ cleanup() {
 trap cleanup EXIT
 
 wipe_boot_provision_json() {
-    if [ "$BOOT_MOUNTED_TMP" -eq 1 ]; then
-        return 0
-    fi
     for candidate in \
+        "$BOOT_JSON" \
         "$(_prefix_path /boot/easymanet/provision.json)" \
         "$(_prefix_path /boot/firmware/easymanet/provision.json)"
     do
@@ -115,7 +113,7 @@ find_boot_json() {
     mkdir -p "$BOOT_MOUNT_TMP"
     for dev in /dev/mmcblk0p1 /dev/sda1 /dev/nvme0n1p1; do
         [ -b "$dev" ] || continue
-        if mount -o ro -t vfat "$dev" "$BOOT_MOUNT_TMP" 2>/dev/null; then
+        if mount -t vfat "$dev" "$BOOT_MOUNT_TMP" 2>/dev/null; then
             BOOT_MOUNTED_TMP=1
             if [ -s "$BOOT_MOUNT_TMP/easymanet/provision.json" ]; then
                 BOOT_JSON="$BOOT_MOUNT_TMP/easymanet/provision.json"
@@ -157,7 +155,7 @@ MESH_CHANNEL="$(json_val mesh channel)"
 MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
 
-if [ -z "$MESH_ID" ] || [ -z "$MESH_PASSWORD" ] || [ -z "$HOSTNAME" ]; then
+if [ -z "$MESH_ID" ] || [ -z "$MESH_PASSWORD" ] || [ -z "$HOSTNAME" ] || [ -z "$NODE_IP" ]; then
     echo "FATAL: missing required mesh/node fields in provision.json" | tee -a "$LOG_FILE"
     exit 1
 fi

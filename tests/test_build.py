@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from easymanet import build
 
 
@@ -200,3 +202,40 @@ def test_build_image_returns_expected_artifact(monkeypatch, tmp_path):
 
     assert artifact == output / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
     assert artifact.exists()
+
+
+def test_build_image_rejects_non_positive_jobs(tmp_path):
+    with pytest.raises(ValueError, match="jobs must be >= 1"):
+        build.build_image(output_dir=str(tmp_path), jobs=0)
+
+
+def test_ensure_builder_image_maps_missing_docker_to_build_error(monkeypatch):
+    monkeypatch.setattr(build, "_ensure_build_dirs", lambda: None)
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(build.BuildError, match="Failed to execute Docker") as exc_info:
+        build._ensure_builder_image("builder:test")
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+
+
+def test_build_image_maps_missing_docker_to_build_error(monkeypatch, tmp_path):
+    output = tmp_path / "dist"
+    overlay = tmp_path / "overlay"
+    overlay.mkdir(parents=True)
+
+    monkeypatch.setattr(build, "_overlay_dir", lambda: overlay)
+    monkeypatch.setattr(build, "_ensure_builder_image", lambda *args, **kwargs: None)
+    monkeypatch.setattr(build, "_ensure_build_dirs", lambda: None)
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(build.BuildError, match="Failed to execute Docker") as exc_info:
+        build.build_image(output_dir=str(output))
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)

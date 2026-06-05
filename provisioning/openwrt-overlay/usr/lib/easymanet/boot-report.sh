@@ -48,6 +48,23 @@ easymanet_redact_uci_wireless() {
     uci show wireless 2>/dev/null | sed -E "s/(\.(key|password)=)'[^']*'/\1'<redacted>'/g" || true
 }
 
+easymanet_redact_uci_mesh11sd() {
+    uci show mesh11sd 2>/dev/null | sed -E "s/(\.(key|password|passphrase|psk|secret)=)'[^']*'/\1'<redacted>'/g" || true
+}
+
+easymanet_redact_config_mesh11sd() {
+    if command -v uci >/dev/null 2>&1; then
+        easymanet_redact_uci_mesh11sd
+        return 0
+    fi
+    if [ -f /etc/config/mesh11sd ]; then
+        sed -E \
+            -e "s/(option[[:space:]]+(key|password|passphrase|psk|secret)[[:space:]]+)'[^']*'/\1'<redacted>'/g" \
+            -e 's/(option[[:space:]]+(key|password|passphrase|psk|secret)[[:space:]]+)"[^"]*"/\1"<redacted>"/g' \
+            /etc/config/mesh11sd 2>/dev/null || true
+    fi
+}
+
 write_easymanet_boot_report() {
     reason="${1:-boot}"
     report_dir="$(find_boot_report_dir)" || return 0
@@ -86,7 +103,7 @@ write_easymanet_boot_report() {
     run_report_cmd "$latest/wifi-status.txt" wifi status
     run_report_cmd "$latest/uci-wireless.txt" easymanet_redact_uci_wireless
     run_report_cmd "$latest/uci-network.txt" uci show network
-    run_report_cmd "$latest/uci-mesh11sd.txt" uci show mesh11sd
+    run_report_cmd "$latest/uci-mesh11sd.txt" easymanet_redact_uci_mesh11sd
     run_report_cmd "$latest/uci-dhcp.txt" uci show dhcp
     run_report_cmd "$latest/uci-firewall.txt" uci show firewall
     run_report_cmd "$latest/ps.txt" ps w
@@ -96,7 +113,7 @@ write_easymanet_boot_report() {
     cp /var/log/easymanet-network.log "$latest/easymanet-network.log" 2>/dev/null || true
     cp /etc/easymanet/provisioned "$latest/provisioned" 2>/dev/null || true
     cp /etc/config/network "$latest/config-network" 2>/dev/null || true
-    cp /etc/config/mesh11sd "$latest/config-mesh11sd" 2>/dev/null || true
+    easymanet_redact_config_mesh11sd > "$latest/config-mesh11sd" 2>/dev/null || true
     cp /etc/config/dhcp "$latest/config-dhcp" 2>/dev/null || true
     cp /etc/config/firewall "$latest/config-firewall" 2>/dev/null || true
 

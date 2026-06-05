@@ -142,7 +142,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
             )
         except BuildError as e:
             typer.secho(f"Build error: {e}", fg=typer.colors.RED)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from e
 
         typer.secho("Build complete.", fg=typer.colors.GREEN)
         typer.echo(f"  Image: {artifact}")

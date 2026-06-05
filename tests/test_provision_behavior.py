@@ -93,6 +93,21 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
     assert "wifi_off" in result.stdout
 
 
+def test_jsonfilter_rejects_malformed_array_expression(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps({"items": ["one"]}))
+
+    result = subprocess.run(
+        [str(HARNESS / "jsonfilter"), "-i", str(provision_json), "-e", "items[*]"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
 def test_uci_harness_escapes_backslashes_in_keys(tmp_path):
     uci_state = tmp_path / "uci-state"
     env = _harness_env(uci_state)

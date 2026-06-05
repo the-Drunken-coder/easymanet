@@ -65,3 +65,23 @@ def test_flash_download_flags_mutually_exclusive():
     )
     assert result.exit_code == 1
     assert "Cannot use --download and --no-download" in result.output
+
+
+def test_image_build_chains_build_error(monkeypatch):
+    from typer.testing import CliRunner
+
+    from easymanet import cli_image
+    from easymanet.build import BuildError
+    from easymanet.cli import app
+
+    def fail_build(**kwargs):
+        del kwargs
+        raise BuildError("docker is missing")
+
+    monkeypatch.setattr(cli_image, "maybe_show_update_notice", lambda: None)
+    monkeypatch.setattr(cli_image, "build_image", fail_build)
+
+    result = CliRunner().invoke(app, ["image", "build", "--output-dir", "dist"])
+
+    assert result.exit_code == 1
+    assert "Build error: docker is missing" in result.output

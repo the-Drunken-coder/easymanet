@@ -34,7 +34,9 @@ def main() -> int:
     data = load_json(path)
 
     if expr.endswith("[*]"):
-        base = expr[1:-3]  # drop @. and [*]
+        if not expr.startswith("@."):
+            return 1
+        base = expr[2:-3]  # drop @. and [*]
         keys = base.split(".")
         cur = walk(data, keys)
         if isinstance(cur, list):

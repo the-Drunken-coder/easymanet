@@ -24,7 +24,7 @@ class Manifest:
         if not self.path.exists():
             raise ManifestError(f"Config file not found: {self.path}")
         try:
-            with open(self.path, "r") as f:
+            with open(self.path, "r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f)
         except OSError as e:
             raise ManifestError(f"Could not read config file {self.path}: {e}") from e

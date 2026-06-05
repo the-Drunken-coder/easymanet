@@ -1,9 +1,7 @@
 """Tests for boot-partition staging."""
 
 import json
-import os
 import plistlib
-import tempfile
 
 from easymanet.inject import (
     _cleanup_mount,
@@ -48,11 +46,10 @@ nodes:
 """
 
 
-def _write_config(content: str) -> str:
-    fd, path = tempfile.mkstemp(suffix=".yml", prefix="easymanet_test_")
-    with os.fdopen(fd, "w") as f:
-        f.write(content)
-    return path
+def _write_config(tmp_path, content: str) -> str:
+    path = tmp_path / "easymanet_test.yml"
+    path.write_text(content)
+    return str(path)
 
 
 def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(monkeypatch):
@@ -88,19 +85,18 @@ def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(mon
     assert _find_boot_mount("/dev/disk4") == "/Volumes/boot"
 
 
-def test_inject_dry_run_info_mentions_boot_partition():
-    path = _write_config(VALID_CONFIG)
+def test_inject_dry_run_info_mentions_boot_partition(tmp_path):
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
 
     info = inject_dry_run_info(manifest, "node01")
 
     assert "/easymanet/provision.json" in info
     assert "first-boot hooks" in info
-    os.unlink(path)
 
 
 def test_inject_writes_provision_json_to_boot_partition(monkeypatch, tmp_path):
-    path = _write_config(VALID_CONFIG)
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
@@ -121,11 +117,10 @@ def test_inject_writes_provision_json_to_boot_partition(monkeypatch, tmp_path):
     data = json.loads(written.read_text())
     assert data["node"]["name"] == "node01"
     assert results[0] == ("/boot/easymanet/provision.json", True)
-    os.unlink(path)
 
 
 def test_inject_patches_rpi_boot_root_to_partuuid(monkeypatch, tmp_path):
-    path = _write_config(VALID_CONFIG)
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
@@ -150,11 +145,10 @@ def test_inject_patches_rpi_boot_root_to_partuuid(monkeypatch, tmp_path):
     assert "root=/dev/mmcblk0p2" not in cmdline.read_text()
     assert (boot_mount / "cmdline.txt.easymanet.bak").read_text().startswith("console=serial0")
     assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=a7ad1f13-02", True)
-    os.unlink(path)
 
 
 def test_inject_patches_usb_sda_root_to_partuuid(monkeypatch, tmp_path):
-    path = _write_config(VALID_CONFIG)
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
@@ -179,11 +173,10 @@ def test_inject_patches_usb_sda_root_to_partuuid(monkeypatch, tmp_path):
     assert "root=/dev/sda2" not in cmdline.read_text()
     assert (boot_mount / "cmdline.txt.easymanet.bak").read_text().startswith("console=ttyAMA0")
     assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=b3c4d5e6-02", True)
-    os.unlink(path)
 
 
 def test_inject_patches_nvme_root_to_partuuid(monkeypatch, tmp_path):
-    path = _write_config(VALID_CONFIG)
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
@@ -208,11 +201,10 @@ def test_inject_patches_nvme_root_to_partuuid(monkeypatch, tmp_path):
     assert "root=/dev/nvme0n1p2" not in cmdline.read_text()
     assert (boot_mount / "cmdline.txt.easymanet.bak").read_text().startswith("console=ttyAMA0")
     assert results[-1] == ("/boot/cmdline.txt root=PARTUUID=c8d9e0f1-02", True)
-    os.unlink(path)
 
 
 def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
-    path = _write_config(VALID_CONFIG)
+    path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
@@ -235,7 +227,6 @@ def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
     assert cmdline.read_text() == original
     assert not (boot_mount / "cmdline.txt.easymanet.bak").exists()
     assert all("cmdline.txt" not in path for path, _ok in results)
-    os.unlink(path)
 
 
 def test_cleanup_mount_reports_failed_linux_unmount(monkeypatch, tmp_path, capsys):

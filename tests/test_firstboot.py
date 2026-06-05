@@ -114,6 +114,10 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "write_easymanet_boot_report" in report_text
     assert "boot-report-latest" in report_text
     assert "easymanet_redact_uci_wireless" in report_text
+    assert "easymanet_redact_uci_mesh11sd" in report_text
+    assert 'run_report_cmd "$latest/uci-mesh11sd.txt" easymanet_redact_uci_mesh11sd' in report_text
+    assert 'easymanet_redact_config_mesh11sd > "$latest/config-mesh11sd"' in report_text
     assert 'cp /etc/easymanet/provision.json' not in report_text
+    assert 'cp /etc/config/mesh11sd "$latest/config-mesh11sd"' not in report_text
     assert "/etc/init.d/easymanet-boot-report enable" in defaults.read_text()
     assert "write_easymanet_boot_report provisioned" in PROVISION_SCRIPT.read_text()

@@ -220,11 +220,18 @@ def get_cached_image(target: str) -> Optional[Path]:
             cached = CACHE_DIR / filename
             if cached.exists() and _valid_cached_image(cached):
                 return cached
-    cached = sorted(CACHE_DIR.glob(f"*{target}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    cached = sorted(CACHE_DIR.glob(f"*{target}*"), key=_cache_mtime, reverse=True)
     for path in cached:
         if _valid_cached_image(path):
             return path
     return None
+
+
+def _cache_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _valid_cached_image(path: Path) -> bool:

@@ -85,9 +85,7 @@ def inject(
         _cleanup_mount(device, mount_point, mounted_here)
 
 
-def inject_dry_run_info(manifest: Manifest, node_name: str) -> str:
-    del manifest
-    del node_name
+def inject_dry_run_info(_manifest: Manifest, _node_name: str) -> str:
     lines = ["Files to place on the boot FAT partition:"]
     lines.append("  /easymanet/provision.json")
     lines.append("       (generated from fleet.yml for this node)")

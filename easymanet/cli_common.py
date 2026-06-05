@@ -1,6 +1,7 @@
 """Shared CLI helpers."""
 
 import os
+import sys
 
 import typer
 
@@ -24,9 +25,18 @@ def maybe_show_update_notice() -> None:
     if update:
         typer.secho(
             f"EasyMANET {update} is available (you have {__version__}). "
-            f"Run: pip3 install --break-system-packages --upgrade easymanet",
+            f"Run: {_upgrade_command()}",
             fg=typer.colors.YELLOW,
         )
+
+
+def _upgrade_command() -> str:
+    in_venv = bool(os.environ.get("VIRTUAL_ENV")) or (
+        getattr(sys, "base_prefix", sys.prefix) != sys.prefix
+    )
+    if in_venv:
+        return "pip3 install --upgrade easymanet"
+    return "pipx upgrade easymanet"
 
 
 def print_errors_and_warnings(result: ValidationResult) -> int:

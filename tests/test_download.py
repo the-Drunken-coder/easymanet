@@ -2,6 +2,7 @@
 
 import gzip
 import json
+from pathlib import Path
 
 import pytest
 
@@ -89,6 +90,32 @@ def test_get_cached_image_allows_openwrt_trailing_metadata(tmp_path, monkeypatch
     monkeypatch.setattr(download, "VERSION_FILE", version_file)
 
     assert download.get_cached_image("rpi4-mm6108-spi") == image
+
+
+def test_get_cached_image_ignores_file_removed_during_sort(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    manifest = tmp_path / "images.json"
+    version_file = tmp_path / "version.json"
+    missing = cache / "openmanet-old-rpi4-mm6108-spi.img"
+    valid = cache / "openmanet-new-rpi4-mm6108-spi.img.gz"
+    missing.write_bytes(b"old")
+    _write_gzip(valid)
+
+    monkeypatch.setattr(download, "CACHE_DIR", cache)
+    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
+    monkeypatch.setattr(download, "VERSION_FILE", version_file)
+
+    original_stat = Path.stat
+
+    def flaky_stat(path, *args, **kwargs):
+        if path == missing:
+            raise FileNotFoundError(path)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+
+    assert download.get_cached_image("rpi4-mm6108-spi") == valid
 
 
 def test_download_image_rejects_non_http_url(tmp_path, monkeypatch):

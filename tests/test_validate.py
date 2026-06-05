@@ -290,6 +290,22 @@ def test_defaults_gateway_must_be_mapping():
     os.unlink(path)
 
 
+def test_defaults_management_must_be_mapping():
+    config = VALID_CONFIG.replace(
+        """  management:
+    root_password_hash: ""
+    ssh_authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh\"""",
+        "  management: not-a-mapping",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("defaults.management must be a mapping" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_node_gateway_must_be_mapping():
     config = VALID_CONFIG.replace(
         "    gateway:\n      enabled: true\n      uplink_interface: eth0",

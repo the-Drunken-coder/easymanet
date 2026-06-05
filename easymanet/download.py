@@ -192,7 +192,7 @@ def download_image(
     except urllib.error.URLError as e:
         if dest.exists():
             dest.unlink()
-        raise OSError(f"Download failed: {e}")
+        raise OSError(f"Download failed: {e}") from e
 
     if not _valid_cached_image(dest):
         dest.unlink(missing_ok=True)

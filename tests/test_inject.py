@@ -6,6 +6,7 @@ import plistlib
 import tempfile
 
 from easymanet.inject import (
+    _cleanup_mount,
     _find_boot_mount,
     _find_boot_partition,
     inject,
@@ -235,3 +236,22 @@ def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
     assert not (boot_mount / "cmdline.txt.easymanet.bak").exists()
     assert all("cmdline.txt" not in path for path, _ok in results)
     os.unlink(path)
+
+
+def test_cleanup_mount_reports_failed_linux_unmount(monkeypatch, tmp_path, capsys):
+    mount_point = tmp_path / "boot"
+    mount_point.mkdir()
+
+    class Result:
+        returncode = 1
+        stderr = "busy"
+
+    monkeypatch.setattr("easymanet.inject.is_macos", lambda: False)
+    monkeypatch.setattr("easymanet.inject.is_linux", lambda: True)
+    monkeypatch.setattr("easymanet.inject.subprocess.run", lambda *_a, **_k: Result())
+
+    _cleanup_mount("/dev/disk4", str(mount_point), True)
+
+    captured = capsys.readouterr()
+    assert "umount failed" in captured.err
+    assert mount_point.exists()

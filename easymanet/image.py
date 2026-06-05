@@ -150,7 +150,7 @@ def _write_gz_via_dd(image_path: str, device: str) -> None:
     )
     assert gzip_proc.stdout is not None
     dd_proc = subprocess.Popen(
-        ["dd", f"of={device}", "bs=16M", "status=progress"],
+        ["dd", f"of={device}", _write_block_size_arg(), "status=progress"],
         stdin=gzip_proc.stdout,
     )
     gzip_proc.stdout.close()
@@ -174,6 +174,10 @@ def _dd_device_path(device: str) -> str:
     if is_macos() and device.startswith("/dev/disk"):
         return device.replace("/dev/disk", "/dev/rdisk", 1)
     return device
+
+
+def _write_block_size_arg() -> str:
+    return "bs=16m" if is_macos() else "bs=16M"
 
 
 def _ceil_div(numerator: int, denominator: int) -> int:
@@ -257,7 +261,7 @@ def _write_raw_via_dd(image_path: str, device: str) -> None:
             "dd",
             f"if={image_path}",
             f"of={output_device}",
-            "bs=16M",
+            _write_block_size_arg(),
             "status=progress",
         ],
         check=True,

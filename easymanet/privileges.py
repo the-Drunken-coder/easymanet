@@ -19,8 +19,6 @@ def is_running_as_root() -> bool:
 
 
 def can_write_block_device(device: str) -> bool:
-    if not os.path.exists(device):
-        return False
     return os.access(device, os.W_OK)
 
 

@@ -1,6 +1,5 @@
 """Platform detection and OS-specific utilities."""
 
-import platform
 import sys
 
 

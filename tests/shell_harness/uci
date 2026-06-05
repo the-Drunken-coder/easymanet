@@ -9,7 +9,7 @@ _uci_ensure() {
 }
 
 _uci_escape_sed() {
-    printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'
+    printf '%s' "$1" | sed 's/[.[\*^$()+?{|\\]/\\&/g'
 }
 
 _uci_set_line() {

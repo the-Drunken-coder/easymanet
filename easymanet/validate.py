@@ -109,6 +109,13 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         )
         default_local_ap = {}
 
+    management = manifest.defaults.get("management", {})
+    if not isinstance(management, dict):
+        result.add_error(
+            f"defaults.management must be a mapping, got {type(management).__name__}"
+        )
+        management = {}
+
     for name in nodes:
         if name.lower() in node_names_lower:
             result.add_error(f"Duplicate node name (case-insensitive): {name}")
@@ -186,7 +193,6 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                     )
             _validate_gateway_wifi(result, name, resolved_gateway)
 
-    management = manifest.defaults.get("management", {})
     ssh_keys = management.get("ssh_authorized_keys", [])
     if not ssh_keys:
         result.add_warning("No SSH authorized keys provided in defaults.management.ssh_authorized_keys")

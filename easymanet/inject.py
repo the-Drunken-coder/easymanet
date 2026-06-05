@@ -202,19 +202,26 @@ def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
         return
 
     if is_macos():
-        subprocess.run(
+        result = subprocess.run(
             ["diskutil", "unmount", mount_point],
             capture_output=True,
+            text=True,
             timeout=30,
         )
+        if result.returncode != 0:
+            _debug_note(f"diskutil unmount failed for {mount_point}: {result.stderr.strip()}")
         return
 
     if is_linux():
-        subprocess.run(
+        result = subprocess.run(
             ["umount", mount_point],
             capture_output=True,
+            text=True,
             timeout=30,
         )
+        if result.returncode != 0:
+            _debug_note(f"umount failed for {mount_point}: {result.stderr.strip()}")
+            return
         try:
             os.rmdir(mount_point)
         except OSError:

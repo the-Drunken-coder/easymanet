@@ -331,7 +331,23 @@ def test_write_gz_via_dd_keeps_buffered_device_on_macos(monkeypatch, tmp_path):
 
     _write_gz_via_dd(str(image), "/dev/disk4")
 
-    assert ["dd", "of=/dev/disk4", "bs=16M", "status=progress"] in popen_calls
+    assert ["dd", "of=/dev/disk4", "bs=16m", "status=progress"] in popen_calls
+
+
+def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):
+    image = tmp_path / "firmware.img"
+    image.write_bytes(b"payload")
+    run_calls = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+    monkeypatch.setattr("easymanet.image.subprocess.run", fake_run)
+
+    _write_raw_via_dd(str(image), "/dev/disk4")
+
+    assert ["dd", f"if={image}", "of=/dev/rdisk4", "bs=16m", "status=progress"] in run_calls
 
 
 def test_check_device_safety_requires_force_for_blocking_disk(monkeypatch):

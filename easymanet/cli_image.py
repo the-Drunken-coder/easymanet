@@ -13,7 +13,7 @@ from .build import (
     build_image,
 )
 from .cli_common import maybe_show_update_notice, print_header
-from .download import get_cached_image, get_image_config, set_image_config
+from .download import get_cached_image, get_image_config, normalize_sha256, set_image_config
 from .format import human_size
 
 
@@ -30,6 +30,9 @@ def register_image_commands(image_app: typer.Typer) -> None:
         set_version: Optional[str] = typer.Option(
             None, "--set-version", help="Set the version label"
         ),
+        set_sha256: Optional[str] = typer.Option(
+            None, "--set-sha256", help="Set the expected SHA-256 checksum"
+        ),
         show: bool = typer.Option(
             False, "--show", help="Show current image config"
         ),
@@ -40,10 +43,22 @@ def register_image_commands(image_app: typer.Typer) -> None:
             return
 
         if set_url:
-            set_image_config(target, set_url, set_version or "custom")
+            if not set_sha256:
+                typer.secho(
+                    "--set-url requires --set-sha256 so downloaded firmware can be verified.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+            try:
+                sha256 = normalize_sha256(set_sha256)
+            except ValueError as e:
+                typer.secho(str(e), fg=typer.colors.RED)
+                raise typer.Exit(1)
+            set_image_config(target, set_url, set_version or "custom", sha256=sha256)
             typer.secho(f"Image URL set for {target}:", fg=typer.colors.GREEN)
             typer.echo(f"  URL: {set_url}")
             typer.echo(f"  Version: {set_version or 'custom'}")
+            typer.echo(f"  SHA256: {sha256}")
             return
 
         info = get_image_config(target)
@@ -60,6 +75,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
         if info:
             typer.echo(f"  URL:     {info.get('url', '(none)')}")
             typer.echo(f"  Version: {info.get('version', '(none)')}")
+            typer.echo(f"  SHA256:  {info.get('sha256', '(none)')}")
             typer.echo(f"  Desc:    {info.get('description', '')}")
         if cached:
             size = cached.stat().st_size

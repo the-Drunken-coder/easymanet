@@ -50,6 +50,7 @@ easymanet flash \
   --node manet02 \
   --device /dev/disk4 \
   --base-image ./openmanet-rpi4-mm6108-spi.img.gz \
+  --image-sha256 <sha256> \
   --yes
 ```
 
@@ -64,6 +65,28 @@ Steps:
 7. Mount the FAT boot partition.
 8. Write `/easymanet/provision.json`.
 9. Unmount and eject.
+
+### Image verification
+
+Downloaded images must use HTTPS and must have a SHA-256 checksum. When
+configuring a download URL, provide the expected digest:
+
+```bash
+easymanet image --set-url https://example.com/openmanet.img.gz \
+  --set-sha256 <sha256>
+```
+
+One-off downloaded images use the same checksum requirement:
+
+```bash
+easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
+  --image-url https://example.com/openmanet.img.gz \
+  --image-sha256 <sha256> --download --yes
+```
+
+Local `--base-image` files are allowed without a checksum, but EasyMANET
+prints a warning. Pass `--image-sha256 <sha256>` to verify a local image
+before flashing.
 
 ### SSH at flash time
 
@@ -123,6 +146,9 @@ Same command as macOS. Streams the image with `gzip | dd` or `dd`.
 - System disks are detected via `findmnt` on `/` and `/boot` (with a
   mount-point fallback), not only partition mount lists.
 - Large internal fixed disks and devices not in the default list are blocking.
+- Partitions are unmounted normally before writing. If Linux reports the
+  drive is busy, EasyMANET stops and asks you to close the process using the
+  drive before retrying.
 - `--yes` is required.
 - `--force` overrides all blocking warnings.
 

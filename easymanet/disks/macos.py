@@ -160,18 +160,37 @@ def _parse_macos_size(size_str: str) -> int:
 def _get_macos_all_mounts() -> dict:
     mounts = {}
     try:
-        output = subprocess.check_output(["mount"], timeout=5).decode()
+        output = subprocess.check_output(["diskutil", "list", "-plist"], timeout=15)
+        data = plistlib.loads(output)
     except DISK_PARSE_ERRORS as exc:
-        debug_note(f"mount output unavailable: {exc}")
+        debug_note(f"diskutil mount plist unavailable: {exc}")
         return mounts
-    for line in output.strip().split("\n"):
-        parts = line.split()
-        if len(parts) >= 3:
-            device = parts[0]
-            mount_point = parts[2]
-            base_dev = re.sub(r"s\d+$", "", device.replace("/dev/", ""))
-            mounts.setdefault(base_dev, []).append(mount_point)
+
+    for entry in data.get("AllDisksAndPartitions", []):
+        dev_id = entry.get("DeviceIdentifier", "")
+        if not dev_id:
+            continue
+        for partition in entry.get("Partitions", []):
+            mount_point = partition.get("MountPoint")
+            part_id = partition.get("DeviceIdentifier", "")
+            if mount_point is None and part_id:
+                mount_point = _get_macos_mount_point(f"/dev/{part_id}")
+            if mount_point:
+                mounts.setdefault(dev_id, []).append(mount_point)
     return mounts
+
+
+def _get_macos_mount_point(dev_path: str) -> str:
+    try:
+        output = subprocess.check_output(
+            ["diskutil", "info", "-plist", dev_path],
+            timeout=15,
+        )
+        data = plistlib.loads(output)
+    except DISK_PARSE_ERRORS as exc:
+        debug_note(f"diskutil mount point lookup failed for {dev_path}: {exc}")
+        return ""
+    return data.get("MountPoint") or ""
 
 
 def _find_mounts_for_disk(dev_id: str, all_mounts: dict) -> List[str]:
@@ -306,11 +325,19 @@ def unmount_disk_macos(device: str) -> None:
     result = subprocess.run(
         ["diskutil", "unmountDisk", device],
         capture_output=True,
+        text=True,
         timeout=60,
     )
     if result.returncode != 0:
-        subprocess.run(
+        force_result = subprocess.run(
             ["diskutil", "unmountDisk", "force", device],
             capture_output=True,
+            text=True,
             timeout=60,
         )
+        if force_result.returncode != 0:
+            detail = (force_result.stderr or force_result.stdout or "").strip()
+            if not detail:
+                detail = (result.stderr or result.stdout or "").strip()
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"Failed to unmount {device}{suffix}")

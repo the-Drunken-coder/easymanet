@@ -135,6 +135,7 @@ easymanet flash \
   --node point01 \
   --device /dev/disk4 \
   --base-image ./dist/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
+  --image-sha256 <sha256> \
   --yes
 ```
 
@@ -158,6 +159,9 @@ settle.
 - **Partial failure recovery:** if boot payload staging fails after the
   image write, re-run the full `easymanet flash` command.
 - **Unmounts partitions** before writing.
+- **Downloaded images require HTTPS and SHA-256 verification.** Local
+  `--base-image` files are allowed; pass `--image-sha256` to verify them
+  before flashing.
 - **Syncs writes** and **ejects** after completion.
 - **SSH at flash time:** use `--enable-ssh` or `--disable-ssh` on `easymanet flash`
   (gate nodes default to SSH on; point nodes default to off). See

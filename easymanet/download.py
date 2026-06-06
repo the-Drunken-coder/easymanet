@@ -17,14 +17,16 @@ Or pass --image-url to flash command.
 """
 
 import json
+import hashlib
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
 import zlib
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional
 
 from . import __version__
 from .format import human_size
@@ -43,6 +45,14 @@ _GITHUB_API_ERRORS = (
     TimeoutError,
     ValueError,
 )
+
+SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
+
+
+class ImageRef(NamedTuple):
+    version: str
+    url: str
+    sha256: Optional[str] = None
 
 
 def _debug_note(message: str) -> None:
@@ -82,16 +92,28 @@ def get_image_config(target: str) -> Optional[dict]:
     return manifest.get(target)
 
 
-def set_image_config(target: str, url: str, version: str = "", description: str = "") -> None:
+def set_image_config(
+    target: str,
+    url: str,
+    version: str = "",
+    description: str = "",
+    sha256: Optional[str] = None,
+) -> None:
     manifest = _load_images_manifest()
-    manifest[target] = {"url": url, "version": version, "description": description}
+    entry = {"url": url, "version": version, "description": description}
+    if sha256:
+        entry["sha256"] = normalize_sha256(sha256)
+    manifest[target] = entry
     _save_images_manifest(manifest)
 
 
-def check_latest_version(target: str) -> Optional[Tuple[str, str]]:
+def check_latest_version(target: str) -> Optional[ImageRef]:
     info = get_image_config(target) or {}
     if info.get("url"):
-        return info.get("version", "latest"), info["url"]
+        sha256 = info.get("sha256")
+        if sha256:
+            sha256 = normalize_sha256(sha256)
+        return ImageRef(info.get("version", "latest"), info["url"], sha256)
 
     github_repo = info.get("github") or DEFAULT_OPENMANET_GITHUB
     return _check_github_release(github_repo, target)
@@ -107,7 +129,7 @@ def _fetch_github_release(repo: str) -> Optional[dict]:
         return None
 
 
-def _pick_release_asset(release: dict, target: str) -> Optional[Tuple[str, str]]:
+def _pick_release_asset(release: dict, target: str) -> Optional[ImageRef]:
     version = release.get("tag_name", "")
     if not version:
         return None
@@ -116,7 +138,8 @@ def _pick_release_asset(release: dict, target: str) -> Optional[Tuple[str, str]]
     exact = f"openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
     for asset in assets:
         if asset.get("name") == exact:
-            return version, asset["browser_download_url"]
+            sha256 = _sha256_for_release_asset(asset, assets)
+            return ImageRef(version, asset["browser_download_url"], sha256)
 
     for asset in assets:
         name = asset.get("name", "")
@@ -126,12 +149,13 @@ def _pick_release_asset(release: dict, target: str) -> Optional[Tuple[str, str]]
             and name.endswith(".img.gz")
         ):
             print(f"  Using release asset: {name}")
-            return version, asset["browser_download_url"]
+            sha256 = _sha256_for_release_asset(asset, assets)
+            return ImageRef(version, asset["browser_download_url"], sha256)
 
     return None
 
 
-def _check_github_release(repo: str, target: str) -> Optional[Tuple[str, str]]:
+def _check_github_release(repo: str, target: str) -> Optional[ImageRef]:
     release = _fetch_github_release(repo)
     if not release:
         return None
@@ -145,6 +169,98 @@ def _check_github_release(repo: str, target: str) -> Optional[Tuple[str, str]]:
     return result
 
 
+def normalize_sha256(value: str) -> str:
+    digest = value.strip()
+    if digest.lower().startswith("sha256:"):
+        digest = digest.split(":", 1)[1].strip()
+    if not SHA256_PATTERN.match(digest):
+        raise ValueError("SHA-256 checksum must be 64 hexadecimal characters")
+    return digest.lower()
+
+
+def _sha256_for_release_asset(image_asset: dict, assets: list[dict]) -> Optional[str]:
+    digest = _sha256_from_asset_digest(image_asset.get("digest", ""))
+    if digest:
+        return digest
+
+    image_name = image_asset.get("name", "")
+    if not image_name:
+        return None
+
+    checksum_assets = _candidate_checksum_assets(image_name, assets)
+    for checksum_asset in checksum_assets:
+        checksum_url = checksum_asset.get("browser_download_url")
+        if not checksum_url:
+            continue
+        text = _fetch_checksum_text(checksum_url)
+        if not text:
+            continue
+        digest = _extract_sha256_from_checksum_text(text, image_name)
+        if digest:
+            return digest
+    return None
+
+
+def _sha256_from_asset_digest(value: str) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        return normalize_sha256(value)
+    except ValueError:
+        return None
+
+
+def _candidate_checksum_assets(image_name: str, assets: list[dict]) -> list[dict]:
+    exact_names = {
+        f"{image_name}.sha256",
+        f"{image_name}.sha256sum",
+        f"{image_name}.sha256.txt",
+    }
+    bundle_names = {
+        "SHA256SUMS",
+        "SHA256SUMS.txt",
+        "sha256sums",
+        "sha256sums.txt",
+        "checksums.txt",
+    }
+    exact = []
+    bundled = []
+    for asset in assets:
+        name = asset.get("name", "")
+        if name in exact_names:
+            exact.append(asset)
+        elif name in bundle_names:
+            bundled.append(asset)
+    return exact + bundled
+
+
+def _fetch_checksum_text(url: str) -> str:
+    try:
+        _validate_download_url(url)
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return resp.read().decode()
+    except _GITHUB_API_ERRORS as exc:
+        _debug_note(f"checksum lookup failed for {url}: {exc}")
+        return ""
+
+
+def _extract_sha256_from_checksum_text(text: str, image_name: str) -> Optional[str]:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) == 1 and SHA256_PATTERN.match(parts[0]):
+            return normalize_sha256(parts[0])
+        if image_name not in stripped:
+            continue
+        for part in parts:
+            candidate = part.lstrip("*")
+            if SHA256_PATTERN.match(candidate):
+                return normalize_sha256(candidate)
+    return None
+
+
 def _url_to_filename(url: str) -> str:
     parts = url.rstrip("/").split("/")
     return parts[-1] if parts else "image.img.gz"
@@ -152,23 +268,44 @@ def _url_to_filename(url: str) -> str:
 
 def _validate_download_url(url: str) -> None:
     scheme = urlparse(url).scheme.lower()
-    if scheme not in {"http", "https"}:
+    if scheme == "http":
+        raise OSError("Image downloads require HTTPS URLs")
+    if scheme != "https":
         raise OSError(f"Unsupported image URL scheme: {scheme or '<none>'}")
+
+
+def image_sha256(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def verify_image_sha256(path: Path, expected_sha256: str) -> None:
+    expected = normalize_sha256(expected_sha256)
+    actual = image_sha256(path)
+    if actual != expected:
+        raise OSError(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
+        )
 
 
 def download_image(
     target: str,
     version: str,
     url: str,
+    sha256: str,
     force: bool = False,
 ) -> Path:
     _validate_download_url(url)
+    expected_sha256 = normalize_sha256(sha256)
     _ensure_cache_dir()
     filename = _url_to_filename(url)
     dest = CACHE_DIR / filename
 
     if dest.exists() and not force:
-        if _valid_cached_image(dest):
+        if _valid_cached_image(dest) and _cached_image_matches_sha256(dest, expected_sha256):
             return dest
         dest.unlink()
 
@@ -205,26 +342,51 @@ def download_image(
     if not _valid_cached_image(dest):
         dest.unlink(missing_ok=True)
         raise OSError(f"Downloaded image failed integrity check: {dest.name}")
+    try:
+        verify_image_sha256(dest, expected_sha256)
+    except OSError:
+        dest.unlink(missing_ok=True)
+        raise
 
     _save_version(target, version)
     print(f"  Saved: {dest}")
     return dest
 
 
-def get_cached_image(target: str) -> Optional[Path]:
+def get_cached_image(
+    target: str,
+    sha256: Optional[str] = None,
+    url: Optional[str] = None,
+) -> Optional[Path]:
     _ensure_cache_dir()
     info = get_image_config(target)
-    if info:
-        filename = _url_to_filename(info.get("url", ""))
+    expected_sha256 = sha256 or (info or {}).get("sha256")
+    if not expected_sha256:
+        return None
+    expected_sha256 = normalize_sha256(expected_sha256)
+
+    source_url = url or (info or {}).get("url", "")
+    if source_url:
+        filename = _url_to_filename(source_url)
         if filename:
             cached = CACHE_DIR / filename
-            if cached.exists() and _valid_cached_image(cached):
+            if cached.exists() and _valid_cached_image(cached) and _cached_image_matches_sha256(cached, expected_sha256):
                 return cached
-    cached = sorted(CACHE_DIR.glob(f"*{target}*"), key=_cache_mtime, reverse=True)
-    for path in cached:
-        if _valid_cached_image(path):
+            if cached.exists():
+                cached.unlink()
+    cached_images = sorted(CACHE_DIR.glob(f"*{target}*"), key=_cache_mtime, reverse=True)
+    for path in cached_images:
+        if _valid_cached_image(path) and _cached_image_matches_sha256(path, expected_sha256):
             return path
     return None
+
+
+def _cached_image_matches_sha256(path: Path, expected_sha256: str) -> bool:
+    try:
+        verify_image_sha256(path, expected_sha256)
+    except OSError:
+        return False
+    return True
 
 
 def _cache_mtime(path: Path) -> float:

@@ -12,6 +12,7 @@ from easymanet.image import (
     _dd_device_path,
     _write_gz_via_dd,
     _write_raw_via_dd,
+    finish_flash,
     flash_image,
 )
 
@@ -257,6 +258,41 @@ def test_flash_image_unmounts_again_before_overlay_wipe(monkeypatch, tmp_path):
     flash_image(str(device), str(image), force=True)
 
     assert unmount_calls == [str(device), str(device)]
+
+
+def test_flash_image_wraps_initial_unmount_failure(monkeypatch, tmp_path):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img"
+    image.write_bytes(b"FLASH" * 64)
+
+    def fail_unmount(_device):
+        raise RuntimeError("target is busy")
+
+    def unexpected_write(*_args):
+        raise AssertionError("flash should not write after unmount failure")
+
+    monkeypatch.setattr("easymanet.image.unmount_disk", fail_unmount)
+    monkeypatch.setattr("easymanet.image._write_raw_via_dd", unexpected_write)
+
+    with pytest.raises(FlashError, match="Failed to unmount"):
+        flash_image(str(device), str(image), force=True, skip_overlay_wipe=True)
+
+
+def test_finish_flash_warns_when_eject_fails(monkeypatch, capsys):
+    monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
+
+    def fail_eject(_device):
+        raise RuntimeError("eject failed")
+
+    monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
+
+    result = finish_flash("/dev/disk4")
+
+    captured = capsys.readouterr()
+    assert result is False
+    assert "Warning: eject failed" in captured.out
+    assert "eject /dev/disk4 manually" in captured.out
+    assert "Safe to remove." not in captured.out
 
 
 def test_flash_image_writes_gzip_file(monkeypatch, tmp_path):

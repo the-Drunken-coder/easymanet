@@ -1,3 +1,5 @@
+import plistlib
+
 import pytest
 
 from easymanet import disks
@@ -27,8 +29,8 @@ def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeyp
     disks.unmount_disk("/dev/sdb")
 
     assert calls == [
-        (["umount", "-l", "/dev/sdb1"], {"capture_output": True, "text": True, "timeout": 60}),
-        (["umount", "-l", "/dev/sdb2"], {"capture_output": True, "text": True, "timeout": 60}),
+        (["umount", "/dev/sdb1"], {"capture_output": True, "text": True, "timeout": 60}),
+        (["umount", "/dev/sdb2"], {"capture_output": True, "text": True, "timeout": 60}),
     ]
 
 
@@ -47,7 +49,7 @@ def test_linux_unmount_disk_falls_back_to_device_when_no_partitions(monkeypatch)
     disks.unmount_disk("/dev/mmcblk0")
 
     assert calls == [
-        (["umount", "-l", "/dev/mmcblk0"], {"capture_output": True, "text": True, "timeout": 60}),
+        (["umount", "/dev/mmcblk0"], {"capture_output": True, "text": True, "timeout": 60}),
     ]
 
 
@@ -399,6 +401,73 @@ def test_lookup_device_macos_accepts_raw_disk_and_canonicalizes(monkeypatch):
     assert disk.removable is True
     assert disk.mounted == ["/Volumes/BOOT"]
     assert seen == ["/dev/disk4"]
+
+
+def test_get_macos_all_mounts_uses_structured_mount_points(monkeypatch):
+    list_plist = {
+        "AllDisksAndPartitions": [
+            {
+                "DeviceIdentifier": "disk4",
+                "Partitions": [
+                    {
+                        "DeviceIdentifier": "disk4s1",
+                        "MountPoint": "/Volumes/NO NAME",
+                    },
+                    {
+                        "DeviceIdentifier": "disk4s2",
+                    },
+                ],
+            }
+        ]
+    }
+    info_plist = {"MountPoint": "/Volumes/DATA SET"}
+    calls = []
+
+    def fake_check_output(cmd, timeout=15):
+        calls.append(cmd)
+        if cmd == ["diskutil", "list", "-plist"]:
+            return plistlib.dumps(list_plist)
+        if cmd == ["diskutil", "info", "-plist", "/dev/disk4s2"]:
+            return plistlib.dumps(info_plist)
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(macos.subprocess, "check_output", fake_check_output)
+
+    assert macos._get_macos_all_mounts() == {
+        "disk4": ["/Volumes/NO NAME", "/Volumes/DATA SET"]
+    }
+    assert calls == [
+        ["diskutil", "list", "-plist"],
+        ["diskutil", "info", "-plist", "/dev/disk4s2"],
+    ]
+
+
+def test_unmount_disk_macos_raises_when_force_unmount_fails(monkeypatch):
+    calls = []
+    results = [
+        type("Result", (), {"returncode": 1, "stderr": "busy", "stdout": ""})(),
+        type("Result", (), {"returncode": 1, "stderr": "still busy", "stdout": ""})(),
+    ]
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return results.pop(0)
+
+    monkeypatch.setattr(macos.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="still busy"):
+        macos.unmount_disk_macos("/dev/disk4")
+
+    assert calls == [
+        (
+            ["diskutil", "unmountDisk", "/dev/disk4"],
+            {"capture_output": True, "text": True, "timeout": 60},
+        ),
+        (
+            ["diskutil", "unmountDisk", "force", "/dev/disk4"],
+            {"capture_output": True, "text": True, "timeout": 60},
+        ),
+    ]
 
 
 def test_get_partition2_wipe_range_linux(monkeypatch):

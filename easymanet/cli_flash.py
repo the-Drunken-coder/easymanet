@@ -1,12 +1,20 @@
 """Flash command and image resolution helpers."""
 
-from typing import Optional
+import json
+from pathlib import Path
+from typing import Any, Optional
 
 import typer
 
 from .cli_common import maybe_show_update_notice, print_header
 from .disks import assert_flash_allowed, lookup_device
-from .download import check_latest_version, download_image, get_cached_image, set_image_config
+from .download import (
+    check_latest_version,
+    download_image,
+    get_cached_image,
+    set_image_config,
+    verify_image_sha256,
+)
 from .image import FlashError, finish_flash, flash_image
 from .inject import InjectError, inject, inject_dry_run_info
 from .manifest import ManifestError, load_manifest
@@ -14,6 +22,40 @@ from .platform import check_platform
 from .privileges import PrivilegeError, check_privileges
 from .render import render, render_dict
 from .validate import validate
+
+
+SECRET_FIELD_NAMES = {"password", "root_password_hash"}
+SECRET_LIST_FIELD_NAMES = {"ssh_authorized_keys"}
+REDACTED_VALUE = "<redacted>"
+
+
+def redact_provision_for_display(value: Any, field_name: str = "") -> Any:
+    """Return a display-safe copy of provision.json data."""
+    if isinstance(value, dict):
+        return {
+            key: redact_provision_for_display(child, key)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        if field_name in SECRET_LIST_FIELD_NAMES:
+            return [REDACTED_VALUE for _item in value]
+        return [redact_provision_for_display(item) for item in value]
+    if field_name in SECRET_FIELD_NAMES and value:
+        return REDACTED_VALUE
+    return value
+
+
+def render_provision_for_display(
+    manifest,
+    node: str,
+    *,
+    ssh_enabled: Optional[bool] = None,
+    show_secrets: bool = False,
+) -> str:
+    if show_secrets:
+        return render(manifest, node, ssh_enabled=ssh_enabled)
+    provision = render_dict(manifest, node, ssh_enabled=ssh_enabled)
+    return json.dumps(redact_provision_for_display(provision), indent=2)
 
 
 def resolve_flash_ssh_enabled(
@@ -46,16 +88,35 @@ def flash_ssh_note(
 def resolve_base_image(
     target: str,
     base_image: Optional[str],
+    image_sha256: Optional[str],
     image_url: Optional[str],
     download: bool,
     no_download: bool,
     dry_run: bool,
 ) -> str:
     if base_image:
+        if image_sha256:
+            try:
+                verify_image_sha256(Path(base_image), image_sha256)
+            except OSError as e:
+                typer.secho(f"Base image checksum error: {e}", fg=typer.colors.RED)
+                raise typer.Exit(1)
+            typer.secho("Base image SHA-256 verified.", fg=typer.colors.GREEN)
+        else:
+            typer.secho(
+                "Warning: local --base-image was not verified with --image-sha256.",
+                fg=typer.colors.YELLOW,
+            )
         return base_image
 
     if image_url:
-        set_image_config(target, image_url, version="custom")
+        if not image_sha256:
+            typer.secho(
+                "--image-url requires --image-sha256 so downloaded firmware can be verified.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+        set_image_config(target, image_url, version="custom", sha256=image_sha256)
         typer.secho(f"Saved image URL for {target}. Run --download to fetch now.", fg=typer.colors.BLUE)
         if not download:
             typer.secho(
@@ -88,32 +149,47 @@ def resolve_base_image(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        version, url = latest
-        path = download_image(target, version, url, force=True)
-        return str(path)
-
-    cached = get_cached_image(target)
-    if cached:
-        typer.secho(f"Using cached image: {cached}", fg=typer.colors.BLUE)
-    else:
-        latest = check_latest_version(target)
-        if not latest:
+        if not latest.sha256:
             typer.secho(
-                f"No image configured for target '{target}' and no --base-image given.\n"
-                f"\n"
-                f"Configure an image URL with:\n"
-                f"  easymanet flash --image-url <URL> ...\n"
-                f"\n"
-                f"Or download an image and pass it with:\n"
-                f"  easymanet flash --base-image <path-to-image> ...\n"
-                f"\n"
-                f"OpenMANET firmware releases can be downloaded from:\n"
-                f"  https://github.com/OpenMANET/firmware/releases",
+                f"No SHA-256 checksum configured or found for target '{target}'. "
+                f"Use --image-url with --image-sha256 or configure one with "
+                f"`easymanet image --set-url ... --set-sha256 ...`.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        version, url = latest
-        cached = download_image(target, version, url)
+        path = download_image(target, latest.version, latest.url, latest.sha256, force=True)
+        return str(path)
+
+    latest = check_latest_version(target)
+    if not latest:
+        typer.secho(
+            f"No image configured for target '{target}' and no --base-image given.\n"
+            f"\n"
+            f"Configure an image URL with:\n"
+            f"  easymanet flash --image-url <URL> --image-sha256 <SHA256> ...\n"
+            f"\n"
+            f"Or download an image and pass it with:\n"
+            f"  easymanet flash --base-image <path-to-image> --image-sha256 <SHA256> ...\n"
+            f"\n"
+            f"OpenMANET firmware releases can be downloaded from:\n"
+            f"  https://github.com/OpenMANET/firmware/releases",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    if not latest.sha256:
+        typer.secho(
+            f"No SHA-256 checksum configured or found for target '{target}'. "
+            f"Use --image-url with --image-sha256 or configure one with "
+            f"`easymanet image --set-url ... --set-sha256 ...`.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    cached = get_cached_image(target, sha256=latest.sha256, url=latest.url)
+    if cached:
+        typer.secho(f"Using verified cached image: {cached}", fg=typer.colors.BLUE)
+    else:
+        cached = download_image(target, latest.version, latest.url, latest.sha256)
     return str(cached)
 
 
@@ -135,8 +211,15 @@ def register_flash_command(app: typer.Typer) -> None:
             "-i",
             help="Path to OpenMANET base image (.img or .img.gz) — auto-downloaded if omitted",
         ),
+        image_sha256: Optional[str] = typer.Option(
+            None,
+            "--image-sha256",
+            help="Expected SHA-256 for --base-image or downloaded --image-url firmware.",
+        ),
         image_url: Optional[str] = typer.Option(
-            None, "--image-url", help="URL to download the base image from (saved for future use)"
+            None,
+            "--image-url",
+            help="HTTPS URL to download the base image from; requires --image-sha256.",
         ),
         download: bool = typer.Option(
             False, "--download", help="Force re-download of the latest base image"
@@ -172,6 +255,11 @@ def register_flash_command(app: typer.Typer) -> None:
             False,
             "--disable-ssh",
             help="Disable SSH at first boot, including on gate nodes.",
+        ),
+        show_secrets: bool = typer.Option(
+            False,
+            "--show-secrets",
+            help="Print secret values in the resolved provision.json preview.",
         ),
     ):
         """Flash an OpenMANET image and stage node config on the boot partition."""
@@ -218,7 +306,13 @@ def register_flash_command(app: typer.Typer) -> None:
         )
 
         image_path = resolve_base_image(
-            target, base_image, image_url, download, no_download, dry_run
+            target,
+            base_image,
+            image_sha256,
+            image_url,
+            download,
+            no_download,
+            dry_run,
         )
 
         print_header("Flash Plan")
@@ -255,7 +349,19 @@ def register_flash_command(app: typer.Typer) -> None:
             typer.echo()
 
         print_header("Resolved provision.json")
-        print(render(manifest, node, ssh_enabled=ssh_enabled))
+        print(
+            render_provision_for_display(
+                manifest,
+                node,
+                ssh_enabled=ssh_enabled,
+                show_secrets=show_secrets,
+            )
+        )
+        if not show_secrets:
+            typer.secho(
+                "  Secrets redacted. Use --show-secrets to print the full payload.",
+                fg=typer.colors.BLUE,
+            )
         print()
 
         typer.echo(inject_dry_run_info(manifest, node))

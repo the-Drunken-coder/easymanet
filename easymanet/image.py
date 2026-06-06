@@ -39,6 +39,13 @@ def _check_device_safety(device: str, force: bool = False) -> None:
         raise FlashError(str(e)) from e
 
 
+def _unmount_or_raise(device: str) -> None:
+    try:
+        unmount_disk(device)
+    except Exception as e:
+        raise FlashError(f"Failed to unmount {device}: {e}") from e
+
+
 def _gzip_decompressed_bytes(image_path: Path) -> int:
     decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
     total = 0
@@ -124,10 +131,10 @@ def flash_image(
         print(f"Removable: {'yes' if disk.removable else 'no'}")
         print()
 
-    unmount_disk(device)
-    print(f"Writing {image.name} to {device}...")
-
     try:
+        _unmount_or_raise(device)
+        print(f"Writing {image.name} to {device}...")
+
         if image.suffix == ".gz":
             _write_gz_via_dd(str(image), device)
         else:
@@ -140,7 +147,7 @@ def flash_image(
         if not skip_overlay_wipe:
             written_bytes = gzip_written_bytes if gzip_written_bytes is not None else image.stat().st_size
             # macOS (and sometimes Linux) auto-mounts partitions after dd; unmount before raw wipe.
-            unmount_disk(device)
+            _unmount_or_raise(device)
             _clear_stale_overlay(device, written_bytes)
 
     except subprocess.CalledProcessError as e:
@@ -205,7 +212,7 @@ def _run_zero_dd(device: str, block_bytes: int, seek_blocks: int, count_blocks: 
         return
 
     # macOS may auto-mount partitions between wipe phases (especially after long writes).
-    unmount_disk(device)
+    _unmount_or_raise(device)
     output_device = _dd_device_path(device)
     subprocess.run(
         [
@@ -284,9 +291,18 @@ def _write_raw_via_dd(image_path: str, device: str) -> None:
     )
 
 
-def finish_flash(device: str, eject: bool = True) -> None:
+def finish_flash(device: str, eject: bool = True) -> bool:
     os.sync()
     if eject:
         print(f"Ejecting {device}...")
-        eject_disk(device)
+        try:
+            eject_disk(device)
+        except RuntimeError as e:
+            print(f"Warning: {e}")
+            print(
+                f"Image written and payload staged, but eject failed. "
+                f"Run sync and eject {device} manually before removing it."
+            )
+            return False
     print("Safe to remove.")
+    return True

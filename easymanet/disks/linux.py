@@ -263,7 +263,7 @@ def unmount_disk_linux(device: str) -> None:
     targets = _linux_partitions_for_device(device) or [device]
     for target in targets:
         result = subprocess.run(
-            ["umount", "-l", target],
+            ["umount", target],
             capture_output=True,
             text=True,
             timeout=60,

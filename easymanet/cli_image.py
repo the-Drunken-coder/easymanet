@@ -53,7 +53,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
                 sha256 = normalize_sha256(set_sha256)
             except ValueError as e:
                 typer.secho(str(e), fg=typer.colors.RED)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from e
             set_image_config(target, set_url, set_version or "custom", sha256=sha256)
             typer.secho(f"Image URL set for {target}:", fg=typer.colors.GREEN)
             typer.echo(f"  URL: {set_url}")
@@ -68,7 +68,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
             typer.secho(f"No image configured for {target}.", fg=typer.colors.YELLOW)
             typer.echo("")
             typer.echo("Configure one with:")
-            typer.echo("  easymanet image --set-url <URL>")
+            typer.echo("  easymanet image --set-url <URL> --set-sha256 <SHA256>")
             return
 
         print_header(f"Image config: {target}")

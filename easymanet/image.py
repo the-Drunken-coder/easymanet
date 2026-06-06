@@ -297,7 +297,7 @@ def finish_flash(device: str, eject: bool = True) -> bool:
         print(f"Ejecting {device}...")
         try:
             eject_disk(device)
-        except RuntimeError as e:
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
             print(f"Warning: {e}")
             print(
                 f"Image written and payload staged, but eject failed. "

@@ -112,7 +112,11 @@ def check_latest_version(target: str) -> Optional[ImageRef]:
     if info.get("url"):
         sha256 = info.get("sha256")
         if sha256:
-            sha256 = normalize_sha256(sha256)
+            try:
+                sha256 = normalize_sha256(sha256)
+            except ValueError as exc:
+                _debug_note(f"invalid SHA-256 configured for {target}: {exc}")
+                sha256 = None
         return ImageRef(info.get("version", "latest"), info["url"], sha256)
 
     github_repo = info.get("github") or DEFAULT_OPENMANET_GITHUB
@@ -245,20 +249,30 @@ def _fetch_checksum_text(url: str) -> str:
 
 
 def _extract_sha256_from_checksum_text(text: str, image_name: str) -> Optional[str]:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        parts = stripped.split()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) == 1:
+        parts = lines[0].split()
         if len(parts) == 1 and SHA256_PATTERN.match(parts[0]):
             return normalize_sha256(parts[0])
-        if image_name not in stripped:
-            continue
-        for part in parts:
+
+    for line in lines:
+        parts = line.split()
+        for index, part in enumerate(parts):
             candidate = part.lstrip("*")
-            if SHA256_PATTERN.match(candidate):
+            if not SHA256_PATTERN.match(candidate):
+                continue
+            filename_tokens = parts[:index] + parts[index + 1:]
+            if any(
+                _checksum_filename_matches(token, image_name)
+                for token in filename_tokens
+            ):
                 return normalize_sha256(candidate)
     return None
+
+
+def _checksum_filename_matches(token: str, image_name: str) -> bool:
+    filename = token.lstrip("*")
+    return filename == image_name or Path(filename).name == image_name
 
 
 def _url_to_filename(url: str) -> str:

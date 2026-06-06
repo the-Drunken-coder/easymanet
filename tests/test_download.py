@@ -202,9 +202,8 @@ def test_download_image_verifies_sha256(tmp_path, monkeypatch):
     expected = hashlib.sha256(body).hexdigest()
 
     class Resp:
-        headers = {"Content-Length": str(len(body))}
-
         def __init__(self):
+            self.headers = {"Content-Length": str(len(body))}
             self.stream = io.BytesIO(body)
 
         def read(self, size=-1):
@@ -238,9 +237,8 @@ def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
     body = compressed.getvalue()
 
     class Resp:
-        headers = {"Content-Length": str(len(body))}
-
         def __init__(self):
+            self.headers = {"Content-Length": str(len(body))}
             self.stream = io.BytesIO(body)
 
         def read(self, size=-1):
@@ -324,6 +322,53 @@ def test_extract_sha256_from_checksum_text_matches_image_name():
     text = f"{'b' * 64}  openmanet.img.gz\n{'c' * 64}  other.img.gz\n"
 
     assert download._extract_sha256_from_checksum_text(text, "openmanet.img.gz") == "b" * 64
+
+
+def test_extract_sha256_from_checksum_text_requires_exact_image_token():
+    text = f"{'b' * 64}  not-openmanet.img.gz\n{'c' * 64}  other.img.gz\n"
+
+    assert download._extract_sha256_from_checksum_text(text, "openmanet.img.gz") is None
+
+
+def test_extract_sha256_from_checksum_text_accepts_star_prefixed_filename():
+    text = f"{'b' * 64} *openmanet.img.gz\n"
+
+    assert download._extract_sha256_from_checksum_text(text, "openmanet.img.gz") == "b" * 64
+
+
+def test_extract_sha256_from_checksum_text_accepts_single_digest_file():
+    text = f"{'b' * 64}\n"
+
+    assert download._extract_sha256_from_checksum_text(text, "openmanet.img.gz") == "b" * 64
+
+
+def test_extract_sha256_from_checksum_text_rejects_multi_digest_only_file():
+    text = f"{'b' * 64}\n{'c' * 64}\n"
+
+    assert download._extract_sha256_from_checksum_text(text, "openmanet.img.gz") is None
+
+
+def test_check_latest_version_treats_invalid_configured_sha256_as_missing(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({
+        "rpi4-mm6108-spi": {
+            "url": "https://example.invalid/openmanet.img.gz",
+            "version": "test",
+            "sha256": "not-a-sha256",
+        }
+    }))
+    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
+
+    result = download.check_latest_version("rpi4-mm6108-spi")
+
+    assert result is not None
+    assert result.url == "https://example.invalid/openmanet.img.gz"
+    assert result.sha256 is None
+    assert "invalid SHA-256 configured" in capsys.readouterr().err
 
 
 def test_check_easymanet_update_respects_env_repo(monkeypatch):

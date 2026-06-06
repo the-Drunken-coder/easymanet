@@ -12,6 +12,7 @@ from .download import (
     check_latest_version,
     download_image,
     get_cached_image,
+    normalize_sha256,
     set_image_config,
     verify_image_sha256,
 )
@@ -94,13 +95,21 @@ def resolve_base_image(
     no_download: bool,
     dry_run: bool,
 ) -> str:
+    normalized_sha256: Optional[str] = None
+    if image_sha256:
+        try:
+            normalized_sha256 = normalize_sha256(image_sha256)
+        except ValueError as e:
+            typer.secho(f"Invalid --image-sha256: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1) from e
+
     if base_image:
-        if image_sha256:
+        if normalized_sha256:
             try:
-                verify_image_sha256(Path(base_image), image_sha256)
+                verify_image_sha256(Path(base_image), normalized_sha256)
             except OSError as e:
                 typer.secho(f"Base image checksum error: {e}", fg=typer.colors.RED)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from e
             typer.secho("Base image SHA-256 verified.", fg=typer.colors.GREEN)
         else:
             typer.secho(
@@ -110,13 +119,13 @@ def resolve_base_image(
         return base_image
 
     if image_url:
-        if not image_sha256:
+        if not normalized_sha256:
             typer.secho(
                 "--image-url requires --image-sha256 so downloaded firmware can be verified.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        set_image_config(target, image_url, version="custom", sha256=image_sha256)
+        set_image_config(target, image_url, version="custom", sha256=normalized_sha256)
         typer.secho(f"Saved image URL for {target}. Run --download to fetch now.", fg=typer.colors.BLUE)
         if not download:
             typer.secho(
@@ -145,7 +154,8 @@ def resolve_base_image(
             typer.secho(
                 f"No image URL configured for target '{target}'. "
                 f"Configure one with --image-url or specify --base-image.\n"
-                f"  easymanet flash --image-url https://example.com/image.img.gz ...",
+                f"  easymanet flash --image-url https://example.com/image.img.gz "
+                f"--image-sha256 <SHA256> ...",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)

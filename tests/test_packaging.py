@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY_INSTALL_ROOT = Path("share/easymanet/provisioning/openwrt-overlay")
@@ -19,6 +21,25 @@ EXECUTABLE_OVERLAY_FILES = [
     "usr/lib/easymanet/network.sh",
     "usr/lib/easymanet/provision.sh",
 ]
+PACKAGING_COMMAND_TIMEOUT = 180
+
+
+def _run_packaging_command(args, env):
+    try:
+        return subprocess.run(
+            args,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=PACKAGING_COMMAND_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as e:
+        pytest.fail(
+            f"packaging command timed out after {e.timeout}s: {' '.join(args)}\n"
+            f"stdout:\n{e.output or ''}\n"
+            f"stderr:\n{e.stderr or ''}"
+        )
 
 
 def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
@@ -27,7 +48,7 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
     env = os.environ.copy()
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
 
-    subprocess.run(
+    _run_packaging_command(
         [
             sys.executable,
             "-m",
@@ -39,15 +60,12 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
             str(wheel_dir),
             str(ROOT),
         ],
-        check=True,
-        capture_output=True,
-        text=True,
         env=env,
     )
     wheels = sorted(wheel_dir.glob("easymanet-*.whl"))
     assert len(wheels) == 1
 
-    subprocess.run(
+    _run_packaging_command(
         [
             sys.executable,
             "-m",
@@ -58,9 +76,6 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
             str(install_dir),
             str(wheels[0]),
         ],
-        check=True,
-        capture_output=True,
-        text=True,
         env=env,
     )
 

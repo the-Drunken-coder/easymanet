@@ -295,6 +295,23 @@ def test_finish_flash_warns_when_eject_fails(monkeypatch, capsys):
     assert "Safe to remove." not in captured.out
 
 
+def test_finish_flash_warns_when_eject_times_out(monkeypatch, capsys):
+    monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
+
+    def fail_eject(_device):
+        raise subprocess.TimeoutExpired(["eject", "/dev/disk4"], timeout=30)
+
+    monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
+
+    result = finish_flash("/dev/disk4")
+
+    captured = capsys.readouterr()
+    assert result is False
+    assert "timed out" in captured.out
+    assert "eject /dev/disk4 manually" in captured.out
+    assert "Safe to remove." not in captured.out
+
+
 def test_flash_image_writes_gzip_file(monkeypatch, tmp_path):
     device = _patch_flash_safety(monkeypatch, tmp_path)
     image = tmp_path / "firmware.img.gz"

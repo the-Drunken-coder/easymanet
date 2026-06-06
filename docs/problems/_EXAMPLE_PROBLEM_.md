@@ -1,6 +1,8 @@
 # Problem Template
 
-Each entry under `docs/problems/` is a short-lived note for agent-to-agent reference — most are resolved in minutes; none should live longer than a day or two. Use this template to keep the format consistent:
+Each entry under `docs/problems/` is a short-lived note for agent-to-agent
+reference — most are resolved in minutes; none should live longer than a day or
+two. Use this template to keep the format consistent:
 
 1. **Time & Date:** [UTC timestamp or local time zone timestamp]
 2. **Name:** [One-line summary identifier]
@@ -20,7 +22,7 @@ Each entry under `docs/problems/` is a short-lived note for agent-to-agent refer
 ### What does not belong here
 
 - **Recurring agent confusion** → `docs/lessons-learned.md` (after you've seen the same gotcha more than once).
-- **Architectural decisions and durable design** → `docs/architecture.md`, `docs/manifest.md`, or `future concepts and plans/`.
+- **Architectural decisions and durable design** → `docs/design-decisions/`.
 - **How the system is supposed to work** → the docs listed in [README.md](../../README.md#docs).
 
 ### Severity Levels

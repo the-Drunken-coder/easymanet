@@ -207,10 +207,12 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 
 ## Docs
 
+- [Documentation Index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Manifest Reference](docs/manifest.md) — every config field documented
 - [Flashing Guide](docs/flashing.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
+- [Design Decisions](docs/design-decisions/) — durable choices and trade-offs ([template](docs/design-decisions/_EXAMPLE_DESIGN_DECISION_.md))
 - [Problems](docs/problems/) — short-lived agent notes on active blockers ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
 
 ## Development

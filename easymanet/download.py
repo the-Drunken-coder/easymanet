@@ -21,6 +21,8 @@ import hashlib
 import os
 import re
 import sys
+import tempfile
+import time
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
@@ -45,6 +47,11 @@ _GITHUB_API_ERRORS = (
     TimeoutError,
     ValueError,
 )
+_URL_RETRY_ERRORS = (urllib.error.URLError, OSError, TimeoutError)
+_URL_RETRY_ATTEMPTS = 3
+_URL_RETRY_BACKOFF_SECONDS = 0.25
+_RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 
@@ -126,7 +133,7 @@ def check_latest_version(target: str) -> Optional[ImageRef]:
 def _fetch_github_release(repo: str) -> Optional[dict]:
     try:
         api_url = f"https://api.github.com/repos/{repo}/releases/latest"
-        with urllib.request.urlopen(api_url, timeout=15) as resp:
+        with _urlopen_with_retries(api_url, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except _GITHUB_API_ERRORS as exc:
         _debug_note(f"GitHub release lookup failed for {repo}: {exc}")
@@ -241,7 +248,7 @@ def _candidate_checksum_assets(image_name: str, assets: list[dict]) -> list[dict
 def _fetch_checksum_text(url: str) -> str:
     try:
         _validate_download_url(url)
-        with urllib.request.urlopen(url, timeout=30) as resp:
+        with _urlopen_with_retries(url, timeout=30) as resp:
             return resp.read().decode()
     except _GITHUB_API_ERRORS as exc:
         _debug_note(f"checksum lookup failed for {url}: {exc}")
@@ -288,6 +295,24 @@ def _validate_download_url(url: str) -> None:
         raise OSError(f"Unsupported image URL scheme: {scheme or '<none>'}")
 
 
+def _urlopen_with_retries(url: str, *, timeout: int):
+    last_error: Optional[BaseException] = None
+    for attempt in range(1, _URL_RETRY_ATTEMPTS + 1):
+        try:
+            return urllib.request.urlopen(url, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in _RETRYABLE_HTTP_STATUS_CODES or attempt == _URL_RETRY_ATTEMPTS:
+                raise
+            last_error = exc
+        except _URL_RETRY_ERRORS as exc:
+            if attempt == _URL_RETRY_ATTEMPTS:
+                raise
+            last_error = exc
+        time.sleep(_URL_RETRY_BACKOFF_SECONDS * attempt)
+    assert last_error is not None
+    raise last_error
+
+
 def image_sha256(path: Path) -> str:
     hasher = hashlib.sha256()
     with path.open("rb") as f:
@@ -328,13 +353,23 @@ def download_image(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    tmp_path: Optional[Path] = None
+    tmp_fd: Optional[int] = None
     try:
-        with urllib.request.urlopen(url, timeout=300) as resp:
+        tmp_fd, raw_tmp_path = tempfile.mkstemp(
+            prefix=f".{dest.name}.",
+            suffix=".part",
+            dir=dest.parent,
+        )
+        tmp_path = Path(raw_tmp_path)
+
+        with _urlopen_with_retries(url, timeout=300) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
-            with open(dest, "wb") as f:
+            with os.fdopen(tmp_fd, "wb") as f:
+                tmp_fd = None
                 while True:
-                    chunk = resp.read(1024 * 1024)
+                    chunk = resp.read(_DOWNLOAD_CHUNK_BYTES)
                     if not chunk:
                         break
                     f.write(chunk)
@@ -348,19 +383,18 @@ def download_image(
                             flush=True,
                         )
             print()
+        if not _valid_image_payload(tmp_path, dest.name):
+            raise OSError(f"Downloaded image failed integrity check: {dest.name}")
+        verify_image_sha256(tmp_path, expected_sha256)
+        os.replace(tmp_path, dest)
+        tmp_path = None
     except urllib.error.URLError as e:
-        if dest.exists():
-            dest.unlink()
         raise OSError(f"Download failed: {e}") from e
-
-    if not _valid_cached_image(dest):
-        dest.unlink(missing_ok=True)
-        raise OSError(f"Downloaded image failed integrity check: {dest.name}")
-    try:
-        verify_image_sha256(dest, expected_sha256)
-    except OSError:
-        dest.unlink(missing_ok=True)
-        raise
+    finally:
+        if tmp_fd is not None:
+            os.close(tmp_fd)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
     _save_version(target, version)
     print(f"  Saved: {dest}")
@@ -411,13 +445,18 @@ def _cache_mtime(path: Path) -> float:
 
 
 def _valid_cached_image(path: Path) -> bool:
-    suffix = path.suffix.lower()
+    return _valid_image_payload(path, path.name)
+
+
+def _valid_image_payload(path: Path, filename: str) -> bool:
+    named_path = Path(filename)
+    suffix = named_path.suffix.lower()
     if suffix == ".img":
         try:
             return path.stat().st_size > 0
         except OSError:
             return False
-    if suffix != ".gz" or not path.stem.lower().endswith(".img"):
+    if suffix != ".gz" or not named_path.stem.lower().endswith(".img"):
         return False
     try:
         decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)

@@ -42,7 +42,7 @@ def _check_device_safety(device: str, force: bool = False) -> None:
 def _unmount_or_raise(device: str) -> None:
     try:
         unmount_disk(device)
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         raise FlashError(f"Failed to unmount {device}: {e}") from e
 
 
@@ -89,22 +89,35 @@ def _check_image(image_path: str) -> Tuple[Path, Optional[int]]:
 
 def _reread_partition_table(device: str) -> None:
     if is_linux():
-        subprocess.run(
-            [_tool_path("blockdev"), "--rereadpt", device],
-            capture_output=True,
-            timeout=30,
-        )
-        subprocess.run(
-            [_tool_path("partprobe"), device],
-            capture_output=True,
-            timeout=30,
-        )
+        _run_reread_partition_command([_tool_path("blockdev"), "--rereadpt", device], device)
+        _run_reread_partition_command([_tool_path("partprobe"), device], device)
     elif is_macos():
+        _run_reread_partition_command([_tool_path("diskutil"), "list", device], device)
+
+
+def _run_reread_partition_command(cmd: list[str], device: str) -> None:
+    try:
         subprocess.run(
-            [_tool_path("diskutil"), "list", device],
+            cmd,
             capture_output=True,
+            text=True,
             timeout=30,
+            check=True,
         )
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or e.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise FlashError(
+            f"Failed to re-read partition table for {device} with {cmd[0]}{suffix}"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise FlashError(
+            f"Timed out re-reading partition table for {device} with {cmd[0]}"
+        ) from e
+    except OSError as e:
+        raise FlashError(
+            f"Failed to re-read partition table for {device} with {cmd[0]}: {e}"
+        ) from e
 
 
 def flash_image(
@@ -154,7 +167,7 @@ def flash_image(
         raise FlashError(f"Flash failed: {e}") from e
     except FlashError:
         raise
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         raise FlashError(f"Flash failed: {e}") from e
 
 

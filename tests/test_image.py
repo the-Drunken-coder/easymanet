@@ -2,6 +2,7 @@
 
 import gzip
 import subprocess
+import sys
 
 import pytest
 
@@ -10,10 +11,17 @@ from easymanet.image import (
     _check_image,
     _clear_stale_overlay,
     _dd_device_path,
+    _reread_partition_table,
+    _unmount_or_raise,
     _write_gz_via_dd,
     _write_raw_via_dd,
     finish_flash,
     flash_image,
+)
+
+REAL_DD_TEST = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="spawns the host dd binary; command-line flags differ across platforms",
 )
 
 
@@ -74,6 +82,39 @@ def subprocess_completed():
         returncode = 0
 
     return Result()
+
+
+def test_unmount_or_raise_does_not_wrap_programming_errors(monkeypatch):
+    def fail_unmount(_device):
+        raise TypeError("bug in caller")
+
+    monkeypatch.setattr("easymanet.image.unmount_disk", fail_unmount)
+
+    with pytest.raises(TypeError, match="bug in caller"):
+        _unmount_or_raise("/dev/disk4")
+
+
+def test_reread_partition_table_surfaces_command_failure(monkeypatch):
+    run_calls = []
+
+    def fail_run(cmd, **kwargs):
+        run_calls.append((cmd, kwargs))
+        raise subprocess.CalledProcessError(1, cmd, stderr="device busy")
+
+    monkeypatch.setattr("easymanet.image.is_linux", lambda: True)
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: False)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.subprocess.run", fail_run)
+
+    with pytest.raises(FlashError, match="device busy"):
+        _reread_partition_table("/dev/sdb")
+
+    assert run_calls == [
+        (
+            ["blockdev", "--rereadpt", "/dev/sdb"],
+            {"capture_output": True, "text": True, "timeout": 30, "check": True},
+        )
+    ]
 
 
 def test_check_image_rejects_corrupt_gzip(tmp_path):
@@ -203,6 +244,7 @@ def _patch_flash_safety(monkeypatch, tmp_path):
     return device
 
 
+@REAL_DD_TEST
 def test_write_raw_via_dd_writes_payload(tmp_path):
     device = tmp_path / "disk.img"
     device.write_bytes(b"\x00" * 4096)
@@ -216,6 +258,7 @@ def test_write_raw_via_dd_writes_payload(tmp_path):
     assert written[: len(payload)] == payload
 
 
+@REAL_DD_TEST
 def test_write_gz_via_dd_writes_decompressed_payload(tmp_path):
     device = tmp_path / "disk.img"
     device.write_bytes(b"\x00" * 4096)
@@ -230,6 +273,7 @@ def test_write_gz_via_dd_writes_decompressed_payload(tmp_path):
     assert written[: len(payload)] == payload
 
 
+@REAL_DD_TEST
 def test_flash_image_writes_raw_file(monkeypatch, tmp_path):
     device = _patch_flash_safety(monkeypatch, tmp_path)
     image = tmp_path / "firmware.img"
@@ -312,6 +356,7 @@ def test_finish_flash_warns_when_eject_times_out(monkeypatch, capsys):
     assert "Safe to remove." not in captured.out
 
 
+@REAL_DD_TEST
 def test_flash_image_writes_gzip_file(monkeypatch, tmp_path):
     device = _patch_flash_safety(monkeypatch, tmp_path)
     image = tmp_path / "firmware.img.gz"
@@ -344,16 +389,28 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
 
     gzip_stdout = io.BytesIO(b"payload")
     procs = [FakeProc(2, gzip_stdout), FakeProc(0)]
+    popen_calls = []
 
     def fake_popen(cmd, **kwargs):
+        popen_calls.append((cmd, kwargs))
         if cmd[0] == "gzip":
             return procs[0]
         return procs[1]
 
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: False)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
     _write_gz_via_dd(str(image), str(device))
+
+    assert popen_calls == [
+        (["gzip", "-dc", str(image)], {"stdout": subprocess.PIPE}),
+        (
+            ["dd", f"of={device}", "bs=16M", "status=progress"],
+            {"stdin": gzip_stdout},
+        ),
+    ]
+    assert gzip_stdout.closed is True
 
 
 def test_write_gz_via_dd_uses_raw_device_on_macos(monkeypatch, tmp_path):

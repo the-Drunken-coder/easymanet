@@ -10,6 +10,9 @@ from typing import List, Optional, Tuple
 
 from ._common import DISK_PARSE_ERRORS, DiskInfo, debug_note
 
+_FINDMNT_PARENT_RESOLUTION_MAX_DEPTH = 8
+_LINUX_DEFAULT_LOGICAL_SECTOR_BYTES = 512
+
 
 def _disks_module():
     return sys.modules[__package__]
@@ -80,7 +83,12 @@ def _linux_lsblk_data(device: Optional[str] = None) -> Optional[dict]:
     try:
         output = subprocess.check_output(cmd, timeout=10).decode()
         return json.loads(output)
-    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ):
         return None
 
 
@@ -176,7 +184,7 @@ def _linux_resolve_findmnt_source(source: str) -> Optional[str]:
         return None
 
     current = device_path
-    for _ in range(8):
+    for _ in range(_FINDMNT_PARENT_RESOLUTION_MAX_DEPTH):
         base = disks_mod._linux_base_block_device(current)
         if base:
             return base
@@ -221,7 +229,10 @@ def _check_linux_system_disk(dev_path: str, mounts: List[str]) -> bool:
 
     root_related = disks_mod._linux_root_block_devices()
     if not root_related:
-        return False
+        debug_note(
+            "could not resolve Linux root block devices; treating candidate as a system disk"
+        )
+        return True
 
     if dev_path in root_related:
         return True
@@ -234,11 +245,16 @@ def _check_linux_system_disk(dev_path: str, mounts: List[str]) -> bool:
 
 
 def _linux_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[int, int]]:
-    cmd = ["lsblk", "-J", "-b", "-o", "NAME,START,SIZE,TYPE", "-n", device]
+    cmd = ["lsblk", "-J", "-b", "-o", "NAME,START,SIZE,TYPE,LOG-SEC", "-n", device]
     try:
         output = subprocess.check_output(cmd, timeout=10).decode()
         data = json.loads(output)
-    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ):
         return None
 
     blockdevs = data.get("blockdevices", [])
@@ -253,10 +269,23 @@ def _linux_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     size = int(part2.get("size", 0) or 0)
     if start <= 0 or size <= 0:
         return None
-    start_bytes = start * 512
+    sector_bytes = _linux_logical_sector_bytes(part2, blockdevs[0])
+    start_bytes = start * sector_bytes
     wipe_bytes = min(size, max_wipe)
     tail_start = start_bytes + size - wipe_bytes
     return (tail_start, wipe_bytes)
+
+
+def _linux_logical_sector_bytes(*devices: dict) -> int:
+    for dev in devices:
+        for key in ("log-sec", "log_sec", "LOG-SEC"):
+            try:
+                value = int(dev.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+    return _LINUX_DEFAULT_LOGICAL_SECTOR_BYTES
 
 
 def unmount_disk_linux(device: str) -> None:

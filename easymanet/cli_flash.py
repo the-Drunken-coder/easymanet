@@ -18,7 +18,7 @@ from .download import (
 )
 from .image import FlashError, finish_flash, flash_image
 from .inject import InjectError, inject, inject_dry_run_info
-from .manifest import ManifestError, load_manifest
+from .manifest import Manifest, ManifestError, load_manifest
 from .platform import check_platform
 from .privileges import PrivilegeError, check_privileges
 from .render import render, render_dict
@@ -28,6 +28,7 @@ from .validate import validate
 SECRET_FIELD_NAMES = {"password", "root_password_hash"}
 SECRET_LIST_FIELD_NAMES = {"ssh_authorized_keys"}
 REDACTED_VALUE = "<redacted>"
+CUSTOM_IMAGE_VERSION = "custom"
 
 
 def redact_provision_for_display(value: Any, field_name: str = "") -> Any:
@@ -47,7 +48,7 @@ def redact_provision_for_display(value: Any, field_name: str = "") -> Any:
 
 
 def render_provision_for_display(
-    manifest,
+    manifest: Manifest,
     node: str,
     *,
     ssh_enabled: Optional[bool] = None,
@@ -125,7 +126,12 @@ def resolve_base_image(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        set_image_config(target, image_url, version="custom", sha256=normalized_sha256)
+        set_image_config(
+            target,
+            image_url,
+            version=CUSTOM_IMAGE_VERSION,
+            sha256=normalized_sha256,
+        )
         typer.secho(f"Saved image URL for {target}. Run --download to fetch now.", fg=typer.colors.BLUE)
         if not download:
             typer.secho(
@@ -420,7 +426,8 @@ def register_flash_command(app: typer.Typer) -> None:
             )
             raise typer.Exit(1)
 
-        finish_flash(device, eject=not no_eject)
+        if not finish_flash(device, eject=not no_eject):
+            raise typer.Exit(1)
         typer.secho(
             f"\nDone. Insert the drive into the Raspberry Pi for {node} and boot.",
             fg=typer.colors.GREEN,

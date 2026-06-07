@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,51 +26,64 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_get_cached_image_skips_empty_img(tmp_path, monkeypatch):
+@pytest.fixture
+def image_cache(tmp_path, monkeypatch):
     cache = tmp_path / "images"
     cache.mkdir()
+    manifest = tmp_path / "images.json"
     version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img"
-    image.touch()
-
     monkeypatch.setattr(download, "CACHE_DIR", cache)
+    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
     monkeypatch.setattr(download, "VERSION_FILE", version_file)
+    return SimpleNamespace(cache=cache, manifest=manifest, version_file=version_file)
+
+
+class BytesResponse:
+    def __init__(self, body: bytes, headers=None):
+        self.headers = headers or {"Content-Length": str(len(body))}
+        self.stream = io.BytesIO(body)
+
+    def read(self, size=-1):
+        return self.stream.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+def _part_files(cache: Path) -> list[Path]:
+    return [path for path in cache.iterdir() if path.name.endswith(".part")]
+
+
+def test_get_cached_image_skips_empty_img(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img"
+    image.touch()
 
     assert download.get_cached_image("rpi4-mm6108-spi") is None
     assert download._valid_cached_image(image) is False
 
 
-def test_get_cached_image_skips_corrupt_configured_image(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_skips_corrupt_configured_image(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image, corrupt=True)
 
-    manifest.write_text(json.dumps({
+    image_cache.manifest.write_text(json.dumps({
         "rpi4-mm6108-spi": {
             "url": f"https://example.invalid/{image.name}",
             "version": "test",
         }
     }))
-
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
 
     assert download.get_cached_image("rpi4-mm6108-spi") is None
 
 
-def test_get_cached_image_returns_valid_matching_image(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_returns_valid_matching_image(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image)
 
-    manifest.write_text(json.dumps({
+    image_cache.manifest.write_text(json.dumps({
         "rpi4-mm6108-spi": {
             "url": f"https://example.invalid/{image.name}",
             "version": "test",
@@ -77,21 +91,13 @@ def test_get_cached_image_returns_valid_matching_image(tmp_path, monkeypatch):
         }
     }))
 
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
-
     assert download.get_cached_image("rpi4-mm6108-spi") == image
 
 
-def test_get_cached_image_allows_openwrt_trailing_metadata(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_allows_openwrt_trailing_metadata(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image, trailing=b'{"metadata": "openwrt sysupgrade trailer"}')
-    manifest.write_text(json.dumps({
+    image_cache.manifest.write_text(json.dumps({
         "rpi4-mm6108-spi": {
             "url": f"https://example.invalid/{image.name}",
             "version": "test",
@@ -99,26 +105,14 @@ def test_get_cached_image_allows_openwrt_trailing_metadata(tmp_path, monkeypatch
         }
     }))
 
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
-
     assert download.get_cached_image("rpi4-mm6108-spi") == image
 
 
-def test_get_cached_image_ignores_file_removed_during_sort(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    missing = cache / "openmanet-old-rpi4-mm6108-spi.img"
-    valid = cache / "openmanet-new-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_ignores_file_removed_during_sort(image_cache, monkeypatch):
+    missing = image_cache.cache / "openmanet-old-rpi4-mm6108-spi.img"
+    valid = image_cache.cache / "openmanet-new-rpi4-mm6108-spi.img.gz"
     missing.write_bytes(b"old")
     _write_gzip(valid)
-
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
 
     original_stat = Path.stat
 
@@ -132,47 +126,31 @@ def test_get_cached_image_ignores_file_removed_during_sort(tmp_path, monkeypatch
     assert download.get_cached_image("rpi4-mm6108-spi", sha256=_sha256(valid)) == valid
 
 
-def test_get_cached_image_requires_checksum(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_requires_checksum(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image)
 
-    manifest.write_text(json.dumps({
+    image_cache.manifest.write_text(json.dumps({
         "rpi4-mm6108-spi": {
             "url": f"https://example.invalid/{image.name}",
             "version": "test",
         }
     }))
 
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
-
     assert download.get_cached_image("rpi4-mm6108-spi") is None
 
 
-def test_get_cached_image_rejects_checksum_mismatch(tmp_path, monkeypatch):
-    cache = tmp_path / "images"
-    cache.mkdir()
-    manifest = tmp_path / "images.json"
-    version_file = tmp_path / "version.json"
-    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+def test_get_cached_image_rejects_checksum_mismatch(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     _write_gzip(image)
 
-    manifest.write_text(json.dumps({
+    image_cache.manifest.write_text(json.dumps({
         "rpi4-mm6108-spi": {
             "url": f"https://example.invalid/{image.name}",
             "version": "test",
             "sha256": "0" * 64,
         }
     }))
-
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
 
     assert download.get_cached_image("rpi4-mm6108-spi") is None
 
@@ -201,23 +179,9 @@ def test_download_image_verifies_sha256(tmp_path, monkeypatch):
     body = compressed.getvalue()
     expected = hashlib.sha256(body).hexdigest()
 
-    class Resp:
-        def __init__(self):
-            self.headers = {"Content-Length": str(len(body))}
-            self.stream = io.BytesIO(body)
-
-        def read(self, size=-1):
-            return self.stream.read(size)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
     monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
     monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
-    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: Resp())
+    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: BytesResponse(body))
 
     path = download.download_image(
         "rpi4-mm6108-spi",
@@ -227,6 +191,7 @@ def test_download_image_verifies_sha256(tmp_path, monkeypatch):
     )
 
     assert path.read_bytes() == body
+    assert _part_files(path.parent) == []
 
 
 def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
@@ -236,23 +201,9 @@ def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
         f.write(payload)
     body = compressed.getvalue()
 
-    class Resp:
-        def __init__(self):
-            self.headers = {"Content-Length": str(len(body))}
-            self.stream = io.BytesIO(body)
-
-        def read(self, size=-1):
-            return self.stream.read(size)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
     monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
     monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
-    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: Resp())
+    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: BytesResponse(body))
 
     with pytest.raises(OSError, match="SHA-256 mismatch"):
         download.download_image(
@@ -263,6 +214,79 @@ def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
         )
 
     assert not (tmp_path / "images" / "openmanet-test-rpi4-mm6108-spi.img.gz").exists()
+    assert _part_files(tmp_path / "images") == []
+
+
+def test_download_image_removes_part_file_on_stream_error(tmp_path, monkeypatch):
+    class FailingResponse:
+        headers = {"Content-Length": "10"}
+
+        def read(self, size=-1):
+            del size
+            raise OSError("disk full")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    cache = tmp_path / "images"
+    monkeypatch.setattr(download, "CACHE_DIR", cache)
+    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: FailingResponse())
+
+    with pytest.raises(OSError, match="disk full"):
+        download.download_image(
+            "rpi4-mm6108-spi",
+            "test",
+            "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
+            "0" * 64,
+        )
+
+    assert not (cache / "openmanet-test-rpi4-mm6108-spi.img.gz").exists()
+    assert _part_files(cache) == []
+
+
+def test_download_image_preserves_existing_cache_when_force_download_fails(tmp_path, monkeypatch):
+    existing = io.BytesIO()
+    with gzip.GzipFile(fileobj=existing, mode="wb") as f:
+        f.write(b"existing-firmware")
+    existing_body = existing.getvalue()
+    expected = hashlib.sha256(existing_body).hexdigest()
+
+    class FailingResponse:
+        headers = {"Content-Length": "10"}
+
+        def read(self, size=-1):
+            del size
+            raise TimeoutError("temporary read timeout")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    cache = tmp_path / "images"
+    cache.mkdir()
+    dest = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+    dest.write_bytes(existing_body)
+    monkeypatch.setattr(download, "CACHE_DIR", cache)
+    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: FailingResponse())
+
+    with pytest.raises(TimeoutError, match="temporary read timeout"):
+        download.download_image(
+            "rpi4-mm6108-spi",
+            "test",
+            "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
+            expected,
+            force=True,
+        )
+
+    assert dest.read_bytes() == existing_body
+    assert _part_files(cache) == []
 
 
 def test_pick_release_asset_falls_back_to_pattern_match():
@@ -316,6 +340,39 @@ def test_pick_release_asset_uses_github_asset_digest():
     assert result.version == "1.6.5"
     assert result.url == "https://example.com/image.img.gz"
     assert result.sha256 == "a" * 64
+
+
+def test_fetch_github_release_retries_transient_urlopen_error(monkeypatch):
+    payload = json.dumps({"tag_name": "v1.2.3"}).encode()
+    calls = []
+
+    def fake_urlopen(url, timeout=15):
+        calls.append((url, timeout))
+        if len(calls) == 1:
+            raise download.urllib.error.URLError("temporary")
+        return BytesResponse(payload)
+
+    monkeypatch.setattr(download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    assert download._fetch_github_release("org/repo") == {"tag_name": "v1.2.3"}
+    assert len(calls) == 2
+
+
+def test_fetch_checksum_text_retries_transient_timeout(monkeypatch):
+    calls = []
+
+    def fake_urlopen(url, timeout=30):
+        calls.append((url, timeout))
+        if len(calls) == 1:
+            raise TimeoutError("temporary")
+        return BytesResponse(b"checksum text")
+
+    monkeypatch.setattr(download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    assert download._fetch_checksum_text("https://example.invalid/SHA256SUMS") == "checksum text"
+    assert len(calls) == 2
 
 
 def test_extract_sha256_from_checksum_text_matches_image_name():

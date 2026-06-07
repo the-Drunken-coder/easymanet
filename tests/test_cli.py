@@ -6,6 +6,7 @@ import typer
 from easymanet import cli_flash, cli_image
 from easymanet.cli import _resolve_flash_ssh_enabled
 from easymanet.cli_flash import (
+    CUSTOM_IMAGE_VERSION,
     REDACTED_VALUE,
     redact_provision_for_display,
     resolve_base_image,
@@ -163,6 +164,36 @@ def test_flash_image_url_rejects_malformed_sha256(capsys):
     assert "Invalid --image-sha256" in capsys.readouterr().out
 
 
+def test_flash_image_url_uses_custom_version_label(monkeypatch):
+    saved = {}
+
+    def fake_set_image_config(target, url, version="", description="", sha256=None):
+        saved.update(
+            {
+                "target": target,
+                "url": url,
+                "version": version,
+                "description": description,
+                "sha256": sha256,
+            }
+        )
+
+    monkeypatch.setattr(cli_flash, "set_image_config", fake_set_image_config)
+
+    with pytest.raises(typer.Exit):
+        resolve_base_image(
+            "rpi4-mm6108-spi",
+            None,
+            "a" * 64,
+            "https://example.invalid/openmanet.img.gz",
+            False,
+            False,
+            False,
+        )
+
+    assert saved["version"] == CUSTOM_IMAGE_VERSION
+
+
 def test_flash_download_missing_url_hint_mentions_sha256(monkeypatch, capsys):
     monkeypatch.setattr(cli_flash, "check_latest_version", lambda _target: None)
 
@@ -193,6 +224,69 @@ def test_image_empty_config_hint_mentions_sha256(monkeypatch):
 
     assert result.exit_code == 0
     assert "easymanet image --set-url <URL> --set-sha256 <SHA256>" in result.output
+
+
+def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from easymanet.cli import app
+
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(b"firmware")
+    finish_calls = []
+
+    monkeypatch.setattr(cli_flash, "check_platform", lambda: None)
+    monkeypatch.setattr(cli_flash, "maybe_show_update_notice", lambda: None)
+    monkeypatch.setattr(cli_flash, "load_manifest", lambda _config: object())
+    monkeypatch.setattr(
+        cli_flash,
+        "validate",
+        lambda *_args, **_kwargs: type("Result", (), {"errors": []})(),
+    )
+    monkeypatch.setattr(
+        cli_flash,
+        "render_dict",
+        lambda *_args, **_kwargs: {
+            "node": {
+                "target": "rpi4-mm6108-spi",
+                "role": "point",
+                "hostname": "point01",
+            }
+        },
+    )
+    monkeypatch.setattr(cli_flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(cli_flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_flash, "render_provision_for_display", lambda *_args, **_kwargs: "{}")
+    monkeypatch.setattr(cli_flash, "inject_dry_run_info", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(cli_flash, "check_privileges", lambda _device: None)
+    monkeypatch.setattr(cli_flash, "flash_image", lambda **_kwargs: None)
+    monkeypatch.setattr(cli_flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
+
+    def fake_finish_flash(device, eject=True):
+        finish_calls.append((device, eject))
+        return False
+
+    monkeypatch.setattr(cli_flash, "finish_flash", fake_finish_flash)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "flash",
+            "--config",
+            "fleet.yml",
+            "--node",
+            "n1",
+            "--device",
+            "/dev/disk4",
+            "--base-image",
+            str(image),
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert finish_calls == [("/dev/disk4", True)]
+    assert "Done. Insert the drive" not in result.output
 
 
 def test_image_build_chains_build_error(monkeypatch):

@@ -57,6 +57,17 @@ def test_github_cli_env_maps_publish_token_to_gh_token(monkeypatch):
     assert env["GH_TOKEN"] == "secret-token"
 
 
+def test_github_cli_env_prefers_publish_token_over_existing_gh_token(monkeypatch):
+    publish = load_publish_module()
+    monkeypatch.setenv("EASYMANET_PUBLIC_REPO_TOKEN", "publish-token")
+    monkeypatch.setenv("GH_TOKEN", "default-token")
+
+    env = publish.github_cli_env()
+
+    assert env is not None
+    assert env["GH_TOKEN"] == "publish-token"
+
+
 def test_remote_default_branch_parses_symref(monkeypatch):
     publish = load_publish_module()
 

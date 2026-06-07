@@ -164,7 +164,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -200,7 +200,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -366,7 +366,7 @@ jobs:
           df -h
 
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -593,7 +593,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -703,7 +703,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -796,7 +796,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
 
@@ -1079,8 +1079,7 @@ def github_cli_env() -> dict[str, str] | None:
         return None
 
     env = os.environ.copy()
-    if not env.get("GH_TOKEN"):
-        env["GH_TOKEN"] = token
+    env["GH_TOKEN"] = token
     return env
 
 

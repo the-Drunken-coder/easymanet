@@ -3,6 +3,7 @@
 
 BOOT_REPORT_TMP="/tmp/easymanet-boot-report"
 BOOT_REPORT_MOUNTED=0
+MESH11SD_SECRET_FIELDS="key|password|passphrase|psk|secret|auto_mesh_id|auto_mesh_key|mesh_gate_key|vtun_gate_key"
 
 boot_report_cleanup() {
     if [ "$BOOT_REPORT_MOUNTED" -eq 1 ]; then
@@ -45,11 +46,11 @@ run_report_cmd() {
 }
 
 easymanet_redact_uci_wireless() {
-    uci show wireless 2>/dev/null | sed -E "s/(\.(key|password)=)'[^']*'/\1'<redacted>'/g" || true
+    uci show wireless 2>/dev/null | sed -E "s/(\.(key|password|priv_key_pwd)=)'[^']*'/\1'<redacted>'/g" || true
 }
 
 easymanet_redact_uci_mesh11sd() {
-    uci show mesh11sd 2>/dev/null | sed -E "s/(\.(key|password|passphrase|psk|secret)=)'[^']*'/\1'<redacted>'/g" || true
+    uci show mesh11sd 2>/dev/null | sed -E "s/\.($MESH11SD_SECRET_FIELDS)='[^']*'/.\1='<redacted>'/g" || true
 }
 
 easymanet_redact_config_mesh11sd() {
@@ -59,8 +60,8 @@ easymanet_redact_config_mesh11sd() {
     fi
     if [ -f /etc/config/mesh11sd ]; then
         sed -E \
-            -e "s/(option[[:space:]]+(key|password|passphrase|psk|secret)[[:space:]]+)'[^']*'/\1'<redacted>'/g" \
-            -e 's/(option[[:space:]]+(key|password|passphrase|psk|secret)[[:space:]]+)"[^"]*"/\1"<redacted>"/g' \
+            -e "s/(option[[:space:]]+($MESH11SD_SECRET_FIELDS)[[:space:]]+)'[^']*'/\1'<redacted>'/g" \
+            -e "s/(option[[:space:]]+($MESH11SD_SECRET_FIELDS)[[:space:]]+)\"[^\"]*\"/\1\"<redacted>\"/g" \
             /etc/config/mesh11sd 2>/dev/null || true
     fi
 }

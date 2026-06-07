@@ -131,12 +131,15 @@ def clean_build_metadata(repo_root: Path) -> None:
     found = [path for path in paths if path.exists()]
     if found:
         found_text = ", ".join(str(path.relative_to(repo_root)) for path in found)
-        warnings.warn(f"clean_build_metadata removing stale build metadata: {found_text}")
+        warnings.warn(
+            f"clean_build_metadata removing stale build metadata: {found_text}",
+            stacklevel=2,
+        )
     for path in found:
         try:
             shutil.rmtree(path)
         except OSError as exc:
-            warnings.warn(f"clean_build_metadata could not remove {path}: {exc}")
+            warnings.warn(f"clean_build_metadata could not remove {path}: {exc}", stacklevel=2)
             raise
 
 

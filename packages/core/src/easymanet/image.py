@@ -89,8 +89,10 @@ def _check_image(image_path: str) -> Tuple[Path, Optional[int]]:
 
 def _reread_partition_table(device: str) -> None:
     if is_linux():
-        _run_reread_partition_command([_tool_path("blockdev"), "--rereadpt", device], device)
-        _run_reread_partition_command([_tool_path("partprobe"), device], device)
+        try:
+            _run_reread_partition_command([_tool_path("blockdev"), "--rereadpt", device], device)
+        except FlashError:
+            _run_reread_partition_command([_tool_path("partprobe"), device], device)
     elif is_macos():
         _run_reread_partition_command([_tool_path("diskutil"), "list", device], device)
 

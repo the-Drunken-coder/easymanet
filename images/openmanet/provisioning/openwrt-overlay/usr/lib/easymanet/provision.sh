@@ -64,6 +64,42 @@ cleanup() {
 
 trap cleanup EXIT
 
+write_root_shadow_hash() {
+    shadow_path="$1"
+    root_hash="$2"
+    tmp_path="${shadow_path}.easymanet.$$"
+    mode="$(stat -c '%a' "$shadow_path" 2>/dev/null || stat -f '%Lp' "$shadow_path" 2>/dev/null || true)"
+    owner="$(stat -c '%u:%g' "$shadow_path" 2>/dev/null || stat -f '%u:%g' "$shadow_path" 2>/dev/null || true)"
+
+    if ! awk -v hash="$root_hash" '
+        BEGIN { replaced = 0 }
+        /^root:/ {
+            printf "root:%s:19000:0:99999:7:::\n", hash
+            replaced = 1
+            next
+        }
+        { print }
+        END {
+            if (!replaced) {
+                printf "root:%s:19000:0:99999:7:::\n", hash
+            }
+        }
+    ' "$shadow_path" > "$tmp_path"; then
+        rm -f "$tmp_path"
+        return 1
+    fi
+
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$tmp_path" 2>/dev/null || true
+    else
+        chmod 0600 "$tmp_path" 2>/dev/null || true
+    fi
+    if [ -n "$owner" ]; then
+        chown "$owner" "$tmp_path" 2>/dev/null || true
+    fi
+    mv "$tmp_path" "$shadow_path"
+}
+
 wipe_boot_provision_json() {
     for candidate in \
         "$BOOT_JSON" \
@@ -195,7 +231,7 @@ if [ -n "$ROOT_PW_HASH" ]; then
     if [ ! -f "$shadow_path" ]; then
         printf 'root::0:0:99999:7:::\n' > "$shadow_path"
     fi
-    if ! sed -i "s|^root:.*|root:${ROOT_PW_HASH}:19000:0:99999:7:::|" "$shadow_path"; then
+    if ! write_root_shadow_hash "$shadow_path" "$ROOT_PW_HASH"; then
         echo "FATAL: failed to set root password hash in /etc/shadow" | tee -a "$LOG_FILE"
         exit 1
     fi

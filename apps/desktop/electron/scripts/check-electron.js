@@ -46,7 +46,15 @@ if (bridge.status !== 0) {
   process.exit(bridge.status || 1);
 }
 
-const payload = JSON.parse(bridge.stdout);
+let payload;
+try {
+  payload = JSON.parse(bridge.stdout);
+} catch (error) {
+  cleanupWorkspace();
+  console.error(`Could not parse EasyMANET bridge JSON: ${error.message}`);
+  console.error(bridge.stdout);
+  process.exit(1);
+}
 if (!payload.ok) {
   cleanupWorkspace();
   console.error(bridge.stdout);
@@ -57,7 +65,11 @@ cleanupWorkspace();
 console.log("Electron desktop files and EasyMANET bridge are valid.");
 
 function cleanupWorkspace() {
-  fs.rmSync(workspace, { recursive: true, force: true });
+  if (typeof fs.rmSync === "function") {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    return;
+  }
+  fs.rmdirSync(workspace, { recursive: true });
 }
 
 function venvPython(venvRoot) {

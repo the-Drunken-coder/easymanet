@@ -15,7 +15,10 @@ class PrivilegeError(Exception):
 
 
 def is_running_as_root() -> bool:
-    return os.geteuid() == 0
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    return geteuid() == 0
 
 
 def can_write_block_device(device: str) -> bool:

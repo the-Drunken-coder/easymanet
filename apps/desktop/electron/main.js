@@ -6,6 +6,8 @@ const fs = require("node:fs");
 const repoRoot = path.resolve(__dirname, "../../..");
 const staticRoot = path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop", "static");
 const indexHtml = path.join(staticRoot, "index.html");
+const fleetExtensions = new Set([".yml", ".yaml"]);
+const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -90,10 +92,14 @@ function registerIpc() {
     }
     return runBridge(args);
   });
-  ipcMain.handle("easymanet:validate", (_event, payload = {}) => {
-    const args = ["validate", "--config", String(payload.config || "")];
-    if (payload.node) {
-      args.push("--node", String(payload.node));
+  ipcMain.handle("easymanet:validate", async (_event, payload = {}) => {
+    const validated = await validatePayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const args = ["validate", "--config", validated.config];
+    if (validated.node) {
+      args.push("--node", validated.node);
     }
     return runBridge(args);
   });
@@ -159,6 +165,92 @@ function runBridge(args) {
       }
     });
   });
+}
+
+async function validatePayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Validation payload must be an object"] };
+  }
+
+  const config = typeof payload.config === "string" ? payload.config.trim() : "";
+  if (!config) {
+    return { ok: false, errors: ["Fleet config path is required"] };
+  }
+  if (hasTraversalSegment(config)) {
+    return { ok: false, errors: ["Fleet config path must not contain traversal segments"] };
+  }
+
+  const node = typeof payload.node === "string" ? payload.node.trim() : "";
+  if (node && !nodeNamePattern.test(node)) {
+    return { ok: false, errors: ["Node name contains unsupported characters"] };
+  }
+
+  const resolved = await resolveConfigPath(config);
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return { ok: true, config: resolved.config, node };
+}
+
+async function resolveConfigPath(config) {
+  const expanded = expandHome(config);
+  if (path.isAbsolute(expanded)) {
+    return existingFleetFile(expanded);
+  }
+
+  const state = await runBridge(["state"]);
+  if (!state.ok || !state.workspace || !state.workspace.fleets_dir) {
+    return { ok: false, errors: state.errors || ["Fleets folder is unavailable"] };
+  }
+  const fleetRoot = path.resolve(state.workspace.fleets_dir);
+  const candidate = path.resolve(fleetRoot, expanded);
+  if (!isInside(fleetRoot, candidate)) {
+    return { ok: false, errors: ["Fleet config path must stay inside the Fleets folder"] };
+  }
+  return existingFleetFile(candidate);
+}
+
+function existingFleetFile(configPath) {
+  for (const candidate of fleetPathCandidates(path.resolve(configPath))) {
+    if (!fleetExtensions.has(path.extname(candidate).toLowerCase())) {
+      continue;
+    }
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isFile()) {
+        return { ok: true, config: candidate };
+      }
+    } catch (_error) {
+      // Try the next extension candidate.
+    }
+  }
+  return { ok: false, errors: ["Fleet config file must exist and use .yml or .yaml"] };
+}
+
+function fleetPathCandidates(configPath) {
+  if (path.extname(configPath)) {
+    return [configPath];
+  }
+  return [configPath, `${configPath}.yml`, `${configPath}.yaml`];
+}
+
+function expandHome(value) {
+  if (value === "~") {
+    return app.getPath("home");
+  }
+  if (value.startsWith(`~${path.sep}`) || value.startsWith("~/") || value.startsWith("~\\")) {
+    return path.join(app.getPath("home"), value.slice(2));
+  }
+  return value;
+}
+
+function hasTraversalSegment(value) {
+  return value.split(/[\\/]+/).some((part) => part === "..");
+}
+
+function isInside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 function pythonPath() {

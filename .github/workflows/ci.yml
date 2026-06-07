@@ -32,6 +32,32 @@ jobs:
       - name: Import smoke test
         run: python -c "import easymanet, easymanet_cli, easymanet_image, easymanet_desktop, easymanet_publish; from easymanet_cli.app import app"
 
+      - name: Check release version alignment
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          pyproject_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          init_text = Path("packages/core/src/easymanet/__init__.py").read_text()
+          init_match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
+          if not init_match:
+              raise SystemExit("packages/core/src/easymanet/__init__.py does not define __version__")
+          package_version = init_match.group(1)
+          electron_version = json.loads(Path("apps/desktop/electron/package.json").read_text())["version"]
+          versions = {
+              "pyproject.toml": pyproject_version,
+              "packages/core/src/easymanet/__init__.py": package_version,
+              "apps/desktop/electron/package.json": electron_version,
+          }
+          if len(set(versions.values())) != 1:
+              details = ", ".join(f"{path}={version}" for path, version in versions.items())
+              raise SystemExit(f"Release versions are not aligned: {details}")
+          print(f"Release versions aligned: {pyproject_version}")
+          PY
+
       - name: Check Electron desktop shell
         run: |
           npm ci --prefix apps/desktop/electron

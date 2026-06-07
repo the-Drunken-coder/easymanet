@@ -24,7 +24,9 @@ if (!nativeApi) {
   openFleetsFolder.hidden = true;
 }
 
-document.getElementById("refresh").addEventListener("click", () => refreshAll());
+document.getElementById("refresh").addEventListener("click", () => {
+  refreshAll().catch(handleRefreshError);
+});
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
@@ -49,43 +51,67 @@ openFleetsFolder.addEventListener("click", async () => {
     renderValidation({ ok: false, errors: result.errors || ["Could not open Fleets folder"] });
   }
 });
-showAllDisks.addEventListener("change", () => loadDisks());
+showAllDisks.addEventListener("change", () => {
+  loadDisks().catch(renderDiskError);
+});
 document.getElementById("validate-form").addEventListener("submit", async event => {
   event.preventDefault();
   state.configPath = configInput.value.trim();
   state.nodeName = document.getElementById("node-name").value.trim();
-  const response = await postJson("/api/validate", {
-    config: state.configPath,
-    node: state.nodeName,
-  });
-  renderValidation(response);
+  try {
+    const response = await postJson("/api/validate", {
+      config: state.configPath,
+      node: state.nodeName,
+    });
+    renderValidation(response);
+  } catch (error) {
+    console.error("Validation request failed", error);
+    renderValidation({ ok: false, errors: [errorMessage(error)] });
+  }
 });
 
 async function refreshAll() {
-  await Promise.all([loadState(), loadDisks()]);
+  try {
+    await Promise.all([loadState(), loadDisks()]);
+  } catch (error) {
+    handleRefreshError(error);
+  }
 }
 
 async function loadState() {
-  const payload = await getState();
-  const workspace = payload.workspace || {};
-  workspacePath.textContent = workspace.root ? `Workspace: ${workspace.root}` : "";
-  renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
-  const entries = Object.entries(payload.images || {});
-  imageCount.textContent = `${entries.length}`;
-  images.innerHTML = entries.map(([target, image]) => imageMarkup(target, image)).join("");
+  try {
+    const payload = await getState();
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Could not load workspace state");
+    }
+    const workspace = payload.workspace || {};
+    workspacePath.textContent = workspace.root ? `Workspace: ${workspace.root}` : "";
+    renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
+    const entries = Object.entries(payload.images || {});
+    imageCount.textContent = `${entries.length}`;
+    images.innerHTML = entries.map(([target, image]) => imageMarkup(target, image)).join("");
+  } catch (error) {
+    console.error("State refresh failed", error);
+    renderStateError(error);
+  }
 }
 
 async function loadDisks() {
-  const payload = await getDisks(showAllDisks.checked);
-  if (!payload.ok) {
-    disks.innerHTML = `<div class="status-bad">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
-    return;
+  try {
+    const payload = await getDisks(showAllDisks.checked);
+    if (!payload.ok) {
+      disks.innerHTML = `<div class="status-bad">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
+      return;
+    }
+    if (!payload.disks.length) {
+      disks.innerHTML = `<div class="meta">No disks found.</div>`;
+      return;
+    }
+    disks.innerHTML = payload.disks.map(diskMarkup).join("");
+  } catch (error) {
+    console.error("Disk refresh failed", error);
+    renderDiskError(error);
   }
-  if (!payload.disks.length) {
-    disks.innerHTML = `<div class="meta">No disks found.</div>`;
-    return;
-  }
-  disks.innerHTML = payload.disks.map(diskMarkup).join("");
 }
 
 function renderValidation(payload) {
@@ -232,6 +258,33 @@ function errorDetail(payload) {
   return "";
 }
 
+function handleRefreshError(error) {
+  console.error("Refresh failed", error);
+  renderStateError(error);
+  renderDiskError(error);
+}
+
+function renderStateError(error) {
+  workspacePath.textContent = "Workspace unavailable";
+  fleetFolder.textContent = "";
+  fleetEmptyPath.textContent = "";
+  fleetCount.textContent = "0";
+  fleetSelect.replaceChildren();
+  fleetSelect.disabled = true;
+  fleetSelect.add(new Option("Workspace unavailable", ""));
+  fleetEmpty.hidden = false;
+  imageCount.textContent = "0";
+  images.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
+}
+
+function renderDiskError(error) {
+  disks.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
+}
+
+function errorMessage(error) {
+  return error && error.message ? error.message : String(error);
+}
+
 async function getState() {
   return getJson("/api/state");
 }
@@ -253,4 +306,4 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-refreshAll();
+refreshAll().catch(handleRefreshError);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ensure provisioning/openwrt-overlay files are listed in pyproject.toml data-files."""
+"""Ensure OpenMANET overlay files are listed in pyproject.toml data-files."""
 
 from pathlib import Path
 import sys
@@ -9,8 +9,9 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-ROOT = Path(__file__).resolve().parents[1]
-OVERLAY = ROOT / "provisioning" / "openwrt-overlay"
+ROOT = Path(__file__).resolve().parents[2]
+PROVISIONING = ROOT / "images" / "openmanet" / "provisioning"
+OVERLAY = PROVISIONING / "openwrt-overlay"
 PYPROJECT_PATH = ROOT / "pyproject.toml"
 METADATA_SUFFIXES = {".pyc", ".pyo", ".swp", ".swo"}
 
@@ -28,7 +29,7 @@ def _packaged_overlay_paths() -> set[str]:
     with PYPROJECT_PATH.open("rb") as f:
         data = tomllib.load(f)
     packaged: set[str] = set()
-    overlay_prefix = "provisioning/openwrt-overlay/"
+    overlay_prefix = "images/openmanet/provisioning/openwrt-overlay/"
     data_files = (
         data.get("tool", {})
         .get("setuptools", {})

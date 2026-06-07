@@ -5,9 +5,9 @@ import sys
 
 import typer
 
-from . import __version__
-from .download import check_easymanet_update
-from .validate import ValidationResult
+from easymanet import __version__
+from easymanet.download import check_easymanet_update
+from easymanet.validate import ValidationResult
 
 
 def print_header(text: str) -> None:

@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OVERLAY_INSTALL_ROOT = Path("share/easymanet/provisioning/openwrt-overlay")
+OVERLAY_INSTALL_ROOT = Path("share/easymanet/images/openmanet/provisioning/openwrt-overlay")
 EXECUTABLE_OVERLAY_FILES = [
     "etc/init.d/easymanet-boot-report",
     "etc/init.d/easymanet-management-lan",
@@ -83,3 +83,21 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
         installed = install_dir / OVERLAY_INSTALL_ROOT / rel_path
         assert installed.exists(), rel_path
         assert installed.stat().st_mode & stat.S_IXUSR, rel_path
+
+
+def test_release_smoke_installs_wheel_in_temp_venv(tmp_path):
+    env = os.environ.copy()
+    env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+
+    result = _run_packaging_command(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "release_smoke.py"),
+            "--temp-root",
+            str(tmp_path / "release-smoke"),
+            "--skip-electron",
+        ],
+        env=env,
+    )
+
+    assert "Release smoke passed." in result.stdout

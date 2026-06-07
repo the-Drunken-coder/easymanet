@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OVERLAY = ROOT / "provisioning" / "openwrt-overlay"
+OVERLAY = ROOT / "images" / "openmanet" / "provisioning" / "openwrt-overlay"
 PROVISION_SCRIPT = OVERLAY / "usr" / "lib" / "easymanet" / "provision.sh"
 PROVISION_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "provision-lib.sh"
 

@@ -11,17 +11,22 @@ from typing import Optional
 
 import typer
 
-from .cli_common import print_errors_and_warnings, print_header
-from .cli_flash import register_flash_command, resolve_flash_ssh_enabled
-from .cli_image import register_image_commands
-from .disks import DiskInfo, list_disks
-from .manifest import ManifestError, load_manifest
-from .platform import check_platform
-from .render import render
-from .validate import validate
+from easymanet.disks import list_disks
+from easymanet.manifest import ManifestError, load_manifest
+from easymanet.platform import check_platform
+from easymanet.render import render
+from easymanet.validate import validate
+from easymanet.workspace import (
+    ensure_workspace,
+    fleet_file_records,
+    fleets_dir,
+    resolve_fleet_config,
+    workspace_payload,
+)
+from easymanet_image.cli import register_image_commands
 
-# Re-export for tests and backward compatibility.
-_resolve_flash_ssh_enabled = resolve_flash_ssh_enabled
+from .common import print_errors_and_warnings
+from .flash import register_flash_command
 
 app = typer.Typer(
     name="easymanet",
@@ -45,14 +50,15 @@ def validate_cmd(
     ),
 ):
     """Validate a fleet.yml config file."""
+    config_path = resolve_fleet_config(config)
     try:
-        manifest = load_manifest(config)
+        manifest = load_manifest(str(config_path))
     except ManifestError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED)
         raise typer.Exit(1) from e
 
     result = validate(manifest, node_name=node)
-    typer.secho(f"Validating: {config}", bold=True)
+    typer.secho(f"Validating: {config_path}", bold=True)
     if node:
         typer.secho(f"Selected node: {node}")
 
@@ -70,8 +76,9 @@ def render_cmd(
     ),
 ):
     """Render the resolved provision.json for a node."""
+    config_path = resolve_fleet_config(config)
     try:
-        manifest = load_manifest(config)
+        manifest = load_manifest(str(config_path))
     except ManifestError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED)
         raise typer.Exit(1) from e
@@ -85,6 +92,32 @@ def render_cmd(
 
     output = render(manifest, node)
     print(output)
+
+
+@app.command(name="init")
+def init_cmd():
+    """Create the shared EasyMANET workspace in Documents."""
+    payload = workspace_payload()
+    typer.secho("EasyMANET workspace ready.", fg=typer.colors.GREEN)
+    typer.echo(f"  Root:        {payload['root']}")
+    typer.echo(f"  Fleets:      {payload['fleets_dir']}")
+    typer.echo(f"  Images:      {payload['images_dir']}")
+    typer.echo(f"  Diagnostics: {payload['diagnostics_dir']}")
+    typer.echo(f"  Builds:      {payload['builds_dir']}")
+
+
+@app.command(name="fleets")
+def fleets_cmd():
+    """List fleet files in the shared EasyMANET workspace."""
+    ensure_workspace()
+    records = fleet_file_records()
+    typer.echo(f"Fleets folder: {fleets_dir()}")
+    if not records:
+        typer.secho("No fleet files found.", fg=typer.colors.YELLOW)
+        typer.echo("Add .yml or .yaml files to the Fleets folder above.")
+        return
+    for record in records:
+        typer.echo(f"  {record['relative_path']}")
 
 
 @app.command(name="disks")
@@ -122,6 +155,7 @@ def disks_cmd(
 
 
 def main():
+    ensure_workspace()
     app()
 
 

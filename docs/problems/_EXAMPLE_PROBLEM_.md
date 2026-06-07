@@ -46,7 +46,7 @@ two. Use this template to keep the format consistent:
    1. Use `examples/three-node-field-mesh.yml` (or a minimal fleet with one `gate` node and `gateway.enabled: true`)
    2. Run `easymanet render fleet.yml`
    3. Compare output to node `provision.json` schema in `docs/manifest.md`
-9. **Notes:** Check render path vs inject/overlay expectations in `provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh`.
+9. **Notes:** Check render path vs inject/overlay expectations in `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh`.
 
 ### File naming
 
@@ -59,7 +59,7 @@ two. Use this template to keep the format consistent:
 | --- | --- |
 | CLI / Python | `easymanet/` (`cli.py`, `validate.py`, `render.py`, `build.py`, `image.py`, `inject.py`, …) |
 | First-boot (host staging) | `firstboot/` |
-| OpenWrt overlay | `provisioning/openwrt-overlay/` (`etc/uci-defaults/`, `usr/lib/easymanet/`) |
+| OpenWrt overlay | `images/openmanet/provisioning/openwrt-overlay/` (`etc/uci-defaults/`, `usr/lib/easymanet/`) |
 | Tests | `tests/` |
 | CI | `.github/workflows/` |
 | Fleet examples | `examples/*.yml` |

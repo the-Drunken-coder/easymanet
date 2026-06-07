@@ -6,9 +6,8 @@ from typing import Any, Optional
 
 import typer
 
-from .cli_common import maybe_show_update_notice, print_header
-from .disks import assert_flash_allowed, lookup_device
-from .download import (
+from easymanet.disks import assert_flash_allowed, lookup_device
+from easymanet.download import (
     check_latest_version,
     download_image,
     get_cached_image,
@@ -16,13 +15,16 @@ from .download import (
     set_image_config,
     verify_image_sha256,
 )
-from .image import FlashError, finish_flash, flash_image
-from .inject import InjectError, inject, inject_dry_run_info
-from .manifest import Manifest, ManifestError, load_manifest
-from .platform import check_platform
-from .privileges import PrivilegeError, check_privileges
-from .render import render, render_dict
-from .validate import validate
+from easymanet.image import FlashError, finish_flash, flash_image
+from easymanet.inject import InjectError, inject, inject_dry_run_info
+from easymanet.manifest import Manifest, ManifestError, load_manifest
+from easymanet.platform import check_platform
+from easymanet.privileges import PrivilegeError, check_privileges
+from easymanet.render import render, render_dict
+from easymanet.validate import validate
+from easymanet.workspace import resolve_fleet_config
+
+from .common import maybe_show_update_notice, print_header
 
 
 SECRET_FIELD_NAMES = {"password", "root_password_hash"}
@@ -301,8 +303,9 @@ def register_flash_command(app: typer.Typer) -> None:
 
         maybe_show_update_notice()
 
+        config_path = resolve_fleet_config(config)
         try:
-            manifest = load_manifest(config)
+            manifest = load_manifest(str(config_path))
         except ManifestError as e:
             typer.secho(f"Error: {e}", fg=typer.colors.RED)
             raise typer.Exit(1)
@@ -332,7 +335,7 @@ def register_flash_command(app: typer.Typer) -> None:
         )
 
         print_header("Flash Plan")
-        typer.echo(f"  Config:       {config}")
+        typer.echo(f"  Config:       {config_path}")
         typer.echo(f"  Node:         {node}")
         typer.echo(f"  Hostname:     {resolved['node']['hostname']}")
         typer.echo(f"  Role:         {role}")

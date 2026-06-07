@@ -30,19 +30,24 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Import smoke test
-        run: python -c "import easymanet; from easymanet.cli import app"
+        run: python -c "import easymanet, easymanet_cli, easymanet_image, easymanet_desktop, easymanet_publish; from easymanet_cli.app import app"
+
+      - name: Check Electron desktop shell
+        run: |
+          npm ci --prefix apps/desktop/electron
+          EASYMANET_PYTHON=python npm --prefix apps/desktop/electron run check
 
       - name: Run unit tests
         run: pytest -q --cov=easymanet --cov-report=term-missing --cov-fail-under=50
 
       - name: Syntax-check overlay shell scripts
         run: |
-          find provisioning/openwrt-overlay \
+          find images/openmanet/provisioning/openwrt-overlay \
             \( -name '*.sh' -o -path '*/etc/init.d/*' -o -path '*/etc/uci-defaults/*' \) \
             -type f -print0 | xargs -0 sh -n
 
       - name: Verify overlay files are packaged
-        run: python scripts/verify_overlay_packaging.py
+        run: python tools/packaging/verify_overlay_packaging.py
 
   docker-build-smoke:
     name: Docker build smoke
@@ -67,7 +72,7 @@ jobs:
 
       - name: Build Docker builder image
         run: |
-          python -c "from easymanet.build import _ensure_builder_image; _ensure_builder_image('easymanet-openmanet-builder:ci')"
+          python -c "from easymanet_image.build import _ensure_builder_image; _ensure_builder_image('easymanet-openmanet-builder:ci')"
 
       - name: Syntax-check generated container build script
         run: |
@@ -76,7 +81,7 @@ jobs:
           import tempfile
           from pathlib import Path
 
-          from easymanet.build import (
+          from easymanet_image.build import (
               DEFAULT_BOARD,
               DEFAULT_OPENMANET_REPO,
               DEFAULT_OPENMANET_VERSION,

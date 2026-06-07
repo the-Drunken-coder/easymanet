@@ -11,6 +11,10 @@ work is implemented, so this file records the product decisions, release
 philosophy, reasoning, constraints, and tradeoffs that should survive
 repo churn.
 
+Implementation note: the private monorepo split now lives in
+`docs/monorepo.md`. Public subrepositories are intentionally not configured
+in this repo; only local generated public-surface exports are implemented.
+
 ## Starting Point
 
 EasyMANET began as a practical way to make OpenMANET deployment less

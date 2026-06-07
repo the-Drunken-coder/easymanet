@@ -3,7 +3,7 @@
 Downloads OpenMANET base images from configured URLs and caches them
 locally. Checks for newer versions on each run.
 
-Users configure download URLs in ~/.easymanet/images.json:
+Users configure download URLs in the EasyMANET workspace image manifest:
 
 {
   "rpi4-mm6108-spi": {
@@ -32,13 +32,18 @@ from typing import NamedTuple, Optional
 
 from . import __version__
 from .format import human_size
+from .workspace import images_dir
 
-CACHE_DIR = Path.home() / ".easymanet" / "images"
-IMAGES_MANIFEST = Path.home() / ".easymanet" / "images.json"
-VERSION_FILE = Path.home() / ".easymanet" / "version.json"
+CACHE_DIR = images_dir()
+IMAGES_MANIFEST = images_dir() / "images.json"
+VERSION_FILE = images_dir() / "version.json"
 
 DEFAULT_EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
 DEFAULT_OPENMANET_GITHUB = "OpenMANET/firmware"
+IMAGE_RELEASE_MANIFEST_ASSETS = {
+    "easymanet-image-release.json",
+    "easymanet-images.json",
+}
 
 _GITHUB_API_ERRORS = (
     urllib.error.URLError,
@@ -170,6 +175,9 @@ def _check_github_release(repo: str, target: str) -> Optional[ImageRef]:
     release = _fetch_github_release(repo)
     if not release:
         return None
+    manifest_result = _pick_manifest_release_asset(release, target)
+    if manifest_result:
+        return manifest_result
     result = _pick_release_asset(release, target)
     if not result:
         version = release.get("tag_name", "unknown")
@@ -178,6 +186,57 @@ def _check_github_release(repo: str, target: str) -> Optional[ImageRef]:
             f"Expected asset like openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
         )
     return result
+
+
+def _pick_manifest_release_asset(release: dict, target: str) -> Optional[ImageRef]:
+    assets = release.get("assets", [])
+    for asset in assets:
+        if asset.get("name") not in IMAGE_RELEASE_MANIFEST_ASSETS:
+            continue
+        manifest_url = asset.get("browser_download_url")
+        if not manifest_url:
+            continue
+        manifest = _fetch_release_manifest(manifest_url)
+        if not manifest:
+            continue
+        ref = _image_ref_from_release_manifest(manifest, assets, target)
+        if ref:
+            return ref
+    return None
+
+
+def _fetch_release_manifest(url: str) -> Optional[dict]:
+    try:
+        _validate_download_url(url)
+        with _urlopen_with_retries(url, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except _GITHUB_API_ERRORS as exc:
+        _debug_note(f"image release manifest lookup failed for {url}: {exc}")
+        return None
+
+
+def _image_ref_from_release_manifest(
+    manifest: dict,
+    assets: list[dict],
+    target: str,
+) -> Optional[ImageRef]:
+    if manifest.get("target") != target:
+        return None
+    artifact = manifest.get("artifact", {})
+    filename = artifact.get("filename", "")
+    sha256 = artifact.get("sha256", "")
+    if not filename or not sha256:
+        return None
+    try:
+        sha256 = normalize_sha256(sha256)
+    except ValueError:
+        return None
+
+    for asset in assets:
+        if asset.get("name") == filename and asset.get("browser_download_url"):
+            version = manifest.get("openmanet_version") or manifest.get("channel") or "latest"
+            return ImageRef(version, asset["browser_download_url"], sha256)
+    return None
 
 
 def normalize_sha256(value: str) -> str:

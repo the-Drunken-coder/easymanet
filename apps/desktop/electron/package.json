@@ -1,0 +1,14 @@
+{
+  "name": "@easymanet/desktop-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Electron shell for the EasyMANET operator console",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node scripts/check-electron.js"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6"
+  }
+}

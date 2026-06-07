@@ -137,10 +137,17 @@ def _ensure_build_dirs() -> None:
 
 
 def _provisioning_dir() -> Path:
-    source_tree_dir = Path(__file__).resolve().parent.parent / "provisioning"
-    if source_tree_dir.exists():
-        return source_tree_dir
-    return Path(sys.prefix) / "share" / "easymanet" / "provisioning"
+    configured = os.environ.get("EASYMANET_PROVISIONING_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        source_tree_dir = parent / "images" / "openmanet" / "provisioning"
+        if source_tree_dir.exists():
+            return source_tree_dir
+
+    return Path(sys.prefix) / "share" / "easymanet" / "images" / "openmanet" / "provisioning"
 
 
 def _overlay_dir() -> Path:

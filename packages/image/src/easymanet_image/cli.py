@@ -1,8 +1,18 @@
 """Image management and build commands."""
 
 from typing import Optional
+from pathlib import Path
 
 import typer
+
+from easymanet.download import (
+    get_cached_image,
+    get_image_config,
+    normalize_sha256,
+    set_image_config,
+)
+from easymanet.format import human_size
+from easymanet_cli.common import maybe_show_update_notice, print_header
 
 from .build import (
     DEFAULT_BOARD,
@@ -12,9 +22,7 @@ from .build import (
     BuildError,
     build_image,
 )
-from .cli_common import maybe_show_update_notice, print_header
-from .download import get_cached_image, get_image_config, normalize_sha256, set_image_config
-from .format import human_size
+from .release import IMAGE_RELEASE_MANIFEST, write_release_manifest
 
 
 def register_image_commands(image_app: typer.Typer) -> None:
@@ -130,6 +138,16 @@ def register_image_commands(image_app: typer.Typer) -> None:
             "--cache-dir",
             help="Host directory to mount as the OpenMANET build cache instead of a Docker volume",
         ),
+        channel: str = typer.Option(
+            "stable",
+            "--channel",
+            help="Release channel recorded in image metadata",
+        ),
+        source_ref: Optional[str] = typer.Option(
+            None,
+            "--source-ref",
+            help="Monorepo source commit or ref recorded in image metadata",
+        ),
     ):
         """Build an EasyMANET-flavored OpenMANET image in Docker."""
         maybe_show_update_notice()
@@ -138,10 +156,11 @@ def register_image_commands(image_app: typer.Typer) -> None:
         typer.echo(f"  Version:      {openmanet_version}")
         typer.echo(f"  Board:        {board}")
         typer.echo(f"  Target:       {target}")
+        typer.echo(f"  Channel:      {channel}")
         typer.echo(f"  Output dir:   {output_dir}")
         if cache_dir:
             typer.echo(f"  Cache dir:    {cache_dir}")
-        typer.echo("  Overlay:      provisioning/openwrt-overlay")
+        typer.echo("  Overlay:      images/openmanet/provisioning/openwrt-overlay")
         typer.echo()
 
         try:
@@ -162,3 +181,60 @@ def register_image_commands(image_app: typer.Typer) -> None:
 
         typer.secho("Build complete.", fg=typer.colors.GREEN)
         typer.echo(f"  Image: {artifact}")
+
+        manifest = write_release_manifest(
+            artifact=artifact,
+            output_dir=Path(output_dir),
+            target=target,
+            openmanet_version=openmanet_version,
+            board=board,
+            channel=channel,
+            source_ref=source_ref,
+        )
+        typer.echo(f"  Manifest: {manifest}")
+
+    @image_app.command(name="manifest")
+    def image_manifest_cmd(
+        image: str = typer.Option(
+            ..., "--image", "-i", help="Built image artifact to describe"
+        ),
+        output_dir: str = typer.Option(
+            "dist", "--output-dir", "-o", help="Directory for the release manifest"
+        ),
+        openmanet_version: str = typer.Option(
+            DEFAULT_OPENMANET_VERSION,
+            "--openmanet-version",
+            help="OpenMANET/OpenWrt tag or branch included in the image",
+        ),
+        board: str = typer.Option(
+            DEFAULT_BOARD,
+            "--board",
+            help="OpenMANET board profile used for the image",
+        ),
+        target: str = typer.Option(
+            DEFAULT_TARGET,
+            "--target",
+            "-t",
+            help="Firmware artifact target suffix",
+        ),
+        channel: str = typer.Option(
+            "stable", "--channel", help="Release channel recorded in metadata"
+        ),
+        source_ref: Optional[str] = typer.Option(
+            None,
+            "--source-ref",
+            help="Monorepo source commit or ref recorded in metadata",
+        ),
+    ):
+        """Write image release metadata for a built artifact."""
+        manifest = write_release_manifest(
+            artifact=Path(image),
+            output_dir=Path(output_dir),
+            target=target,
+            openmanet_version=openmanet_version,
+            board=board,
+            channel=channel,
+            source_ref=source_ref,
+        )
+        typer.secho(f"Wrote {IMAGE_RELEASE_MANIFEST}.", fg=typer.colors.GREEN)
+        typer.echo(f"  Manifest: {manifest}")

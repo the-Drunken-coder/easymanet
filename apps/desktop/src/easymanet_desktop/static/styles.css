@@ -1,0 +1,229 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f4;
+  --ink: #17211b;
+  --muted: #66736b;
+  --line: #cfd7d1;
+  --panel: #ffffff;
+  --accent: #1f7a5b;
+  --accent-strong: #145f47;
+  --warn: #9b4d19;
+  --bad: #9c2d36;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+.workspace {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 24px 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 750;
+}
+
+h2 {
+  font-size: 17px;
+  font-weight: 720;
+}
+
+#workspace-path {
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 20px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 14px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+input[type="text"],
+input:not([type]),
+select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 8px 10px;
+  background: white;
+}
+
+.path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  padding: 8px 13px;
+}
+
+button:hover {
+  background: var(--accent-strong);
+}
+
+#refresh {
+  width: 40px;
+  padding: 0;
+  font-size: 20px;
+}
+
+#validate-form button[type="submit"] {
+  margin-top: 14px;
+  width: 100%;
+}
+
+.path-picker button {
+  margin-top: 0;
+  width: auto;
+}
+
+.empty-state {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.empty-state button {
+  margin-top: 10px;
+}
+
+pre {
+  min-height: 104px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 14px 0 0;
+  padding: 12px;
+  background: #eef2ee;
+  border-radius: 6px;
+  color: var(--ink);
+}
+
+.item {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.name {
+  font-weight: 700;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.status-ok {
+  color: var(--accent-strong);
+}
+
+.status-warn {
+  color: var(--warn);
+}
+
+.status-bad {
+  color: var(--bad);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .workspace {
+    width: min(100vw - 20px, 1180px);
+    padding: 14px 0;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .path-picker {
+    grid-template-columns: 1fr;
+  }
+}

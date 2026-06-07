@@ -206,7 +206,7 @@ def _linux_partitions_for_device(device: str) -> List[str]:
 def _linux_root_block_devices() -> set:
     disks_mod = _disks_module()
     related: set = set()
-    for mount_point in sorted(disks_mod._SYS_MOUNT_POINTS):
+    for mount_point in sorted(disks_mod.SYS_MOUNT_POINTS):
         source = disks_mod._findmnt_source(mount_point)
         if not source:
             continue
@@ -224,7 +224,7 @@ def _linux_root_block_devices() -> set:
 
 def _check_linux_system_disk(dev_path: str, mounts: List[str]) -> bool:
     disks_mod = _disks_module()
-    if any(mp in disks_mod._SYS_MOUNT_POINTS for mp in mounts):
+    if any(mp in disks_mod.SYS_MOUNT_POINTS for mp in mounts):
         return True
 
     root_related = disks_mod._linux_root_block_devices()

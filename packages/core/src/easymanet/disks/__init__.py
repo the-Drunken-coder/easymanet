@@ -48,13 +48,6 @@ from .macos import (
 )
 from .core import _is_block_device
 
-# Backward-compatible aliases for tests and callers.
-_DISK_PARSE_ERRORS = DISK_PARSE_ERRORS
-_SYS_MOUNT_POINTS = SYS_MOUNT_POINTS
-_OVERLAY_WIPE_BLOCK_MIB = OVERLAY_WIPE_BLOCK_MIB
-_OVERLAY_WIPE_BLOCKS = OVERLAY_WIPE_BLOCKS
-_debug_note = debug_note
-
 __all__ = [
     "DISK_PARSE_ERRORS",
     "DISK_SUSPICIOUS_SIZE_GB",

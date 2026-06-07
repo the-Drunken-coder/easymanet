@@ -78,7 +78,13 @@ write_root_shadow_hash() {
             ;;
     esac
 
-    : > "$tmp_path" || return 1
+    old_umask="$(umask)"
+    umask 077
+    if ! : > "$tmp_path"; then
+        umask "$old_umask"
+        return 1
+    fi
+    umask "$old_umask"
     chmod 0600 "$tmp_path" 2>/dev/null || {
         rm -f "$tmp_path"
         return 1

@@ -35,6 +35,20 @@ def test_firstboot_fails_if_root_password_hash_not_applied():
     assert "|| true" not in shadow_block.split("write_root_shadow_hash")[1].split("fi")[0]
 
 
+def test_firstboot_creates_shadow_temp_file_with_restrictive_umask():
+    text = PROVISION_SCRIPT.read_text()
+    write_block = text.split("write_root_shadow_hash() {", 1)[1].split(
+        "wipe_boot_provision_json() {", 1
+    )[0]
+
+    assert 'old_umask="$(umask)"' in write_block
+    assert "umask 077" in write_block
+    assert ': > "$tmp_path"' in write_block
+    assert 'umask "$old_umask"' in write_block
+    assert write_block.index("umask 077") < write_block.index(': > "$tmp_path"')
+    assert write_block.index(': > "$tmp_path"') < write_block.index('umask "$old_umask"')
+
+
 def test_uci_defaults_propagates_provision_failure_rc():
     defaults = OVERLAY / "etc" / "uci-defaults" / "99-easymanet"
     text = defaults.read_text()

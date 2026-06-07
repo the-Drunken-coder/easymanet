@@ -31,11 +31,71 @@ def test_export_surfaces_include_installable_python_roots(tmp_path):
 
     image_files = set(record["surfaces"]["image"]["files"])
     cli_files = set(record["surfaces"]["cli"]["files"])
+    desktop_files = set(record["surfaces"]["desktop"]["files"])
     assert "pyproject.toml" in image_files
     assert any(path.startswith("packages/core/") for path in image_files)
     assert any(path.startswith("apps/cli/") for path in image_files)
     assert any(path.startswith("packages/image/") for path in cli_files)
     assert any(path.startswith("images/openmanet/") for path in cli_files)
+    assert any(path.startswith("apps/desktop/") for path in desktop_files)
+    assert not any(path.startswith("apps/cli/") for path in desktop_files)
+    assert not any(path.startswith("packages/image/") for path in desktop_files)
+
+
+def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
+    output = tmp_path / "public"
+
+    export_public_surfaces(output, source_ref="abc123")
+
+    image_pyproject = (output / "image" / "pyproject.toml").read_text()
+    cli_pyproject = (output / "cli" / "pyproject.toml").read_text()
+    desktop_pyproject = (output / "desktop" / "pyproject.toml").read_text()
+
+    assert 'name = "easymanet-image"' in image_pyproject
+    assert 'easymanet = "easymanet_cli.app:main"' in image_pyproject
+    assert "apps/desktop/src" not in image_pyproject
+    assert "tools/publish/src" not in image_pyproject
+    assert "easymanet-desktop" not in image_pyproject
+    assert "easymanet-publish" not in image_pyproject
+    assert '"rich>=13"' not in image_pyproject
+
+    assert 'name = "easymanet-cli"' in cli_pyproject
+    assert 'easymanet = "easymanet_cli.app:main"' in cli_pyproject
+    assert "apps/desktop/src" not in cli_pyproject
+    assert "tools/publish/src" not in cli_pyproject
+    assert "easymanet-desktop" not in cli_pyproject
+    assert "easymanet-publish" not in cli_pyproject
+    assert '"rich>=13"' not in cli_pyproject
+
+    assert 'name = "easymanet-desktop"' in desktop_pyproject
+    assert 'easymanet-desktop = "easymanet_desktop.server:main"' in desktop_pyproject
+    assert "apps/cli/src" not in desktop_pyproject
+    assert "packages/image/src" not in desktop_pyproject
+    assert "tools/publish/src" not in desktop_pyproject
+    assert "easymanet-publish" not in desktop_pyproject
+    assert '"rich>=13"' not in desktop_pyproject
+
+
+def test_export_templates_dispatch_and_checkout_requested_refs(tmp_path):
+    output = tmp_path / "public"
+
+    export_public_surfaces(output, source_ref="abc123")
+
+    cli_bootstrap = (
+        output / "cli" / ".github" / "workflows" / "easymanet-bootstrap.yml"
+    ).read_text()
+    image_bootstrap = (
+        output / "image" / ".github" / "workflows" / "easymanet-bootstrap.yml"
+    ).read_text()
+    cli_release = (output / "cli" / ".github" / "workflows" / "release-cli.yml").read_text()
+    desktop_release = (
+        output / "desktop" / ".github" / "workflows" / "release-desktop.yml"
+    ).read_text()
+
+    assert "gh workflow run release-cli.yml -R ${{ github.repository }}" in cli_bootstrap
+    assert "-R ${{ github.repository }}" in image_bootstrap
+    assert "ref: ${{ inputs.source_ref || github.sha }}" in cli_release
+    assert "ref: ${{ inputs.source_ref || github.sha }}" in desktop_release
 
 
 def test_export_copy_paths_fails_on_missing_sources(tmp_path):

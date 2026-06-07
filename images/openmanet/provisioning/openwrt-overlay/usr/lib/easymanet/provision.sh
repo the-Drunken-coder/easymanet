@@ -71,8 +71,26 @@ write_root_shadow_hash() {
     mode="$(stat -c '%a' "$shadow_path" 2>/dev/null || stat -f '%Lp' "$shadow_path" 2>/dev/null || true)"
     owner="$(stat -c '%u:%g' "$shadow_path" 2>/dev/null || stat -f '%u:%g' "$shadow_path" 2>/dev/null || true)"
 
-    if ! awk -v hash="$root_hash" '
-        BEGIN { replaced = 0 }
+    case "$root_hash" in
+        *[!A-Za-z0-9./$=]*)
+            echo "Invalid root password hash characters" >> "$LOG_FILE"
+            return 1
+            ;;
+    esac
+
+    : > "$tmp_path" || return 1
+    chmod 0600 "$tmp_path" 2>/dev/null || {
+        rm -f "$tmp_path"
+        return 1
+    }
+
+    EASYMANET_ROOT_HASH="$root_hash"
+    export EASYMANET_ROOT_HASH
+    if ! awk '
+        BEGIN {
+            hash = ENVIRON["EASYMANET_ROOT_HASH"]
+            replaced = 0
+        }
         /^root:/ {
             printf "root:%s:19000:0:99999:7:::\n", hash
             replaced = 1
@@ -85,9 +103,11 @@ write_root_shadow_hash() {
             }
         }
     ' "$shadow_path" > "$tmp_path"; then
+        unset EASYMANET_ROOT_HASH
         rm -f "$tmp_path"
         return 1
     fi
+    unset EASYMANET_ROOT_HASH
 
     if [ -n "$mode" ]; then
         chmod "$mode" "$tmp_path" 2>/dev/null || true

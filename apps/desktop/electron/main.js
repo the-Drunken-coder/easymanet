@@ -8,6 +8,7 @@ const staticRoot = path.join(repoRoot, "apps", "desktop", "src", "easymanet_desk
 const indexHtml = path.join(staticRoot, "index.html");
 const fleetExtensions = new Set([".yml", ".yaml"]);
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const bridgeTimeoutMs = 15000;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -142,6 +143,21 @@ function runBridge(args) {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
+    const finish = (payload) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(payload);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill();
+      finish({ ok: false, errors: [`EasyMANET bridge timed out after ${bridgeTimeoutMs / 1000}s`] });
+    }, bridgeTimeoutMs);
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -150,18 +166,18 @@ function runBridge(args) {
       stderr += chunk.toString();
     });
     child.on("error", (error) => {
-      resolve({ ok: false, errors: [error.message] });
+      finish({ ok: false, errors: [error.message] });
     });
     child.on("close", () => {
       const text = stdout.trim();
       if (!text) {
-        resolve({ ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no output"] });
+        finish({ ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no output"] });
         return;
       }
       try {
-        resolve(JSON.parse(text));
+        finish(JSON.parse(text));
       } catch (error) {
-        resolve({ ok: false, errors: [error.message], raw: text, stderr: stderr.trim() });
+        finish({ ok: false, errors: [error.message], raw: text, stderr: stderr.trim() });
       }
     });
   });

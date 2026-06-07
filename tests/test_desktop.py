@@ -117,6 +117,14 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderFleets" in text
 
 
+def test_desktop_static_containment_rejects_sibling_prefix(tmp_path):
+    static_root = (tmp_path / "static").resolve()
+    sibling = (tmp_path / "static-backup" / "secret.txt").resolve()
+
+    assert server._is_relative_to(static_root / "index.html", static_root)
+    assert not server._is_relative_to(sibling, static_root)
+
+
 def test_electron_shell_files_exist():
     root = Path(__file__).resolve().parents[1]
     electron = root / "apps" / "desktop" / "electron"
@@ -128,3 +136,4 @@ def test_electron_shell_files_exist():
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
+    assert "bridgeTimeoutMs" in (electron / "main.js").read_text()

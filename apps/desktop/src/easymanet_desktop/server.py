@@ -63,7 +63,7 @@ def main() -> None:
 class _DesktopHandler(BaseHTTPRequestHandler):
     server_version = "EasyMANETDesktop/0.1"
 
-    def log_message(self, format: str, *args: object) -> None:
+    def log_message(self, fmt: str, *args: object) -> None:
         return
 
     def do_GET(self) -> None:
@@ -108,10 +108,10 @@ class _DesktopHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_static(self, request_path: str) -> None:
-        static_root = Path(str(resources.files("easymanet_desktop") / "static"))
+        static_root = Path(str(resources.files("easymanet_desktop") / "static")).resolve()
         rel = "index.html" if request_path in {"", "/"} else request_path.lstrip("/")
         path = (static_root / rel).resolve()
-        if not str(path).startswith(str(static_root.resolve())) or not path.exists():
+        if not _is_relative_to(path, static_root) or not path.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         body = path.read_bytes()
@@ -193,3 +193,11 @@ def _validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "warnings": result.warnings,
         "nodes": manifest.node_names(),
     }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True

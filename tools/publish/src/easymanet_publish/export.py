@@ -1,6 +1,7 @@
 """Export generated public product surfaces without configuring subrepos."""
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -13,6 +14,11 @@ from typing import Any, Iterable, Optional
 class Surface:
     name: str
     paths: tuple[str, ...]
+    package_roots: tuple[str, ...]
+    package_includes: tuple[str, ...]
+    scripts: tuple[tuple[str, str], ...]
+    package_data: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    include_image_data: bool = False
 
 
 SURFACES = (
@@ -21,13 +27,26 @@ SURFACES = (
         (
             "README.md",
             "planning.md",
-            "pyproject.toml",
             "images/openmanet",
             "packages/core",
             "packages/image",
             "apps/cli",
             ".github/workflows/build-openmanet-image.yml",
         ),
+        package_roots=(
+            "packages/core/src",
+            "packages/image/src",
+            "apps/cli/src",
+        ),
+        package_includes=(
+            "easymanet*",
+            "easymanet_cli*",
+            "easymanet_image*",
+        ),
+        scripts=(
+            ("easymanet", "easymanet_cli.app:main"),
+        ),
+        include_image_data=True,
     ),
     Surface(
         "cli",
@@ -42,8 +61,21 @@ SURFACES = (
             "packages/core",
             "packages/image",
             "apps/cli",
-            "pyproject.toml",
         ),
+        package_roots=(
+            "packages/core/src",
+            "packages/image/src",
+            "apps/cli/src",
+        ),
+        package_includes=(
+            "easymanet*",
+            "easymanet_cli*",
+            "easymanet_image*",
+        ),
+        scripts=(
+            ("easymanet", "easymanet_cli.app:main"),
+        ),
+        include_image_data=True,
     ),
     Surface(
         "desktop",
@@ -51,12 +83,22 @@ SURFACES = (
             "README.md",
             "docs/manifest.md",
             "examples",
-            "images/openmanet",
             "packages/core",
-            "packages/image",
-            "apps/cli",
             "apps/desktop",
-            "pyproject.toml",
+        ),
+        package_roots=(
+            "packages/core/src",
+            "apps/desktop/src",
+        ),
+        package_includes=(
+            "easymanet*",
+            "easymanet_desktop*",
+        ),
+        scripts=(
+            ("easymanet-desktop", "easymanet_desktop.server:main"),
+        ),
+        package_data=(
+            ("easymanet_desktop", ("static/*",)),
         ),
     ),
 )
@@ -71,6 +113,48 @@ EXPORT_IGNORE = shutil.ignore_patterns(
     "dist",
     "node_modules",
     "out",
+)
+IMAGE_DATA_FILES = (
+    (
+        "share/easymanet/images/openmanet/provisioning",
+        ("images/openmanet/provisioning/extra-packages.txt",),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay",
+        ("images/openmanet/provisioning/openwrt-overlay/README.md",),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/easymanet",
+        ("images/openmanet/provisioning/openwrt-overlay/etc/easymanet/provision.json",),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/init.d",
+        (
+            "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-boot-report",
+            "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-management-lan",
+        ),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/sysctl.d",
+        ("images/openmanet/provisioning/openwrt-overlay/etc/sysctl.d/99-easymanet.conf",),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults",
+        (
+            "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/97-easymanet-management-lan",
+            "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/98-easymanet-boot-report",
+            "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/99-easymanet",
+        ),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet",
+        (
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+        ),
+    ),
 )
 
 
@@ -102,6 +186,7 @@ def export_public_surfaces(
         surface_dir.mkdir(parents=True)
         copied = _copy_paths(repo_root, surface_dir, surface.paths)
         copied.extend(_copy_templates(surface_dir, surface.name))
+        copied.append(_write_surface_pyproject(repo_root, surface_dir, surface))
         copied = sorted(set(copied))
         _write_surface_readme(surface_dir, surface.name, copied)
         record["surfaces"][surface.name] = {
@@ -151,6 +236,97 @@ def _copy_templates(surface_dir: Path, surface: str) -> list[str]:
         shutil.copy2(source, dest)
         copied.append(rel.as_posix())
     return copied
+
+
+def _write_surface_pyproject(repo_root: Path, surface_dir: Path, surface: Surface) -> str:
+    version = _project_version(repo_root / "pyproject.toml")
+    lines = [
+        "[build-system]",
+        'requires = ["setuptools>=68", "wheel"]',
+        'build-backend = "setuptools.build_meta"',
+        "",
+        "[project]",
+        f'name = "easymanet-{surface.name}"',
+        f'version = "{version}"',
+        'description = "Zero-touch OpenMANET provisioning and imaging"',
+        'readme = "README.md"',
+        'requires-python = ">=3.9"',
+        'license = {text = "MIT"}',
+        "authors = [",
+        '    {name = "EasyMANET Contributors"}',
+        "]",
+        'keywords = ["openmanet", "mesh", "provisioning", "openwrt"]',
+        "classifiers = [",
+        '    "Development Status :: 3 - Alpha",',
+        '    "Environment :: Console",',
+        '    "Intended Audience :: System Administrators",',
+        '    "License :: OSI Approved :: MIT License",',
+        '    "Operating System :: MacOS",',
+        '    "Operating System :: POSIX :: Linux",',
+        '    "Programming Language :: Python :: 3",',
+        '    "Programming Language :: Python :: 3.9",',
+        '    "Topic :: System :: Installation/Setup",',
+        '    "Topic :: System :: Systems Administration",',
+        "]",
+        "dependencies = [",
+        '    "typer>=0.9",',
+        '    "pyyaml>=6",',
+        "]",
+        "",
+        "[project.optional-dependencies]",
+        "dev = [",
+        '    "pytest>=7",',
+        '    "pytest-cov",',
+        '    "setuptools>=68",',
+        '    "tomli>=2",',
+        '    "wheel",',
+        "]",
+        "",
+        "[project.scripts]",
+    ]
+    lines.extend(f'{name} = "{target}"' for name, target in surface.scripts)
+    lines.extend(
+        [
+            "",
+            "[tool.setuptools.packages.find]",
+            "where = [",
+        ]
+    )
+    lines.extend(f'    "{root}",' for root in surface.package_roots)
+    lines.extend(
+        [
+            "]",
+            "include = [",
+        ]
+    )
+    lines.extend(f'    "{include}",' for include in surface.package_includes)
+    lines.append("]")
+
+    if surface.package_data:
+        lines.extend(["", "[tool.setuptools.package-data]"])
+        for package, patterns in surface.package_data:
+            lines.append(f'"{package}" = [{_quoted_csv(patterns)}]')
+
+    if surface.include_image_data:
+        lines.extend(["", "[tool.setuptools.data-files]"])
+        for target, paths in IMAGE_DATA_FILES:
+            lines.append(f'"{target}" = [')
+            lines.extend(f'    "{path}",' for path in paths)
+            lines.append("]")
+
+    (surface_dir / "pyproject.toml").write_text("\n".join(lines) + "\n")
+    return "pyproject.toml"
+
+
+def _project_version(pyproject: Path) -> str:
+    match = re.search(r'^version = "([^"]+)"$', pyproject.read_text(), re.MULTILINE)
+    if not match:
+        raise ValueError(f"Could not find project version in {pyproject}")
+    return match.group(1)
+
+
+def _quoted_csv(values: tuple[str, ...]) -> str:
+    return ", ".join(f'"{value}"' for value in values)
 
 
 def _relative_files(path: Path, root: Path) -> list[str]:

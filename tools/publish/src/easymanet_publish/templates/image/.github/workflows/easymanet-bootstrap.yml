@@ -34,6 +34,7 @@ jobs:
           TARGET: ${{ github.event.client_payload.target || inputs.target || 'rpi4-mm6108-spi' }}
         run: |
           gh workflow run build-openmanet-image.yml \
+            -R ${{ github.repository }} \
             -f openmanet_version="$OPENMANET_VERSION" \
             -f board="$BOARD" \
             -f target="$TARGET"

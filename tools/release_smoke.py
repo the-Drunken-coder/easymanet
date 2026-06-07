@@ -21,6 +21,8 @@ REMOVED_IMPORTS = (
     "easymanet.cli_flash",
     "easymanet.cli_common",
 )
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+ELECTRON_SMOKE_TIMEOUT_SECONDS = 60
 
 
 def main() -> int:
@@ -194,6 +196,7 @@ def run_electron_smoke(repo_root: Path, venv_python: Path, env: dict[str, str]) 
         ["npm", "--prefix", str(repo_root / "apps" / "desktop" / "electron"), "start"],
         env=electron_env,
         capture=True,
+        timeout=ELECTRON_SMOKE_TIMEOUT_SECONDS,
     )
     if '"selectedFleet":"field.yml"' not in result.stdout:
         raise SystemExit(f"Electron smoke did not select field.yml:\n{result.stdout}")
@@ -204,15 +207,26 @@ def run(
     *,
     env: dict[str, str] | None = None,
     capture: bool = False,
+    timeout: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     print("+ " + " ".join(command))
-    result = subprocess.run(
-        command,
-        check=False,
-        env=env,
-        text=True,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        if exc.stdout:
+            print(exc.stdout, end="")
+        if exc.stderr:
+            print(exc.stderr, end="", file=sys.stderr)
+        raise SystemExit(
+            f"Command timed out after {timeout}s: {' '.join(command)}"
+        ) from exc
     if not capture and result.stdout:
         print(result.stdout, end="")
     if not capture and result.stderr:

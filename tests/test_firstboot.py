@@ -116,6 +116,10 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "boot-report-latest" in report_text
     assert "easymanet_redact_uci_wireless" in report_text
     assert "easymanet_redact_uci_mesh11sd" in report_text
+    secret_fields = next(
+        line for line in report_text.splitlines() if line.startswith("MESH11SD_SECRET_FIELDS=")
+    )
+    assert "priv_key_pwd" in secret_fields
     assert "priv_key_pwd" in report_text
     assert "auto_mesh_id" in report_text
     assert "auto_mesh_key" in report_text

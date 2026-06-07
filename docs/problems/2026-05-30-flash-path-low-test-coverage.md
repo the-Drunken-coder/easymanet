@@ -9,5 +9,5 @@
 7. **Actual:** `pytest --cov=easymanet` passes the 50% CI floor (~55% total) but `flash.py` lines 37–117 and 190–320 are largely uncovered; `disks/macos.py` is almost entirely untested on non-macOS CI; `format.human_size()` has no direct tests (11-line module, used via disk listing)
 8. **Reproduction:**
    1. `pytest -q --cov=easymanet --cov-report=term-missing`
-   2. Inspect missing lines for `apps/cli/src/easymanet_cli/flash.py`, `disks/macos.py`, `format.py`
+   2. Inspect missing lines for `apps/cli/src/easymanet_cli/flash.py`, `packages/core/src/easymanet/disks/macos.py`, `packages/core/src/easymanet/format.py`
 9. **Notes:** Hardest to unit-test without mocking Typer prompts, sudo, and `diskutil`. Reasonable follow-ups: unit tests for `human_size()`; Linux disk tests where feasible; optional `--dry-run` flash that exercises CLI wiring without writing blocks; macOS-only integration job if needed. Overlay wipe logic is better covered via `image.py` tests — do not conflate with flash CLI gaps.

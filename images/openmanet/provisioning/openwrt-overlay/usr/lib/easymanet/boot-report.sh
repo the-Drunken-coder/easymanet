@@ -3,7 +3,7 @@
 
 BOOT_REPORT_TMP="/tmp/easymanet-boot-report"
 BOOT_REPORT_MOUNTED=0
-MESH11SD_SECRET_FIELDS="key|password|passphrase|psk|secret|auto_mesh_id|auto_mesh_key|mesh_gate_key|vtun_gate_key"
+MESH11SD_SECRET_FIELDS="key|password|passphrase|psk|secret|priv_key_pwd|auto_mesh_id|auto_mesh_key|mesh_gate_key|vtun_gate_key"
 
 boot_report_cleanup() {
     if [ "$BOOT_REPORT_MOUNTED" -eq 1 ]; then

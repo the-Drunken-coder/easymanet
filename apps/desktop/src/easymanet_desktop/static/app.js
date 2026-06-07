@@ -179,20 +179,57 @@ async function getJson(url) {
   if (nativeApi && url === "/api/state") {
     return nativeApi.getState();
   }
-  const response = await fetch(url);
-  return response.json();
+  return fetchJson(url);
 }
 
 async function postJson(url, body) {
   if (nativeApi && url === "/api/validate") {
     return nativeApi.validate(body);
   }
-  const response = await fetch(url, {
+  return fetchJson(url, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(body),
   });
-  return response.json();
+}
+
+async function fetchJson(url, options) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    throw new Error(`Request failed for ${url}: ${error.message}`);
+  }
+
+  const text = await response.text();
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      throw new Error(`Invalid JSON from ${url}: ${error.message}`);
+    }
+  }
+
+  if (!response.ok) {
+    const detail = errorDetail(payload) || text;
+    const suffix = detail ? ` - ${detail}` : "";
+    throw new Error(`Request failed for ${url}: ${response.status} ${response.statusText}${suffix}`);
+  }
+  return payload;
+}
+
+function errorDetail(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  if (payload.error) {
+    return payload.error;
+  }
+  if (Array.isArray(payload.errors)) {
+    return payload.errors.join(", ");
+  }
+  return "";
 }
 
 async function getState() {

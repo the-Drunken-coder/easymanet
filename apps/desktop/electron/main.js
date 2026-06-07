@@ -166,13 +166,19 @@ function pythonPath() {
     return process.env.EASYMANET_PYTHON;
   }
   if (process.env.VIRTUAL_ENV) {
-    return path.join(process.env.VIRTUAL_ENV, "bin", "python");
+    return venvPython(process.env.VIRTUAL_ENV);
   }
-  const localVenv = path.join(repoRoot, ".codex-venv", "bin", "python");
+  const localVenv = venvPython(path.join(repoRoot, ".codex-venv"));
   if (fs.existsSync(localVenv)) {
     return localVenv;
   }
-  return "python3";
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+function venvPython(venvRoot) {
+  const binDir = process.platform === "win32" ? "Scripts" : "bin";
+  const exe = process.platform === "win32" ? "python.exe" : "python";
+  return path.join(venvRoot, binDir, exe);
 }
 
 function bridgeEnv() {

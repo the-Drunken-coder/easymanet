@@ -1,7 +1,5 @@
 """Tests for CLI helpers."""
 
-from pathlib import Path
-
 import pytest
 import typer
 
@@ -14,6 +12,36 @@ from easymanet_cli.flash import (
     resolve_flash_ssh_enabled,
 )
 from easymanet_image import cli as cli_image
+
+
+FIELD_FLEET_YAML = """\
+version: 1
+
+mesh:
+  id: field
+  password: test-password
+  channel: 36
+  bandwidth_mhz: 4
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: test-local-password
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"
+
+nodes:
+  point01:
+    role: point
+    hostname: point01
+    ip: 10.41.2.1
+    local_ap:
+      ssid: point01-local
+"""
 
 
 def test_resolve_flash_ssh_disable_overrides_gate():
@@ -243,9 +271,7 @@ def test_cli_init_and_fleets_use_shared_workspace(tmp_path, monkeypatch):
     assert "EasyMANET workspace ready." in result.output
     assert (workspace / "Fleets").is_dir()
 
-    (workspace / "Fleets" / "field.yml").write_text(
-        Path("examples/three-node-field-mesh.yml").read_text()
-    )
+    (workspace / "Fleets" / "field.yml").write_text(FIELD_FLEET_YAML)
     result = CliRunner().invoke(app, ["fleets"])
 
     assert result.exit_code == 0
@@ -263,7 +289,7 @@ def test_cli_validate_resolves_fleet_name_from_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
     ensure_workspace()
     fleet = workspace / "Fleets" / "field.yml"
-    fleet.write_text(Path("examples/three-node-field-mesh.yml").read_text())
+    fleet.write_text(FIELD_FLEET_YAML)
 
     result = CliRunner().invoke(
         app,

@@ -9,6 +9,6 @@
     "check": "node --check main.js && node --check preload.js && node scripts/check-electron.js"
   },
   "devDependencies": {
-    "electron": "^39.2.6"
+    "electron": "^39.8.5"
   }
 }

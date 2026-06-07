@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import venv
+import warnings
 from pathlib import Path
 
 
@@ -126,9 +127,17 @@ def build_wheel(repo_root: Path, temp_root: Path) -> Path:
 
 
 def clean_build_metadata(repo_root: Path) -> None:
-    shutil.rmtree(repo_root / "build", ignore_errors=True)
-    for path in repo_root.glob("*.egg-info"):
-        shutil.rmtree(path, ignore_errors=True)
+    paths = [repo_root / "build", *repo_root.glob("*.egg-info")]
+    found = [path for path in paths if path.exists()]
+    if found:
+        found_text = ", ".join(str(path.relative_to(repo_root)) for path in found)
+        warnings.warn(f"clean_build_metadata removing stale build metadata: {found_text}")
+    for path in found:
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            warnings.warn(f"clean_build_metadata could not remove {path}: {exc}")
+            raise
 
 
 def create_venv(venv_dir: Path, *, system_site_packages: bool) -> None:
@@ -142,7 +151,7 @@ def venv_python_path(venv_dir: Path) -> Path:
 
 def console_script(venv_dir: Path, name: str) -> Path:
     bin_dir = "Scripts" if os.name == "nt" else "bin"
-    suffix = ".exe" if os.name == "nt" and name != "python" else ""
+    suffix = ".exe" if os.name == "nt" else ""
     return venv_dir / bin_dir / f"{name}{suffix}"
 
 

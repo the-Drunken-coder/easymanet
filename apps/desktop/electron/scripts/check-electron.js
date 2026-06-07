@@ -19,8 +19,9 @@ for (const file of files) {
   }
 }
 
-const localPython = path.join(repoRoot, ".codex-venv/bin/python");
-const python = process.env.EASYMANET_PYTHON || (fs.existsSync(localPython) ? localPython : "python3");
+const localPython = venvPython(path.join(repoRoot, ".codex-venv"));
+const fallbackPython = process.platform === "win32" ? "python" : "python3";
+const python = process.env.EASYMANET_PYTHON || (fs.existsSync(localPython) ? localPython : fallbackPython);
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "easymanet-electron-check-"));
 const bridge = spawnSync(python, ["-m", "easymanet_desktop.bridge", "state"], {
   cwd: repoRoot,
@@ -57,4 +58,10 @@ console.log("Electron desktop files and EasyMANET bridge are valid.");
 
 function cleanupWorkspace() {
   fs.rmSync(workspace, { recursive: true, force: true });
+}
+
+function venvPython(venvRoot) {
+  const binDir = process.platform === "win32" ? "Scripts" : "bin";
+  const exe = process.platform === "win32" ? "python.exe" : "python";
+  return path.join(venvRoot, binDir, exe);
 }

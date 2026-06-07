@@ -21,8 +21,11 @@ SURFACES = (
         (
             "README.md",
             "planning.md",
+            "pyproject.toml",
             "images/openmanet",
+            "packages/core",
             "packages/image",
+            "apps/cli",
             ".github/workflows/build-openmanet-image.yml",
         ),
     ),
@@ -35,7 +38,9 @@ SURFACES = (
             "docs/flashing.md",
             "docs/manifest.md",
             "examples",
+            "images/openmanet",
             "packages/core",
+            "packages/image",
             "apps/cli",
             "pyproject.toml",
         ),
@@ -46,7 +51,10 @@ SURFACES = (
             "README.md",
             "docs/manifest.md",
             "examples",
+            "images/openmanet",
             "packages/core",
+            "packages/image",
+            "apps/cli",
             "apps/desktop",
             "pyproject.toml",
         ),
@@ -54,6 +62,16 @@ SURFACES = (
 )
 
 EXPORT_RECORD = "easymanet-public-surfaces.json"
+EXPORT_IGNORE = shutil.ignore_patterns(
+    "__pycache__",
+    "*.pyc",
+    "*.egg-info",
+    ".pytest_cache",
+    "build",
+    "dist",
+    "node_modules",
+    "out",
+)
 
 
 def export_public_surfaces(
@@ -83,7 +101,7 @@ def export_public_surfaces(
             shutil.rmtree(surface_dir)
         surface_dir.mkdir(parents=True)
         copied = _copy_paths(repo_root, surface_dir, surface.paths)
-        copied.extend(_copy_templates(repo_root, surface_dir, surface.name))
+        copied.extend(_copy_templates(surface_dir, surface.name))
         copied = sorted(set(copied))
         _write_surface_readme(surface_dir, surface.name, copied)
         record["surfaces"][surface.name] = {
@@ -99,23 +117,27 @@ def export_public_surfaces(
 
 def _copy_paths(repo_root: Path, surface_dir: Path, paths: Iterable[str]) -> list[str]:
     copied: list[str] = []
+    missing: list[str] = []
     for rel in paths:
         source = repo_root / rel
         if not source.exists():
+            missing.append(rel)
             continue
         dest = surface_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
-            shutil.copytree(source, dest)
+            shutil.copytree(source, dest, ignore=EXPORT_IGNORE)
             copied.extend(_relative_files(dest, surface_dir))
         else:
             shutil.copy2(source, dest)
             copied.append(rel)
+    if missing:
+        missing_text = ", ".join(sorted(missing))
+        raise FileNotFoundError(f"Export source path(s) missing: {missing_text}")
     return sorted(set(copied))
 
 
-def _copy_templates(repo_root: Path, surface_dir: Path, surface: str) -> list[str]:
-    del repo_root
+def _copy_templates(surface_dir: Path, surface: str) -> list[str]:
     template_root = Path(__file__).resolve().parent / "templates" / surface
     if not template_root.exists():
         return []
@@ -158,6 +180,7 @@ def _write_surface_readme(surface_dir: Path, surface: str, copied: list[str]) ->
 
 def _repo_root() -> Path:
     cwd = Path.cwd().resolve()
+    module_path = Path(__file__).resolve()
     for candidate in (cwd, *cwd.parents):
         if (
             (candidate / "pyproject.toml").exists()
@@ -165,13 +188,19 @@ def _repo_root() -> Path:
             and (candidate / "packages" / "core").exists()
         ):
             return candidate
-    return Path(__file__).resolve().parents[4]
+    raise RuntimeError(
+        "Could not locate the EasyMANET repo root from "
+        f"{module_path}; checked for pyproject.toml, planning.md, and packages/core."
+    )
 
 
 def _git_ref(repo_root: Path) -> str:
+    git_path = shutil.which("git")
+    if not git_path:
+        return ""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [git_path, "rev-parse", "HEAD"],
             cwd=repo_root,
             capture_output=True,
             text=True,

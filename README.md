@@ -228,7 +228,7 @@ on `flash` and `image build`.
 
 ## Architecture
 
-```
+```text
 Documents/EasyMANET/Fleets/fleet.yml → validate → render → boot-partition provision.json → first boot → mesh
 ```
 

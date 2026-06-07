@@ -68,13 +68,14 @@ npm --prefix apps/desktop/electron run check
 ```
 
 If a firmware image is part of the release, build it and write the release
-manifest next to the image:
+manifest next to the image. OpenMANET image filenames carry the OpenMANET
+firmware version, which is independent of the EasyMANET package version:
 
 ```bash
 easymanet image build --output-dir dist/release/images
 easymanet image manifest \
   --image dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
-  --output dist/release/images/easymanet-image-release.json
+  --output-dir dist/release/images
 ```
 
 ## Tag And Publish

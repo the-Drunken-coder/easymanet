@@ -32,7 +32,7 @@ defaults:
     enabled: true
     password: "replace-with-a-local-ap-password"
   management:
-    root_password_hash: ""
+    root_password_hash: "replace-with-hashed-password"
     ssh_authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... operator"
 

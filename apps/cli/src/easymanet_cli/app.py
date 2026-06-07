@@ -109,7 +109,6 @@ def init_cmd():
 @app.command(name="fleets")
 def fleets_cmd():
     """List fleet files in the shared EasyMANET workspace."""
-    ensure_workspace()
     records = fleet_file_records()
     typer.echo(f"Fleets folder: {fleets_dir()}")
     if not records:

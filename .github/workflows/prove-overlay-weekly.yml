@@ -44,12 +44,12 @@ jobs:
           sudo docker image prune --all --force
 
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: "3.11"
 
@@ -63,7 +63,7 @@ jobs:
 
       - name: Restore OpenMANET build cache
         id: openmanet-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: .openmanet-cache
           key: openmanet-docker-cache-v1-${{ runner.os }}-${{ env.BOARD }}-${{ env.OPENMANET_VERSION }}-${{ hashFiles('easymanet/build.py', 'pyproject.toml', 'provisioning/**') }}
@@ -87,13 +87,13 @@ jobs:
 
       - name: Save OpenMANET build cache
         if: success() && steps.openmanet-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: .openmanet-cache
           key: ${{ steps.openmanet-cache.outputs.cache-primary-key }}
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: openmanet-weekly-${{ env.OPENMANET_VERSION }}-${{ env.TARGET }}
           path: dist/*.img.gz

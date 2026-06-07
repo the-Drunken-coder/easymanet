@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OWNER = "the-Drunken-coder"
 DEFAULT_OUTPUT_DIR = ROOT / "build" / "product-repos"
+GITHUB_HOST = "github.com"
 
 
 @dataclass(frozen=True)
@@ -928,7 +930,7 @@ REPO_SPECS = {
         key="cli",
         name="easymanet-cli",
         description="Public CLI and automation surface for EasyMANET.",
-        source_paths=COMMON_SOURCE_PATHS + (".github/workflows/build-openmanet-image.yml",),
+        source_paths=COMMON_SOURCE_PATHS,
         generated_files={
             **_common_generated("easymanet-cli", "CLI and automation"),
             "README.md": CLI_README,
@@ -963,12 +965,14 @@ def run(
     args: list[str],
     *,
     cwd: Path | None = None,
+    env: dict[str, str] | None = None,
     input_text: str | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         cwd=cwd,
+        env=env,
         input=input_text,
         text=True,
         check=check,
@@ -1042,6 +1046,7 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:
     result = run(
         ["gh", "repo", "view", f"{owner}/{spec.name}", "--json", "name"],
+        env=github_cli_env(),
         check=False,
     )
     return result.returncode == 0
@@ -1059,15 +1064,64 @@ def create_github_repo(owner: str, spec: RepoSpec) -> None:
             spec.description,
             "--disable-wiki",
             "--clone=false",
-        ]
+        ],
+        env=github_cli_env(),
     )
 
 
+def publish_token() -> str | None:
+    return os.environ.get("EASYMANET_PUBLIC_REPO_TOKEN") or os.environ.get("GH_TOKEN")
+
+
+def github_cli_env() -> dict[str, str] | None:
+    token = publish_token()
+    if not token:
+        return None
+
+    env = os.environ.copy()
+    if not env.get("GH_TOKEN"):
+        env["GH_TOKEN"] = token
+    return env
+
+
 def remote_url(owner: str, spec: RepoSpec) -> str:
-    token = os.environ.get("EASYMANET_PUBLIC_REPO_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        return f"https://x-access-token:{token}@github.com/{owner}/{spec.name}.git"
-    return f"https://github.com/{owner}/{spec.name}.git"
+    return f"https://{GITHUB_HOST}/{owner}/{spec.name}.git"
+
+
+def git_auth_env() -> dict[str, str] | None:
+    token = publish_token()
+    if not token:
+        return None
+
+    env = os.environ.copy()
+    try:
+        index = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        index = 0
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    env["GIT_CONFIG_COUNT"] = str(index + 1)
+    env[f"GIT_CONFIG_KEY_{index}"] = f"http.https://{GITHUB_HOST}/.extraheader"
+    env[f"GIT_CONFIG_VALUE_{index}"] = f"AUTHORIZATION: basic {encoded}"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def remote_default_branch(owner: str, spec: RepoSpec) -> str:
+    result = run(
+        ["git", "ls-remote", "--symref", remote_url(owner, spec), "HEAD"],
+        env=git_auth_env(),
+        check=False,
+    )
+    if result.returncode != 0:
+        return "main"
+
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "ref:" and parts[2] == "HEAD":
+            ref = parts[1]
+            if ref.startswith("refs/heads/"):
+                return ref.removeprefix("refs/heads/")
+    return "main"
 
 
 def clear_worktree(path: Path) -> None:
@@ -1080,30 +1134,34 @@ def clear_worktree(path: Path) -> None:
             child.unlink()
 
 
-def ensure_worktree(owner: str, spec: RepoSpec, worktree_dir: Path) -> None:
+def checkout_branch(worktree_dir: Path, branch: str) -> None:
+    remote_branch = f"origin/{branch}"
+    result = run(["git", "rev-parse", "--verify", remote_branch], cwd=worktree_dir, check=False)
+    if result.returncode == 0:
+        run(["git", "checkout", "-B", branch, remote_branch], cwd=worktree_dir)
+    else:
+        run(["git", "checkout", "-B", branch], cwd=worktree_dir)
+
+
+def ensure_worktree(owner: str, spec: RepoSpec, worktree_dir: Path) -> str:
     url = remote_url(owner, spec)
+    branch = remote_default_branch(owner, spec)
+    auth_env = git_auth_env()
     if (worktree_dir / ".git").exists():
         run(["git", "remote", "set-url", "origin", url], cwd=worktree_dir)
-        run(["git", "fetch", "origin"], cwd=worktree_dir)
-        result = run(["git", "rev-parse", "--verify", "origin/main"], cwd=worktree_dir, check=False)
-        if result.returncode == 0:
-            run(["git", "checkout", "-B", "main", "origin/main"], cwd=worktree_dir)
-        else:
-            run(["git", "checkout", "-B", "main"], cwd=worktree_dir)
-        return
+        run(["git", "fetch", "origin"], cwd=worktree_dir, env=auth_env)
+        checkout_branch(worktree_dir, branch)
+        return branch
 
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-    run(["git", "clone", url, str(worktree_dir)])
-    result = run(["git", "rev-parse", "--verify", "origin/main"], cwd=worktree_dir, check=False)
-    if result.returncode == 0:
-        run(["git", "checkout", "-B", "main", "origin/main"], cwd=worktree_dir)
-    else:
-        run(["git", "checkout", "-B", "main"], cwd=worktree_dir)
+    run(["git", "clone", url, str(worktree_dir)], env=auth_env)
+    checkout_branch(worktree_dir, branch)
+    return branch
 
 
 def sync_to_remote(owner: str, spec: RepoSpec, generated_dir: Path, output_dir: Path, source_sha: str) -> str | None:
     worktree_dir = output_dir.parent / "product-repo-worktrees" / spec.name
-    ensure_worktree(owner, spec, worktree_dir)
+    branch = ensure_worktree(owner, spec, worktree_dir)
     clear_worktree(worktree_dir)
     shutil.copytree(generated_dir, worktree_dir, dirs_exist_ok=True)
 
@@ -1126,7 +1184,7 @@ def sync_to_remote(owner: str, spec: RepoSpec, generated_dir: Path, output_dir: 
         ],
         cwd=worktree_dir,
     )
-    run(["git", "push", "origin", "main"], cwd=worktree_dir)
+    run(["git", "push", "origin", branch], cwd=worktree_dir, env=git_auth_env())
     return git_output(["rev-parse", "HEAD"], cwd=worktree_dir)
 
 
@@ -1141,6 +1199,7 @@ def dispatch_release(owner: str, spec: RepoSpec, payload: dict[str, str]) -> Non
             "--input",
             "-",
         ],
+        env=github_cli_env(),
         input_text=json.dumps({"event_type": spec.dispatch_event, "client_payload": payload}),
     )
 

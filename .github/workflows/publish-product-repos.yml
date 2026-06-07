@@ -66,30 +66,38 @@ jobs:
 
       - name: Generate product repos
         env:
-          EASYMANET_PUBLIC_REPO_TOKEN: ${{ secrets.EASYMANET_PUBLIC_REPO_TOKEN }}
-          GH_TOKEN: ${{ secrets.EASYMANET_PUBLIC_REPO_TOKEN }}
+          PRODUCT: ${{ inputs.product }}
+          PUSH: ${{ inputs.push }}
+          DISPATCH: ${{ inputs.dispatch }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          OPENMANET_VERSION: ${{ inputs.openmanet_version }}
+          BOARD: ${{ inputs.board }}
+          TARGET: ${{ inputs.target }}
+          JOBS: ${{ inputs.jobs }}
+          EASYMANET_PUBLIC_REPO_TOKEN: ${{ (inputs.push || inputs.dispatch) && secrets.EASYMANET_PUBLIC_REPO_TOKEN || '' }}
+          GH_TOKEN: ${{ (inputs.push || inputs.dispatch) && secrets.EASYMANET_PUBLIC_REPO_TOKEN || '' }}
         run: |
           set -euo pipefail
           args=(
-            --product "${{ inputs.product }}"
+            --product "$PRODUCT"
             --output-dir build/product-repos
             --remote-owner the-Drunken-coder
-            --openmanet-version "${{ inputs.openmanet_version }}"
-            --board "${{ inputs.board }}"
-            --target "${{ inputs.target }}"
-            --jobs "${{ inputs.jobs }}"
+            --openmanet-version "$OPENMANET_VERSION"
+            --board "$BOARD"
+            --target "$TARGET"
+            --jobs "$JOBS"
           )
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            args+=(--release-tag "${{ inputs.release_tag }}")
+          if [ -n "$RELEASE_TAG" ]; then
+            args+=(--release-tag "$RELEASE_TAG")
           fi
-          if [ "${{ inputs.push }}" = "true" ]; then
+          if [ "$PUSH" = "true" ]; then
             if [ -z "${EASYMANET_PUBLIC_REPO_TOKEN:-}" ]; then
               echo "EASYMANET_PUBLIC_REPO_TOKEN is required when push=true"
               exit 1
             fi
             args+=(--push)
           fi
-          if [ "${{ inputs.dispatch }}" = "true" ]; then
+          if [ "$DISPATCH" = "true" ]; then
             if [ -z "${EASYMANET_PUBLIC_REPO_TOKEN:-}" ]; then
               echo "EASYMANET_PUBLIC_REPO_TOKEN is required when dispatch=true"
               exit 1

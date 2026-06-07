@@ -1,0 +1,40 @@
+name: EasyMANET Image Bootstrap
+
+on:
+  repository_dispatch:
+    types: [easymanet-image-publish]
+  workflow_dispatch:
+    inputs:
+      openmanet_version:
+        description: OpenMANET tag or branch to build
+        required: false
+        default: "1.6.5"
+      board:
+        description: OpenMANET board profile
+        required: false
+        default: "ekh-bcm2711"
+      target:
+        description: Firmware target suffix
+        required: false
+        default: "rpi4-mm6108-spi"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch image release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENMANET_VERSION: ${{ github.event.client_payload.openmanet_version || inputs.openmanet_version || '1.6.5' }}
+          BOARD: ${{ github.event.client_payload.board || inputs.board || 'ekh-bcm2711' }}
+          TARGET: ${{ github.event.client_payload.target || inputs.target || 'rpi4-mm6108-spi' }}
+        run: |
+          gh workflow run build-openmanet-image.yml \
+            -R ${{ github.repository }} \
+            -f openmanet_version="$OPENMANET_VERSION" \
+            -f board="$BOARD" \
+            -f target="$TARGET"

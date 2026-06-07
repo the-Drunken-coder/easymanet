@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EasyMANET</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>EasyMANET</h1>
+            <p id="workspace-path"></p>
+          </div>
+          <button id="refresh" title="Refresh state" aria-label="Refresh state">&#8635;</button>
+        </header>
+
+        <section class="grid">
+          <form class="panel" id="validate-form">
+            <div class="panel-title">
+              <h2>Fleet</h2>
+              <span id="fleet-count"></span>
+            </div>
+            <div class="meta" id="fleet-folder"></div>
+            <label>
+              Saved fleet
+              <select id="fleet-select"></select>
+            </label>
+            <div class="empty-state" id="fleet-empty" hidden>
+              <div class="name">No fleet files yet.</div>
+              <div class="meta">Fleets folder: <span id="fleet-empty-path"></span></div>
+              <button id="open-fleets-folder" type="button">Open Fleets Folder</button>
+            </div>
+            <label>
+              Config
+              <span class="path-picker">
+                <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off">
+                <button id="choose-config" type="button">Browse</button>
+              </span>
+            </label>
+            <label>
+              Node
+              <input id="node-name" name="node" placeholder="point01" autocomplete="off">
+            </label>
+            <button type="submit">Validate</button>
+            <pre id="validation-output"></pre>
+          </form>
+
+          <section class="panel">
+            <div class="panel-title">
+              <h2>Images</h2>
+              <span id="image-count"></span>
+            </div>
+            <div id="images"></div>
+          </section>
+
+          <section class="panel wide">
+            <div class="panel-title">
+              <h2>Disks</h2>
+              <label class="toggle">
+                <input id="show-all-disks" type="checkbox">
+                All
+              </label>
+            </div>
+            <div id="disks"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

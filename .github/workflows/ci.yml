@@ -30,19 +30,50 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Import smoke test
-        run: python -c "import easymanet; from easymanet.cli import app"
+        run: python -c "import easymanet, easymanet_cli, easymanet_image, easymanet_desktop, easymanet_publish; from easymanet_cli.app import app"
+
+      - name: Check release version alignment
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          pyproject_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          init_text = Path("packages/core/src/easymanet/__init__.py").read_text()
+          init_match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
+          if not init_match:
+              raise SystemExit("packages/core/src/easymanet/__init__.py does not define __version__")
+          package_version = init_match.group(1)
+          electron_version = json.loads(Path("apps/desktop/electron/package.json").read_text())["version"]
+          versions = {
+              "pyproject.toml": pyproject_version,
+              "packages/core/src/easymanet/__init__.py": package_version,
+              "apps/desktop/electron/package.json": electron_version,
+          }
+          if len(set(versions.values())) != 1:
+              details = ", ".join(f"{path}={version}" for path, version in versions.items())
+              raise SystemExit(f"Release versions are not aligned: {details}")
+          print(f"Release versions aligned: {pyproject_version}")
+          PY
+
+      - name: Check Electron desktop shell
+        run: |
+          npm ci --prefix apps/desktop/electron
+          EASYMANET_PYTHON=python npm --prefix apps/desktop/electron run check
 
       - name: Run unit tests
         run: pytest -q --cov=easymanet --cov-report=term-missing --cov-fail-under=50
 
       - name: Syntax-check overlay shell scripts
         run: |
-          find provisioning/openwrt-overlay \
+          find images/openmanet/provisioning/openwrt-overlay \
             \( -name '*.sh' -o -path '*/etc/init.d/*' -o -path '*/etc/uci-defaults/*' \) \
             -type f -print0 | xargs -0 sh -n
 
       - name: Verify overlay files are packaged
-        run: python scripts/verify_overlay_packaging.py
+        run: python tools/packaging/verify_overlay_packaging.py
 
   docker-build-smoke:
     name: Docker build smoke
@@ -67,7 +98,7 @@ jobs:
 
       - name: Build Docker builder image
         run: |
-          python -c "from easymanet.build import _ensure_builder_image; _ensure_builder_image('easymanet-openmanet-builder:ci')"
+          python -c "from easymanet_image.build import _ensure_builder_image; _ensure_builder_image('easymanet-openmanet-builder:ci')"
 
       - name: Syntax-check generated container build script
         run: |
@@ -76,7 +107,7 @@ jobs:
           import tempfile
           from pathlib import Path
 
-          from easymanet.build import (
+          from easymanet_image.build import (
               DEFAULT_BOARD,
               DEFAULT_OPENMANET_REPO,
               DEFAULT_OPENMANET_VERSION,

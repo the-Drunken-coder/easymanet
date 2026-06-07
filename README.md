@@ -4,16 +4,16 @@ Zero-touch provisioning and imaging for OpenMANET mesh nodes.
 
 ## What EasyMANET Is
 
-EasyMANET is a CLI tool that lets you define an entire OpenMANET mesh
-fleet in a single YAML config file, flash SD cards from that file, and
-boot Raspberry Pi nodes directly into a working mesh — without ever
+EasyMANET is a local CLI and Electron desktop app that lets you define an
+entire OpenMANET mesh fleet in a single YAML config file, flash SD cards from
+that file, and boot Raspberry Pi nodes directly into a working mesh without
 touching the node-local web UI.
 
 ## What EasyMANET Is NOT
 
 - A replacement for OpenMANET or OpenWrt
 - A new MANET protocol
-- A web dashboard or GUI
+- A cloud dashboard
 - A cloud management service
 - A Meshtastic integration
 - A drone UI
@@ -34,19 +34,33 @@ workflow entirely.
 - **Node**: Raspberry Pi 4
 - **Radio**: MM6108 SPI (OpenMANET rpi4 + mm6108-spi target)
 
-## MVP Limitations
+## Current Release Scope
 
 - Single target: `rpi4-mm6108-spi` only
-- CLI only
+- Local CLI and Electron desktop workflows only
 - No remote management
 - No monitoring dashboard
 - No incremental config updates (flash to reconfigure)
 
 ## Quick Start
 
-### 1. Write a fleet config
+### 1. Initialize the local workspace
 
-Create `fleet.yml`:
+The installed CLI creates a shared workspace under
+`~/Documents/EasyMANET/`. Fleet files live in
+`~/Documents/EasyMANET/Fleets/`, and the Electron app reads the same folder.
+
+```bash
+easymanet init
+easymanet fleets
+```
+
+Set `EASYMANET_WORKSPACE=/path/to/EasyMANET` if you need a different local
+workspace.
+
+### 2. Write a fleet config
+
+Create `~/Documents/EasyMANET/Fleets/fleet.yml`:
 
 ```yaml
 version: 1
@@ -87,35 +101,40 @@ nodes:
       ssid: point01-local
 ```
 
+The checked-in starter fleet is
+[`examples/three-node-field-mesh.yml`](examples/three-node-field-mesh.yml).
+See [docs/sample-fleet.md](docs/sample-fleet.md) for the copy command and a
+smaller two-node example. EasyMANET does not create a fleet file automatically.
+
 For a gate, `uplink_interface: eth0` keeps wired management on `br-lan` and
 also runs the WAN DHCP client on that same bridge. That means the upstream
 Ethernet network and the EasyMANET management LAN share one L2 segment.
 
-### 2. List available disks
+### 3. List available disks
 
 ```bash
 easymanet disks
 ```
 
-### 3. Validate config
+### 4. Validate config
 
 ```bash
-easymanet validate --config fleet.yml
-easymanet validate --config fleet.yml --node point01
+easymanet validate --config fleet
+easymanet validate --config fleet --node point01
 ```
 
-### 4. Preview flash (dry run)
+### 5. Preview flash (dry run)
 
 ```bash
 easymanet flash \
-  --config fleet.yml \
+  --config fleet \
   --node point01 \
   --device /dev/disk4 \
   --base-image ./openmanet-rpi4-mm6108-spi.img.gz \
   --dry-run
 ```
 
-### 5. Build an EasyMANET-flavored base image
+### 6. Build an EasyMANET-flavored base image
 
 ```bash
 easymanet image build
@@ -127,11 +146,11 @@ Local builds use a persistent Docker volume for the OpenMANET build cache.
 CI can pass `--cache-dir .openmanet-cache` so GitHub Actions can cache the
 same expensive OpenWrt download, host, and toolchain directories.
 
-### 6. Flash a node
+### 7. Flash a node
 
 ```bash
 easymanet flash \
-  --config fleet.yml \
+  --config fleet \
   --node point01 \
   --device /dev/disk4 \
   --base-image ./dist/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
@@ -139,7 +158,7 @@ easymanet flash \
   --yes
 ```
 
-### 7. Boot the node
+### 8. Boot the node
 
 Insert the SD card into the Raspberry Pi and power it on. The node
 applies EasyMANET provisioning on first boot, restarts networking, and
@@ -193,18 +212,24 @@ on `flash` and `image build`.
 
 | Command | Description |
 |---------|-------------|
+| `easymanet init` | Create/show the shared `~/Documents/EasyMANET` workspace |
+| `easymanet fleets` | List fleet YAML files in the shared workspace |
 | `easymanet disks` | List flashable disks (`--all` for every block device) |
 | `easymanet validate --config FILE` | Validate fleet config |
 | `easymanet validate --config FILE --node NAME` | Validate specific node |
 | `easymanet render --config FILE --node NAME` | Print resolved provision.json |
 | `easymanet image build` | Build an EasyMANET-flavored OpenMANET image with Docker |
+| `easymanet image manifest --image IMG` | Write image release metadata with checksum and provenance |
 | `easymanet flash --config FILE --node NAME --device DEV --base-image IMG --yes` | Flash and provision |
 | `easymanet flash ... --dry-run` | Preview flash without writing |
+| `npm --prefix apps/desktop/electron start` | Run the local Electron operator console |
+| `easymanet-desktop serve` | Run the browser-served fallback console |
+| `easymanet-publish export` | Generate local public product surfaces without setting up subrepos |
 
 ## Architecture
 
-```
-fleet.yml → validate → render → boot-partition provision.json → first boot → mesh
+```text
+Documents/EasyMANET/Fleets/fleet.yml → validate → render → boot-partition provision.json → first boot → mesh
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full data flow.
@@ -213,6 +238,9 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 
 - [Documentation Index](docs/README.md)
 - [Architecture](docs/architecture.md)
+- [Monorepo Layout](docs/monorepo.md)
+- [Release Checklist](docs/release.md)
+- [Sample Fleet](docs/sample-fleet.md)
 - [Manifest Reference](docs/manifest.md) — every config field documented
 - [Flashing Guide](docs/flashing.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
@@ -225,6 +253,13 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 pip install -e ".[dev]"
 pytest
 ```
+
+The repo is split into shared core, CLI, image, Electron desktop, and
+publish/export source roots. See [docs/monorepo.md](docs/monorepo.md) for the
+ownership map.
+
+Before cutting a release, run the installed-wheel smoke and the checklist in
+[docs/release.md](docs/release.md).
 
 Pull requests run the `CI` workflow (unit tests, overlay shell syntax, and
 packaging checks). Full OpenMANET firmware images are built via the

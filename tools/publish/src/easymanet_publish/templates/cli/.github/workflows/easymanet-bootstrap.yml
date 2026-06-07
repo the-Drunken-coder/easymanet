@@ -1,0 +1,24 @@
+name: EasyMANET CLI Bootstrap
+
+on:
+  repository_dispatch:
+    types: [easymanet-cli-publish]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Monorepo source ref being published
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch CLI release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ github.event.client_payload.source_ref || inputs.source_ref || github.sha }}
+        run: gh workflow run release-cli.yml -R ${{ github.repository }} -f source_ref="$SOURCE_REF"

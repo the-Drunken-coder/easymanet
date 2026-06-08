@@ -159,6 +159,9 @@ jobs:
               sha_path.write_text(f"{digest}  {path.name}\n")
               artifacts.append({"name": path.name, "sha256": digest, "bytes": path.stat().st_size})
 
+          if not artifacts:
+              raise SystemExit("No firmware artifacts (*.img.gz) were produced")
+
           manifest = {
               "schema_version": 1,
               "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),

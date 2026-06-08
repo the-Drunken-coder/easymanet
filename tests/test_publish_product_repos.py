@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = ROOT / "scripts" / "publish_product_repos.py"
+SCRIPT_PATH = ROOT / "tools" / "packaging" / "publish_product_repos.py"
 
 
 def load_publish_module():
@@ -26,6 +26,14 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
 
 def test_publish_script_stays_decomposed():
     assert len(SCRIPT_PATH.read_text().splitlines()) < 1000
+
+
+def test_repo_spec_source_paths_exist_in_current_layout():
+    publish = load_publish_module()
+
+    for spec in publish.selected_specs("all"):
+        for rel_path in spec.source_paths:
+            assert (ROOT / rel_path).exists(), f"{spec.key} source path is missing: {rel_path}"
 
 
 def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
@@ -52,6 +60,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert (image_workflows / "image-release.yml").exists()
     assert not (image_workflows / "build-openmanet-image.yml").exists()
     assert not (image_workflows / "prove-overlay-weekly.yml").exists()
+    image_release = (image_workflows / "image-release.yml").read_text()
+    assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
 
 
 def test_remote_url_never_embeds_publish_token(monkeypatch):

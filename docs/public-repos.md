@@ -16,7 +16,7 @@ public product repositories as generated release surfaces.
 Generate all public repo contents without touching GitHub:
 
 ```bash
-python scripts/publish_product_repos.py --product all
+python tools/packaging/publish_product_repos.py --product all
 ```
 
 The generated trees are written to `build/product-repos/`.
@@ -30,7 +30,7 @@ The publish script can also create missing public repositories, push generated
 contents, and dispatch the public bootstrap workflows:
 
 ```bash
-python scripts/publish_product_repos.py \
+python tools/packaging/publish_product_repos.py \
   --product all \
   --create-missing \
   --push
@@ -39,7 +39,7 @@ python scripts/publish_product_repos.py \
 Release dispatches are intentional:
 
 ```bash
-python scripts/publish_product_repos.py \
+python tools/packaging/publish_product_repos.py \
   --product images \
   --dispatch \
   --release-tag images-v0.1.0 \

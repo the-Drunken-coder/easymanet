@@ -104,7 +104,7 @@ jobs:
             fi
             args+=(--dispatch)
           fi
-          python scripts/publish_product_repos.py "${args[@]}"
+          python tools/packaging/publish_product_repos.py "${args[@]}"
 
       - name: Upload generated repo previews
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

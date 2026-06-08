@@ -234,7 +234,7 @@ workflow on `main`. Docker-based `easymanet image build` on Apple Silicon uses
 `linux/amd64` emulation and is slower than on native x86_64 hosts.
 
 Generated public product repositories are produced with
-`scripts/publish_product_repos.py`; see [docs/public-repos.md](docs/public-repos.md).
+`tools/packaging/publish_product_repos.py`; see [docs/public-repos.md](docs/public-repos.md).
 
 ## Security Notes
 

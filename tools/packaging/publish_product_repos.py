@@ -14,11 +14,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OWNER = "the-Drunken-coder"
 DEFAULT_OUTPUT_DIR = ROOT / "build" / "product-repos"
 GITHUB_HOST = "github.com"
 TEMPLATE_ROOT = ROOT / "product_repos" / "templates"
+
+
+def existing_path(*candidates: str) -> str:
+    for rel_path in candidates:
+        if (ROOT / rel_path).exists():
+            return rel_path
+    raise FileNotFoundError(f"None of these source paths exist: {', '.join(candidates)}")
+
+
+def optional_existing_paths(*candidates: str) -> tuple[str, ...]:
+    return tuple(rel_path for rel_path in candidates if (ROOT / rel_path).exists())
 
 
 PRODUCT_DOC_PATHS = (
@@ -54,10 +65,11 @@ COMMON_PRODUCT_SOURCE_PATHS = (
     ".gitignore",
     "pyproject.toml",
     *PRODUCT_DOC_PATHS,
-    "easymanet",
+    existing_path("packages/core/src/easymanet", "easymanet"),
+    *optional_existing_paths("packages/image", "apps/cli"),
     "examples/three-node-field-mesh.yml",
-    "provisioning",
-    "scripts/verify_overlay_packaging.py",
+    existing_path("images/openmanet/provisioning", "provisioning"),
+    existing_path("tools/packaging/verify_overlay_packaging.py", "scripts/verify_overlay_packaging.py"),
     *PRODUCT_TEST_PATHS,
 )
 

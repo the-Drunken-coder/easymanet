@@ -2,6 +2,9 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +25,11 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
 
     assert ".github/workflows/build-openmanet-image.yml" not in publish.REPO_SPECS["cli"].source_paths
     assert "tests/test_publish_product_repos.py" not in publish.REPO_SPECS["cli"].source_paths
+    assert "apps/cli" not in publish.COMMON_PRODUCT_SOURCE_PATHS
+    assert "packages/image" not in publish.COMMON_PRODUCT_SOURCE_PATHS
+    for rel_path in publish.CLI_RUNTIME_SOURCE_PATHS:
+        assert rel_path in publish.REPO_SPECS["cli"].source_paths
+        assert rel_path in publish.REPO_SPECS["images"].source_paths
 
 
 def test_publish_script_stays_decomposed():
@@ -52,6 +60,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
         assert not (repo / "docs" / "problems").exists()
         assert not (repo / "docs" / "design-decisions").exists()
         assert not list(repo.rglob("__pycache__"))
+        metadata = (repo / "REPO_GENERATION.md").read_text(encoding="utf-8")
+        assert "Generated at:" not in metadata
 
         ci_workflow = (repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         assert "easymanet --help" in ci_workflow
@@ -75,6 +85,27 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "packages/image/src/easymanet_image/build.py" in image_release
     assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
+
+
+def test_generation_metadata_is_deterministic():
+    publish = load_publish_module()
+
+    first = publish.generation_metadata(publish.REPO_SPECS["cli"], "main", "source-sha")
+    second = publish.generation_metadata(publish.REPO_SPECS["cli"], "main", "source-sha")
+
+    assert first == second
+    assert "Generated at:" not in first
+
+
+def test_tracked_files_for_rejects_existing_untracked_source(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    (tmp_path / "local-only.txt").write_text("secret-ish local content\n")
+
+    monkeypatch.setattr(publish, "ROOT", tmp_path)
+    monkeypatch.setattr(publish, "git_output", lambda _args: "")
+
+    with pytest.raises(FileNotFoundError, match="has no tracked files"):
+        publish.tracked_files_for("local-only.txt")
 
 
 def test_remote_url_never_embeds_publish_token(monkeypatch):
@@ -139,6 +170,18 @@ def test_remote_default_branch_parses_symref(monkeypatch):
     assert publish.remote_default_branch("example", publish.REPO_SPECS["cli"]) == "trunk"
 
 
+def test_remote_default_branch_falls_back_to_main_on_error(monkeypatch):
+    publish = load_publish_module()
+
+    def fake_run(args, **kwargs):
+        assert args[:3] == ["git", "ls-remote", "--symref"]
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="error")
+
+    monkeypatch.setattr(publish, "run", fake_run)
+
+    assert publish.remote_default_branch("example", publish.REPO_SPECS["cli"]) == "main"
+
+
 def test_ensure_worktree_uses_detected_default_branch(monkeypatch, tmp_path):
     publish = load_publish_module()
     worktree = tmp_path / "worktree"
@@ -195,6 +238,105 @@ def test_sync_to_remote_pushes_detected_branch(monkeypatch, tmp_path):
 
     assert commit_sha == "published-sha"
     assert (["git", "push", "origin", "stable"], worktree) in calls
+
+
+def test_sync_to_remote_skips_push_when_no_changes(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    output_dir = tmp_path / "out"
+    generated_dir = tmp_path / "generated"
+    worktree = output_dir.parent / "product-repo-worktrees" / publish.REPO_SPECS["cli"].name
+    generated_dir.mkdir()
+    (generated_dir / "README.md").write_text("generated\n")
+    (worktree / ".git").mkdir(parents=True)
+    calls = []
+
+    def fake_ensure_worktree(_owner, _spec, _worktree):
+        assert _worktree == worktree
+        return "stable"
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs.get("cwd")))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(publish, "ensure_worktree", fake_ensure_worktree)
+    monkeypatch.setattr(publish, "run", fake_run)
+    monkeypatch.setattr(publish, "git_output", lambda _args, cwd=None: "published-sha")
+
+    commit_sha = publish.sync_to_remote(
+        "example",
+        publish.REPO_SPECS["cli"],
+        generated_dir,
+        output_dir,
+        "source-sha",
+    )
+
+    assert commit_sha is None
+    assert (["git", "push", "origin", "stable"], worktree) not in calls
+
+
+def publish_args(tmp_path, **overrides):
+    values = {
+        "product": "cli",
+        "output_dir": tmp_path / "out",
+        "remote_owner": "example",
+        "source_repo": "example/easymanet",
+        "source_ref": "feature",
+        "source_sha": "source-sha",
+        "create_missing": False,
+        "push": False,
+        "dispatch": False,
+        "release_tag": "",
+        "openmanet_version": "1.6.5",
+        "board": "ekh-bcm2711",
+        "target": "rpi4-mm6108-spi",
+        "jobs": "2",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_main_rejects_dispatch_without_push(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    monkeypatch.setattr(publish, "parse_args", lambda: publish_args(tmp_path, dispatch=True))
+
+    with pytest.raises(SystemExit, match="--dispatch requires --push"):
+        publish.main()
+
+
+def test_main_dispatches_only_after_published_commit(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    args = publish_args(tmp_path, push=True, dispatch=True)
+    generated_dir = tmp_path / "generated"
+    generated_dir.mkdir()
+    dispatches = []
+
+    monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
+    monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
+    monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: "published-sha")
+    monkeypatch.setattr(publish, "dispatch_release", lambda *call_args: dispatches.append(call_args))
+
+    assert publish.main() == 0
+
+    assert len(dispatches) == 1
+
+
+def test_main_skips_dispatch_when_push_has_no_changes(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    args = publish_args(tmp_path, push=True, dispatch=True)
+    generated_dir = tmp_path / "generated"
+    generated_dir.mkdir()
+    dispatches = []
+
+    monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
+    monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
+    monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: None)
+    monkeypatch.setattr(publish, "dispatch_release", lambda *call_args: dispatches.append(call_args))
+
+    assert publish.main() == 0
+
+    assert dispatches == []
 
 
 def test_publish_workflow_does_not_expand_inputs_inside_shell():

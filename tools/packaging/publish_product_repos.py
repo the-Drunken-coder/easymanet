@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import datetime as dt
 import json
 import os
 import shutil
@@ -66,7 +65,6 @@ COMMON_PRODUCT_SOURCE_PATHS = (
     "pyproject.toml",
     *PRODUCT_DOC_PATHS,
     existing_path("packages/core/src/easymanet", "easymanet"),
-    *optional_existing_paths("packages/image", "apps/cli"),
     "examples/three-node-field-mesh.yml",
     existing_path("images/openmanet/provisioning", "provisioning"),
     existing_path("tools/packaging/verify_overlay_packaging.py", "scripts/verify_overlay_packaging.py"),
@@ -74,7 +72,11 @@ COMMON_PRODUCT_SOURCE_PATHS = (
     *PRODUCT_TEST_PATHS,
 )
 
-IMAGE_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + (
+CLI_RUNTIME_SOURCE_PATHS = optional_existing_paths("apps/cli", "packages/image")
+
+CLI_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PATHS
+
+IMAGE_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PATHS + (
     "tests/test_image_workflows.py",
 )
 
@@ -104,7 +106,7 @@ REPO_SPECS = {
         key="cli",
         name="easymanet-cli",
         description="Public CLI and automation surface for EasyMANET.",
-        source_paths=COMMON_PRODUCT_SOURCE_PATHS,
+        source_paths=CLI_PRODUCT_SOURCE_PATHS,
         template_dir=TEMPLATE_ROOT / "cli",
         dispatch_event="easymanet-cli-release",
         release_workflow="cli-release.yml",
@@ -163,11 +165,6 @@ def tracked_files_for(rel_path: str) -> tuple[str, ...]:
     if files:
         return files
 
-    if source.is_file():
-        ignored = run(["git", "check-ignore", "--quiet", "--", rel_path], cwd=ROOT, check=False)
-        if ignored.returncode != 0:
-            return (rel_path,)
-
     raise FileNotFoundError(f"Source path has no tracked files: {rel_path}")
 
 
@@ -196,7 +193,6 @@ def write_text_file(path: Path, contents: str) -> None:
 
 
 def generation_metadata(spec: RepoSpec, source_ref: str, source_sha: str) -> str:
-    generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
     return f"""# Generated Repository
 
 This repository is a generated EasyMANET public product surface.
@@ -206,7 +202,6 @@ This repository is a generated EasyMANET public product surface.
 - Authoring repo: `the-Drunken-coder/easymanet`
 - Source ref: `{source_ref}`
 - Source commit: `{source_sha}`
-- Generated at: `{generated_at}`
 
 Normal development should happen in the authoring repo. Changes are published
 here by the authoring repo publish process so the public product surfaces do
@@ -428,6 +423,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.dispatch and not args.push:
+        raise SystemExit("--dispatch requires --push so release provenance matches published repo contents")
+
     source_ref = args.source_ref or git_output(["branch", "--show-current"]) or "unknown"
     source_sha = args.source_sha or git_output(["rev-parse", "HEAD"])
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -441,6 +439,7 @@ def main() -> int:
             create_github_repo(args.remote_owner, spec)
             print(f"created {args.remote_owner}/{spec.name}")
 
+        commit_sha = None
         if args.push:
             commit_sha = sync_to_remote(args.remote_owner, spec, generated_dir, args.output_dir, source_sha)
             if commit_sha:
@@ -448,9 +447,11 @@ def main() -> int:
             else:
                 print(f"no changes for {args.remote_owner}/{spec.name}")
 
-        if args.dispatch:
+        if args.dispatch and commit_sha:
             dispatch_release(args.remote_owner, spec, payload)
             print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.name}")
+        elif args.dispatch:
+            print(f"skipped dispatch for {args.remote_owner}/{spec.name}: no published commit")
 
     return 0
 

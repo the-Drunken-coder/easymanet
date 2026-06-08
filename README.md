@@ -243,6 +243,7 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 - [Sample Fleet](docs/sample-fleet.md)
 - [Manifest Reference](docs/manifest.md) — every config field documented
 - [Flashing Guide](docs/flashing.md)
+- [Public Product Repositories](docs/public-repos.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
 - [Design Decisions](docs/design-decisions/) — durable choices and trade-offs ([template](docs/design-decisions/_EXAMPLE_DESIGN_DECISION_.md))
 - [Problems](docs/problems/) — short-lived agent notes on active blockers ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
@@ -266,6 +267,9 @@ packaging checks). Full OpenMANET firmware images are built via the
 `Build OpenMANET Image` workflow (manual) or the weekly `Prove Overlay Weekly`
 workflow on `main`. Docker-based `easymanet image build` on Apple Silicon uses
 `linux/amd64` emulation and is slower than on native x86_64 hosts.
+
+Generated public product repositories are produced with
+`tools/packaging/publish_product_repos.py`; see [docs/public-repos.md](docs/public-repos.md).
 
 ## Security Notes
 

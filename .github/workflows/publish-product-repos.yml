@@ -1,0 +1,115 @@
+name: Publish Product Repos
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: Product repo to publish
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - images
+          - cli
+          - desktop
+      push:
+        description: Push generated contents to the public repos
+        required: true
+        type: boolean
+        default: false
+      dispatch:
+        description: Trigger each public repo bootstrap release workflow after publishing
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Optional release tag passed to public release workflows
+        required: false
+        default: ""
+      openmanet_version:
+        description: OpenMANET version for image releases
+        required: false
+        default: "1.6.5"
+      board:
+        description: OpenMANET board profile for image releases
+        required: false
+        default: "ekh-bcm2711"
+      target:
+        description: OpenMANET target suffix for image releases
+        required: false
+        default: "rpi4-mm6108-spi"
+      jobs:
+        description: Parallel OpenWrt make jobs inside Docker
+        required: false
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Generate and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out authoring repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+
+      - name: Generate product repos
+        env:
+          PRODUCT: ${{ inputs.product }}
+          PUSH: ${{ inputs.push }}
+          DISPATCH: ${{ inputs.dispatch }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          OPENMANET_VERSION: ${{ inputs.openmanet_version }}
+          BOARD: ${{ inputs.board }}
+          TARGET: ${{ inputs.target }}
+          JOBS: ${{ inputs.jobs }}
+          EASYMANET_PUBLIC_REPO_TOKEN: ${{ (inputs.push || inputs.dispatch) && secrets.EASYMANET_PUBLIC_REPO_TOKEN || '' }}
+          GH_TOKEN: ${{ (inputs.push || inputs.dispatch) && secrets.EASYMANET_PUBLIC_REPO_TOKEN || '' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --product "$PRODUCT"
+            --output-dir build/product-repos
+            --remote-owner the-Drunken-coder
+            --openmanet-version "$OPENMANET_VERSION"
+            --board "$BOARD"
+            --target "$TARGET"
+            --jobs "$JOBS"
+          )
+          if [ -n "$RELEASE_TAG" ]; then
+            args+=(--release-tag "$RELEASE_TAG")
+          fi
+          if [ "$PUSH" = "true" ]; then
+            if [ -z "${EASYMANET_PUBLIC_REPO_TOKEN:-}" ]; then
+              echo "EASYMANET_PUBLIC_REPO_TOKEN is required when push=true"
+              exit 1
+            fi
+            args+=(--push)
+          fi
+          if [ "$DISPATCH" = "true" ]; then
+            if [ -z "${EASYMANET_PUBLIC_REPO_TOKEN:-}" ]; then
+              echo "EASYMANET_PUBLIC_REPO_TOKEN is required when dispatch=true"
+              exit 1
+            fi
+            args+=(--dispatch)
+          fi
+          python tools/packaging/publish_product_repos.py "${args[@]}"
+
+      - name: Upload generated repo previews
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: generated-product-repos
+          path: build/product-repos/easymanet-*
+          retention-days: 7
+          if-no-files-found: error

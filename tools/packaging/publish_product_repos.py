@@ -70,6 +70,7 @@ COMMON_PRODUCT_SOURCE_PATHS = (
     "examples/three-node-field-mesh.yml",
     existing_path("images/openmanet/provisioning", "provisioning"),
     existing_path("tools/packaging/verify_overlay_packaging.py", "scripts/verify_overlay_packaging.py"),
+    *optional_existing_paths("tools/release_smoke.py"),
     *PRODUCT_TEST_PATHS,
 )
 

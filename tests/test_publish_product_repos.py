@@ -53,6 +53,17 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
         assert not (repo / "docs" / "design-decisions").exists()
         assert not list(repo.rglob("__pycache__"))
 
+        ci_workflow = (repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        assert "easymanet --help" in ci_workflow
+        assert "easymanet.cli" not in ci_workflow
+        assert "images/openmanet/provisioning/openwrt-overlay" in ci_workflow
+        assert "tools/packaging/verify_overlay_packaging.py" in ci_workflow
+        assert "scripts/verify_overlay_packaging.py" in ci_workflow
+
+        packaging_test = (ROOT / "tests" / "test_packaging.py").read_text(encoding="utf-8")
+        if "tools/release_smoke.py" in packaging_test:
+            assert (repo / "tools" / "release_smoke.py").exists()
+
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
 
@@ -60,7 +71,9 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert (image_workflows / "image-release.yml").exists()
     assert not (image_workflows / "build-openmanet-image.yml").exists()
     assert not (image_workflows / "prove-overlay-weekly.yml").exists()
-    image_release = (image_workflows / "image-release.yml").read_text()
+    image_release = (image_workflows / "image-release.yml").read_text(encoding="utf-8")
+    assert "packages/image/src/easymanet_image/build.py" in image_release
+    assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
 
 

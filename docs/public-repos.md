@@ -20,6 +20,9 @@ python scripts/publish_product_repos.py --product all
 ```
 
 The generated trees are written to `build/product-repos/`.
+Product-specific README, CI, bootstrap, and release workflow files live under
+`product_repos/templates/`; the publish script combines those templates with
+an explicit allowlist of tracked source files.
 
 ## Publishing
 
@@ -62,3 +65,8 @@ Each generated public repo has:
 
 This keeps public runner cost on the public product repo while the authoring
 repo controls the generated release logic.
+
+Authoring-only publisher files, public-repo docs, design-decision notes, and
+problem-tracking notes are intentionally not copied into the public product
+repos. Add new exported files to the publish manifest deliberately instead of
+copying whole authoring directories.

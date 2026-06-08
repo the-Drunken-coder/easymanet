@@ -1,0 +1,38 @@
+name: Bootstrap Desktop Release
+
+on:
+  repository_dispatch:
+    types: [easymanet-desktop-release]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag to create, such as desktop-v0.1.0
+        required: false
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch desktop release workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Dispatch Desktop Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag || '' }}
+          PAYLOAD_RELEASE_TAG: ${{ github.event.client_payload.release_tag || '' }}
+          PAYLOAD_SOURCE_REPO: ${{ github.event.client_payload.source_repo || '' }}
+          PAYLOAD_SOURCE_REF: ${{ github.event.client_payload.source_ref || '' }}
+          PAYLOAD_SOURCE_SHA: ${{ github.event.client_payload.source_sha || '' }}
+        run: |
+          set -euo pipefail
+          release_tag="${PAYLOAD_RELEASE_TAG:-$INPUT_RELEASE_TAG}"
+          source_repo="${PAYLOAD_SOURCE_REPO:-unknown}"
+          source_ref="${PAYLOAD_SOURCE_REF:-unknown}"
+          source_sha="${PAYLOAD_SOURCE_SHA:-unknown}"
+          gh workflow run desktop-release.yml             --repo "$GITHUB_REPOSITORY"             --field release_tag="$release_tag"             --field source_repo="$source_repo"             --field source_ref="$source_ref"             --field source_sha="$source_sha"

@@ -21,6 +21,37 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
     publish = load_publish_module()
 
     assert ".github/workflows/build-openmanet-image.yml" not in publish.REPO_SPECS["cli"].source_paths
+    assert "tests/test_publish_product_repos.py" not in publish.REPO_SPECS["cli"].source_paths
+
+
+def test_publish_script_stays_decomposed():
+    assert len(SCRIPT_PATH.read_text().splitlines()) < 1000
+
+
+def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
+    publish = load_publish_module()
+
+    generated = {
+        spec.key: publish.generate_repo(spec, tmp_path, "review-branch", "source-sha")
+        for spec in publish.selected_specs("all")
+    }
+
+    for key in ("images", "cli"):
+        repo = generated[key]
+        assert not (repo / "tests" / "test_publish_product_repos.py").exists()
+        assert not (repo / ".github" / "workflows" / "publish-product-repos.yml").exists()
+        assert not (repo / "docs" / "public-repos.md").exists()
+        assert not (repo / "docs" / "problems").exists()
+        assert not (repo / "docs" / "design-decisions").exists()
+        assert not list(repo.rglob("__pycache__"))
+
+    assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
+    assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
+
+    image_workflows = generated["images"] / ".github" / "workflows"
+    assert (image_workflows / "image-release.yml").exists()
+    assert not (image_workflows / "build-openmanet-image.yml").exists()
+    assert not (image_workflows / "prove-overlay-weekly.yml").exists()
 
 
 def test_remote_url_never_embeds_publish_token(monkeypatch):

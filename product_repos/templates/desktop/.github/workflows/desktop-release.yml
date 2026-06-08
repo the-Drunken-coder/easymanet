@@ -1,0 +1,92 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag to create. Leave blank to upload workflow artifacts only.
+        required: false
+        default: ""
+      source_repo:
+        description: Authoring repository that generated this release
+        required: false
+        default: "unknown"
+      source_ref:
+        description: Authoring repository ref
+        required: false
+        default: "unknown"
+      source_sha:
+        description: Authoring repository commit SHA
+        required: false
+        default: "unknown"
+
+permissions:
+  contents: write
+
+jobs:
+  provenance:
+    name: Desktop provenance placeholder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Generate provenance artifact
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          mkdir -p dist
+          python - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = {
+              "schema_version": 1,
+              "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+              "release_tag": os.environ["RELEASE_TAG"],
+              "source_repo": os.environ["SOURCE_REPO"],
+              "source_ref": os.environ["SOURCE_REF"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "public_repo": os.environ["GITHUB_REPOSITORY"],
+              "public_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "status": "desktop app code has not been published yet",
+          }
+          Path("dist/easymanet-desktop-provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: Upload provenance artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: easymanet-desktop-provenance
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          {
+            echo "EasyMANET desktop release plumbing placeholder."
+            echo
+            echo "No desktop app binary exists yet."
+            echo "Generated from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_SHA})."
+          } > "$notes"
+          gh release create "$RELEASE_TAG" dist/*             --repo "$GITHUB_REPOSITORY"             --title "$RELEASE_TAG"             --notes-file "$notes"

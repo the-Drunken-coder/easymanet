@@ -104,6 +104,38 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
 
 
+def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject(tmp_path):
+    publish = load_publish_module()
+
+    repo = publish.generate_repo(
+        publish.REPO_SPECS["desktop"],
+        tmp_path,
+        "review-branch",
+        "source-sha",
+    )
+
+    assert (repo / "pyproject.toml").exists()
+    assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
+    assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()
+    assert (repo / "tests" / "test_desktop.py").exists()
+    assert not (repo / "tools" / "packaging" / "publish_product_repos.py").exists()
+
+    pyproject = (repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'name = "easymanet-desktop"' in pyproject
+    assert 'easymanet-desktop = "easymanet_desktop.server:main"' in pyproject
+    assert '"easymanet_desktop" = ["static/*"]' in pyproject
+
+
+def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
+    publish = load_publish_module()
+    monkeypatch.setattr(publish, "DESKTOP_CORE_PACKAGE_PATH", "easymanet")
+
+    pyproject = publish.desktop_surface_pyproject()
+
+    assert '    ".",\n    "apps/desktop/src",' in pyproject
+    assert '    "packages/core/src",' not in pyproject
+
+
 def test_generation_metadata_is_deterministic():
     publish = load_publish_module()
 

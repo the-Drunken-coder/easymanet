@@ -1,0 +1,29 @@
+appId: io.easymanet.desktop
+productName: EasyMANET
+directories:
+  output: dist
+files:
+  - main.js
+  - preload.js
+extraResources:
+  - from: ../src/easymanet_desktop/static
+    to: desktop-static
+  - from: ../../../build/desktop-electron/backend/easymanet-bridge
+    to: backend/easymanet-bridge
+artifactName: EasyMANET-${version}-${os}-${arch}.${ext}
+asarUnpack:
+  - backend/easymanet-bridge/**
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  identity: null
+win:
+  target:
+    - nsis
+    - zip
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

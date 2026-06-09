@@ -128,12 +128,22 @@ def test_desktop_static_containment_rejects_sibling_prefix(tmp_path):
 def test_electron_shell_files_exist():
     root = Path(__file__).resolve().parents[1]
     electron = root / "apps" / "desktop" / "electron"
+    bridge_runner = electron / "scripts" / "run-build-bridge.js"
 
     assert (electron / "package.json").exists()
+    assert (electron / "electron-builder.yml").exists()
     assert (electron / "main.js").exists()
     assert (electron / "preload.js").exists()
-    assert "loadFile(indexHtml)" in (electron / "main.js").read_text()
+    assert bridge_runner.exists()
+    assert "loadFile(indexHtmlPath())" in (electron / "main.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
     assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
+    assert "process.resourcesPath" in (electron / "main.js").read_text()
+    assert "desktop-static" in (electron / "main.js").read_text()
+    assert "build:backend" in (electron / "package.json").read_text()
+    assert "electron-builder" in (electron / "package.json").read_text()
+    runner_text = bridge_runner.read_text()
+    assert 'candidates.push("python", "py")' in runner_text
+    assert 'process.env.PYTHON' in runner_text

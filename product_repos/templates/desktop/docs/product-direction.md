@@ -15,4 +15,5 @@ Expected first workflows:
 - Read boot reports and local diagnostics.
 
 This generated repo exists now so release and issue-reporting infrastructure can
-be wired before framework-specific app code lands.
+ship with the actual Electron app sources and packaged desktop release
+artifacts.

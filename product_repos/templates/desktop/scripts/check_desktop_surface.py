@@ -6,10 +6,13 @@ root = Path(__file__).resolve().parents[1]
 required = [
     "README.md",
     "REPO_GENERATION.md",
+    "pyproject.toml",
     "docs/product-direction.md",
     ".github/workflows/ci.yml",
     ".github/workflows/bootstrap-release.yml",
     ".github/workflows/desktop-release.yml",
+    "apps/desktop/electron/package.json",
+    "apps/desktop/src/easymanet_desktop/server.py",
 ]
 
 missing = [path for path in required if not (root / path).exists()]

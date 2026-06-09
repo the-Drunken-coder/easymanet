@@ -4,8 +4,6 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const staticRoot = path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop", "static");
-const indexHtml = path.join(staticRoot, "index.html");
 const fleetExtensions = new Set([".yml", ".yaml"]);
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const bridgeTimeoutMs = 15000;
@@ -64,7 +62,7 @@ function createWindow() {
       app.quit();
     });
   }
-  win.loadFile(indexHtml);
+  win.loadFile(indexHtmlPath());
 }
 
 app.whenReady().then(() => {
@@ -136,8 +134,9 @@ function registerIpc() {
 
 function runBridge(args) {
   return new Promise((resolve) => {
-    const child = spawn(pythonPath(), ["-m", "easymanet_desktop.bridge", ...args], {
-      cwd: repoRoot,
+    const bridge = bridgeCommand(args);
+    const child = spawn(bridge.command, bridge.args, {
+      cwd: bridgeWorkingDirectory(),
       env: bridgeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -290,6 +289,9 @@ function venvPython(venvRoot) {
 }
 
 function bridgeEnv() {
+  if (app.isPackaged) {
+    return { ...process.env };
+  }
   const sourceRoots = process.env.EASYMANET_ELECTRON_NO_SOURCE_PATHS === "1" ? [] : [
     path.join(repoRoot, "packages", "core", "src"),
     path.join(repoRoot, "packages", "image", "src"),
@@ -302,4 +304,43 @@ function bridgeEnv() {
     ...process.env,
     PYTHONPATH: [...sourceRoots, ...existing].join(path.delimiter),
   };
+}
+
+function indexHtmlPath() {
+  return path.join(staticRoot(), "index.html");
+}
+
+function staticRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "desktop-static");
+  }
+  return path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop", "static");
+}
+
+function bridgeCommand(args) {
+  const bundledBridge = process.env.EASYMANET_BRIDGE_BIN || packagedBridgeBinary();
+  if (bundledBridge) {
+    return { command: bundledBridge, args };
+  }
+  return {
+    command: pythonPath(),
+    args: ["-m", "easymanet_desktop.bridge", ...args],
+  };
+}
+
+function packagedBridgeBinary() {
+  if (!app.isPackaged) {
+    return "";
+  }
+  const binary = path.join(
+    process.resourcesPath,
+    "backend",
+    "easymanet-bridge",
+    process.platform === "win32" ? "easymanet-bridge.exe" : "easymanet-bridge"
+  );
+  return fs.existsSync(binary) ? binary : "";
+}
+
+function bridgeWorkingDirectory() {
+  return app.isPackaged ? app.getPath("userData") : repoRoot;
 }

@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -80,6 +81,15 @@ IMAGE_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PA
     "tests/test_image_workflows.py",
 )
 
+DESKTOP_PRODUCT_SOURCE_PATHS = (
+    ".gitignore",
+    "docs/manifest.md",
+    "examples/three-node-field-mesh.yml",
+    existing_path("packages/core/src/easymanet", "easymanet"),
+    "apps/desktop",
+    "tests/test_desktop.py",
+)
+
 
 @dataclass(frozen=True)
 class RepoSpec:
@@ -115,7 +125,7 @@ REPO_SPECS = {
         key="desktop",
         name="easymanet-desktop",
         description="Public local-first desktop operator console for EasyMANET.",
-        source_paths=(),
+        source_paths=DESKTOP_PRODUCT_SOURCE_PATHS,
         template_dir=TEMPLATE_ROOT / "desktop",
         dispatch_event="easymanet-desktop-release",
         release_workflow="desktop-release.yml",
@@ -219,8 +229,86 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
         copy_source_path(rel_path, repo_dir)
 
     copy_template_tree(spec, repo_dir)
+    if spec.key == "desktop":
+        write_text_file(repo_dir / "pyproject.toml", desktop_surface_pyproject())
     write_text_file(repo_dir / "REPO_GENERATION.md", generation_metadata(spec, source_ref, source_sha))
     return repo_dir
+
+
+def desktop_surface_pyproject() -> str:
+    version = project_version(ROOT / "pyproject.toml")
+    return f"""[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easymanet-desktop"
+version = "{version}"
+description = "Local-first EasyMANET desktop operator console"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {{text = "MIT"}}
+authors = [
+    {{name = "EasyMANET Contributors"}}
+]
+keywords = ["openmanet", "mesh", "provisioning", "desktop"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: System :: Installation/Setup",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "typer>=0.9",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "setuptools>=68",
+    "tomli>=2",
+    "wheel",
+]
+
+[project.scripts]
+easymanet-desktop = "easymanet_desktop.server:main"
+
+[tool.setuptools.packages.find]
+where = [
+    "packages/core/src",
+    "apps/desktop/src",
+]
+include = [
+    "easymanet*",
+    "easymanet_desktop*",
+]
+
+[tool.setuptools.package-data]
+"easymanet_desktop" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = [
+    "packages/core/src",
+    "apps/desktop/src",
+    ".",
+]
+"""
+
+
+def project_version(pyproject_path: Path) -> str:
+    match = re.search(r'^version = "([^"]+)"$', pyproject_path.read_text(), re.MULTILINE)
+    if not match:
+        raise ValueError(f"Could not find project version in {pyproject_path}")
+    return match.group(1)
 
 
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:

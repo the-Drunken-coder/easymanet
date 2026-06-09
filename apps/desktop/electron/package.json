@@ -6,9 +6,12 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node scripts/check-electron.js"
+    "check": "node --check main.js && node --check preload.js && node scripts/check-electron.js",
+    "build:backend": "node scripts/run-build-bridge.js",
+    "dist": "npm run build:backend && electron-builder --publish never"
   },
   "devDependencies": {
-    "electron": "^39.8.5"
+    "electron": "^39.8.5",
+    "electron-builder": "^26.0.12"
   }
 }

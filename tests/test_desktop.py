@@ -130,10 +130,15 @@ def test_electron_shell_files_exist():
     electron = root / "apps" / "desktop" / "electron"
 
     assert (electron / "package.json").exists()
+    assert (electron / "electron-builder.yml").exists()
     assert (electron / "main.js").exists()
     assert (electron / "preload.js").exists()
-    assert "loadFile(indexHtml)" in (electron / "main.js").read_text()
+    assert "loadFile(indexHtmlPath())" in (electron / "main.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
     assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
+    assert "process.resourcesPath" in (electron / "main.js").read_text()
+    assert "desktop-static" in (electron / "main.js").read_text()
+    assert "build:backend" in (electron / "package.json").read_text()
+    assert "electron-builder" in (electron / "package.json").read_text()

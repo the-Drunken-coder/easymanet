@@ -9,7 +9,8 @@ public product repositories as generated release surfaces.
   manifest, and release artifacts.
 - `the-Drunken-coder/easymanet-cli`: installable CLI and automation surface.
 - `the-Drunken-coder/easymanet-desktop`: local-first desktop operator-console
-  surface. This is release plumbing plus product direction until app code lands.
+  surface with Electron sources, a bundled bridge build, and desktop release
+  workflows for macOS and Windows artifacts.
 
 ## Local Publish Preview
 

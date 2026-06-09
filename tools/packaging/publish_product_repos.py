@@ -391,6 +391,8 @@ def build_payload(args: argparse.Namespace, source_ref: str, source_sha: str) ->
     }
     if args.release_tag:
         payload["release_tag"] = args.release_tag
+    if args.publish_pypi:
+        payload["publish_pypi"] = "true"
     if args.openmanet_version:
         payload["openmanet_version"] = args.openmanet_version
     if args.board:
@@ -414,6 +416,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--push", action="store_true")
     parser.add_argument("--dispatch", action="store_true")
     parser.add_argument("--release-tag", default="")
+    parser.add_argument("--publish-pypi", action="store_true")
     parser.add_argument("--openmanet-version", default="1.6.5")
     parser.add_argument("--board", default="ekh-bcm2711")
     parser.add_argument("--target", default="rpi4-mm6108-spi")

@@ -27,6 +27,11 @@ on:
         description: Optional release tag passed to public release workflows
         required: false
         default: ""
+      publish_pypi:
+        description: Publish the CLI Python package to PyPI when product=cli
+        required: true
+        type: boolean
+        default: false
       openmanet_version:
         description: OpenMANET version for image releases
         required: false
@@ -70,6 +75,7 @@ jobs:
           PUSH: ${{ inputs.push }}
           DISPATCH: ${{ inputs.dispatch }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLISH_PYPI: ${{ inputs.publish_pypi }}
           OPENMANET_VERSION: ${{ inputs.openmanet_version }}
           BOARD: ${{ inputs.board }}
           TARGET: ${{ inputs.target }}
@@ -89,6 +95,9 @@ jobs:
           )
           if [ -n "$RELEASE_TAG" ]; then
             args+=(--release-tag "$RELEASE_TAG")
+          fi
+          if [ "$PUBLISH_PYPI" = "true" ]; then
+            args+=(--publish-pypi)
           fi
           if [ "$PUSH" = "true" ]; then
             if [ -z "${EASYMANET_PUBLIC_REPO_TOKEN:-}" ]; then

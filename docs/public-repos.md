@@ -70,3 +70,23 @@ Authoring-only publisher files, public-repo docs, design-decision notes, and
 problem-tracking notes are intentionally not copied into the public product
 repos. Add new exported files to the publish manifest deliberately instead of
 copying whole authoring directories.
+
+## Python Package Publishing
+
+The generated `easymanet-cli` repository owns the public Python package release
+for the `easymanet` package. Its `CLI Release` workflow builds with `uv` and can
+publish to PyPI with Trusted Publishing when `publish_pypi=true`.
+
+Before the first PyPI upload, configure a PyPI pending trusted publisher for:
+
+- PyPI project name: `easymanet`
+- Owner: `the-Drunken-coder`
+- Repository: `easymanet-cli`
+- Workflow: `cli-release.yml`
+- Environment: `pypi`
+
+After that one-time PyPI setup, run the authoring repo publish workflow with
+`product=cli`, `push=true`, `dispatch=true`, `release_tag=cli-v0.1.0`, and
+`publish_pypi=true` to update the public repo, dispatch the CLI release, and
+upload the package to PyPI. Leave `publish_pypi=false` to create only the GitHub
+release and workflow artifact.

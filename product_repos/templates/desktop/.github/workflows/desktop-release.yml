@@ -68,6 +68,8 @@ jobs:
 
       - name: Run desktop checks
         shell: bash
+        env:
+          PYTHON: python
         run: |
           python scripts/check_desktop_surface.py
           pytest -q tests/test_desktop.py
@@ -77,6 +79,7 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PYTHON: python
         run: |
           npm --prefix apps/desktop/electron run dist -- ${{ matrix.build_args }}
 

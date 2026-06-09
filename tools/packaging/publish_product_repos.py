@@ -81,11 +81,12 @@ IMAGE_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PA
     "tests/test_image_workflows.py",
 )
 
+DESKTOP_CORE_PACKAGE_PATH = existing_path("packages/core/src/easymanet", "easymanet")
 DESKTOP_PRODUCT_SOURCE_PATHS = (
     ".gitignore",
     "docs/manifest.md",
     "examples/three-node-field-mesh.yml",
-    existing_path("packages/core/src/easymanet", "easymanet"),
+    DESKTOP_CORE_PACKAGE_PATH,
     "apps/desktop",
     "tests/test_desktop.py",
 )
@@ -237,6 +238,7 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
 
 def desktop_surface_pyproject() -> str:
     version = project_version(ROOT / "pyproject.toml")
+    core_package_root = package_find_root(DESKTOP_CORE_PACKAGE_PATH)
     return f"""[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -282,7 +284,7 @@ easymanet-desktop = "easymanet_desktop.server:main"
 
 [tool.setuptools.packages.find]
 where = [
-    "packages/core/src",
+    "{core_package_root}",
     "apps/desktop/src",
 ]
 include = [
@@ -297,11 +299,16 @@ include = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = [
-    "packages/core/src",
+    "{core_package_root}",
     "apps/desktop/src",
     ".",
 ]
 """
+
+
+def package_find_root(package_path: str) -> str:
+    parent = Path(package_path).parent.as_posix()
+    return "." if parent in {"", "."} else parent
 
 
 def project_version(pyproject_path: Path) -> str:

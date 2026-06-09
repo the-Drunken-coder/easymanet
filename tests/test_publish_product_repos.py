@@ -109,6 +109,16 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert '"easymanet_desktop" = ["static/*"]' in pyproject
 
 
+def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
+    publish = load_publish_module()
+    monkeypatch.setattr(publish, "DESKTOP_CORE_PACKAGE_PATH", "easymanet")
+
+    pyproject = publish.desktop_surface_pyproject()
+
+    assert '    ".",\n    "apps/desktop/src",' in pyproject
+    assert '    "packages/core/src",' not in pyproject
+
+
 def test_generation_metadata_is_deterministic():
     publish = load_publish_module()
 

@@ -2,14 +2,19 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const candidates = [
-  process.env.PYTHON ? path.resolve(process.env.PYTHON) : "",
-  process.platform === "win32" ? "py" : "python3",
-  "python",
-].filter(Boolean);
+const candidates = [];
+
+if (process.env.PYTHON) {
+  candidates.push(process.env.PYTHON);
+}
+if (process.platform === "win32") {
+  candidates.push("python", "py");
+} else {
+  candidates.push("python3", "python");
+}
 
 for (const candidate of candidates) {
-  if (candidate.includes(path.sep) && !fs.existsSync(candidate)) {
+  if ((path.isAbsolute(candidate) || candidate.includes(path.sep)) && !fs.existsSync(candidate)) {
     continue;
   }
   const args = candidate === "py" ? ["-3", "scripts/build-bridge.py"] : ["scripts/build-bridge.py"];

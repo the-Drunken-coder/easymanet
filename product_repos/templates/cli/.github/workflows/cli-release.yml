@@ -7,6 +7,11 @@ on:
         description: GitHub release tag to create. Leave blank to upload workflow artifacts only.
         required: false
         default: ""
+      publish_pypi:
+        description: Publish the Python package to PyPI using Trusted Publishing
+        required: false
+        type: boolean
+        default: false
       source_repo:
         description: Authoring repository that generated this release
         required: false
@@ -40,21 +45,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.11.19"
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip build
-          pip install -e ".[dev]"
+        run: uv pip install --system -e ".[dev]"
 
       - name: Run tests
         run: pytest -q
 
       - name: Build distributions
-        run: python -m build
+        run: uv build --no-sources
 
       - name: Install wheel smoke test
-        run: |
-          python -m pip install --force-reinstall dist/*.whl
-          easymanet --help
+        run: uv run --no-project --with dist/*.whl easymanet --help
 
       - name: Generate release manifest
         env:
@@ -117,4 +123,33 @@ jobs:
             echo
             echo "Generated from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_SHA})."
           } > "$notes"
-          gh release create "$RELEASE_TAG" dist/*             --repo "$GITHUB_REPOSITORY"             --title "$RELEASE_TAG"             --notes-file "$notes"
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --notes-file "$notes"
+
+  publish_pypi:
+    name: Publish Python package to PyPI
+    needs: package
+    if: inputs.publish_pypi
+    runs-on: ubuntu-24.04
+    environment: pypi
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: easymanet-cli-package
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.11.19"
+
+      - name: Publish package to PyPI
+        run: uv publish --trusted-publishing always dist/*.tar.gz dist/*.whl

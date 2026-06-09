@@ -41,28 +41,18 @@ dev = [
 
 [project.scripts]
 easymanet = "easymanet_cli.app:main"
-easymanet-desktop = "easymanet_desktop.server:main"
-easymanet-publish = "easymanet_publish.cli:app"
 
 [tool.setuptools.packages.find]
 where = [
     "packages/core/src",
     "packages/image/src",
     "apps/cli/src",
-    "apps/desktop/src",
-    "tools/publish/src",
 ]
 include = [
     "easymanet*",
     "easymanet_cli*",
     "easymanet_image*",
-    "easymanet_desktop*",
-    "easymanet_publish*",
 ]
-
-[tool.setuptools.package-data]
-"easymanet_desktop" = ["static/*"]
-"easymanet_publish" = ["templates/*/.github/workflows/*.yml"]
 
 [tool.setuptools.data-files]
 "share/easymanet/images/openmanet/provisioning" = [
@@ -100,7 +90,5 @@ pythonpath = [
     "packages/core/src",
     "packages/image/src",
     "apps/cli/src",
-    "apps/desktop/src",
-    "tools/publish/src",
     ".",
 ]

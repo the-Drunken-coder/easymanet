@@ -1,6 +1,7 @@
 import importlib.util
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -76,6 +77,22 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
 
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
+
+    cli_pyproject = tomllib.loads((generated["cli"] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert cli_pyproject["project"]["name"] == "easymanet"
+    assert cli_pyproject["project"]["license"] == "MIT"
+    assert cli_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
+    assert "apps/desktop/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
+    assert "tools/publish/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
+
+    cli_release = (generated["cli"] / ".github" / "workflows" / "cli-release.yml").read_text(encoding="utf-8")
+    assert "publish_pypi:" in cli_release
+    assert "id-token: write" in cli_release
+    assert "environment: pypi" in cli_release
+    assert "uv build --no-sources" in cli_release
+    assert "uv run --no-project --with dist/*.whl easymanet --help" in cli_release
+    assert "actions/download-artifact@" in cli_release
+    assert "uv publish --trusted-publishing always dist/*.tar.gz dist/*.whl" in cli_release
 
     image_workflows = generated["images"] / ".github" / "workflows"
     assert (image_workflows / "image-release.yml").exists()
@@ -286,6 +303,7 @@ def publish_args(tmp_path, **overrides):
         "push": False,
         "dispatch": False,
         "release_tag": "",
+        "publish_pypi": False,
         "openmanet_version": "1.6.5",
         "board": "ekh-bcm2711",
         "target": "rpi4-mm6108-spi",
@@ -301,6 +319,16 @@ def test_main_rejects_dispatch_without_push(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit, match="--dispatch requires --push"):
         publish.main()
+
+
+def test_build_payload_includes_pypi_publish_request(tmp_path):
+    publish = load_publish_module()
+    args = publish_args(tmp_path, release_tag="cli-v0.1.0", publish_pypi=True)
+
+    payload = publish.build_payload(args, "feature", "source-sha")
+
+    assert payload["release_tag"] == "cli-v0.1.0"
+    assert payload["publish_pypi"] == "true"
 
 
 def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):

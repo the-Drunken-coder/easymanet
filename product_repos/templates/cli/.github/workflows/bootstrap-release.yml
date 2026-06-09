@@ -9,6 +9,11 @@ on:
         description: GitHub release tag to create, such as cli-v0.1.0
         required: false
         default: ""
+      publish_pypi:
+        description: Publish the Python package to PyPI using Trusted Publishing
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -25,14 +30,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag || '' }}
+          INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi || false }}
           PAYLOAD_RELEASE_TAG: ${{ github.event.client_payload.release_tag || '' }}
+          PAYLOAD_PUBLISH_PYPI: ${{ github.event.client_payload.publish_pypi || '' }}
           PAYLOAD_SOURCE_REPO: ${{ github.event.client_payload.source_repo || '' }}
           PAYLOAD_SOURCE_REF: ${{ github.event.client_payload.source_ref || '' }}
           PAYLOAD_SOURCE_SHA: ${{ github.event.client_payload.source_sha || '' }}
         run: |
           set -euo pipefail
           release_tag="${PAYLOAD_RELEASE_TAG:-$INPUT_RELEASE_TAG}"
+          publish_pypi="${PAYLOAD_PUBLISH_PYPI:-$INPUT_PUBLISH_PYPI}"
           source_repo="${PAYLOAD_SOURCE_REPO:-unknown}"
           source_ref="${PAYLOAD_SOURCE_REF:-unknown}"
           source_sha="${PAYLOAD_SOURCE_SHA:-unknown}"
-          gh workflow run cli-release.yml             --repo "$GITHUB_REPOSITORY"             --field release_tag="$release_tag"             --field source_repo="$source_repo"             --field source_ref="$source_ref"             --field source_sha="$source_sha"
+          gh workflow run cli-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --field release_tag="$release_tag" \
+            --field publish_pypi="$publish_pypi" \
+            --field source_repo="$source_repo" \
+            --field source_ref="$source_ref" \
+            --field source_sha="$source_sha"

@@ -2,6 +2,12 @@
 
 Zero-touch provisioning and imaging for OpenMANET mesh nodes.
 
+Public product repositories:
+
+- [EasyMANET Images](https://github.com/the-Drunken-coder/easymanet-images)
+- [EasyMANET CLI](https://github.com/the-Drunken-coder/easymanet-cli)
+- [EasyMANET Desktop](https://github.com/the-Drunken-coder/easymanet-desktop)
+
 ## What EasyMANET Is
 
 EasyMANET is a local CLI and Electron desktop app that lets you define an

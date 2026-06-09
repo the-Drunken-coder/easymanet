@@ -1,0 +1,187 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+tone_instructions: "Be direct, specific, and evidence-based. Prioritize correctness, security, release safety, and operator-impacting regressions over style nits."
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  changed_files_summary: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: true
+  abort_on_close: true
+  poem: false
+  in_progress_fortune: false
+  slop_detection:
+    enabled: true
+    label: slop
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    ignore_title_keywords:
+      - wip
+      - do not review
+
+  path_filters:
+    - "!build/**"
+    - "!dist/**"
+    - "!htmlcov/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.mypy_cache/**"
+    - "!**/.coverage"
+    - "!**/.coverage.*"
+    - "!**/*.egg-info/**"
+    - "!**/__pycache__/**"
+    - "!**/node_modules/**"
+    - "!apps/desktop/electron/out/**"
+    - "!apps/desktop/electron/dist/**"
+    - "!**/.DS_Store"
+    - "apps/desktop/electron/package-lock.json"
+
+  path_instructions:
+    - path: "{apps/cli/src/easymanet_cli/flash.py,packages/core/src/easymanet/disks/**,packages/core/src/easymanet/{download,image,privileges}.py}"
+      instructions: |
+        Treat this as operator-safety-critical code. Verify that changes preserve explicit device selection, dry-run behavior, the --yes confirmation gate, checksum verification for downloaded images, refusal of unsafe internal or partition devices by default, force-only overrides, unmount/sync/eject behavior, and clear failure messages. Flag any path that could write to the wrong disk, weaken macOS/Linux device validation, skip integrity checks, or hide a partial flashing failure.
+
+    - path: "{packages/core/src/easymanet/{validate,render,inject,manifest}.py,examples/**/*.yml,docs/{sample-fleet,manifest,flashing}.md}"
+      instructions: |
+        Validate fleet schema and rendered provisioning semantics as a contract. Check that mesh passwords, root password hashes, SSH keys, gateway settings, node roles, hostnames, and IP ranges are validated before flash-time use. Flag changes that allow ambiguous defaults, silently rewrite user intent, weaken target validation, or make documentation examples diverge from accepted config.
+
+    - path: "images/openmanet/provisioning/openwrt-overlay/**"
+      instructions: |
+        Review as OpenWrt first-boot ash/BusyBox code. Check for POSIX shell compatibility, idempotent reruns, UCI commit correctness, safe permissions, predictable boot-report evidence, and management LAN availability after provisioning. Flag regressions to the shared eth0/br-lan gateway behavior, missing meshNetInterface/bat0 handling, cleartext secret retention on the boot partition, or scripts that can leave networking half-configured.
+
+    - path: "{tools/packaging/**,tools/publish/**,product_repos/templates/**,.github/workflows/publish-product-repos.yml,docs/public-repos.md}"
+      instructions: |
+        Treat generated public repositories as derived products, not independent source. Verify that template, export, packaging, and workflow changes keep easymanet-images, easymanet-cli, and easymanet-desktop reproducible from this authoring repo. Flag stale source_commit metadata, workflow drift, missing generated-file coverage, direct patching assumptions for product repos, or changes that would publish secrets or private-only files.
+
+    - path: "{apps/desktop/**,apps/cli/**,packages/image/**,tools/release_smoke.py,docs/release.md}"
+      instructions: |
+        Review user-facing release surfaces together. Check that CLI, desktop, image-build, and release documentation changes stay aligned on package version, supported target, workspace paths, flags, and offline/local-first behavior. Flag any new cloud dependency, silent network side effect, unpinned release action, or user-visible behavior change without tests and documentation.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Review workflows for least-privilege permissions, pinned third-party actions, secret scope, artifact contents, reproducible commands, and parity with local verification. Flag any pull_request_target use, broad write permissions, untrusted shell interpolation, secret exposure, or missing status coverage for changed release/publish paths.
+
+    - path: "tests/**"
+      instructions: |
+        Check that tests exercise safety boundaries and failure paths, not only successful commands. Prefer targeted assertions for disk refusal, checksum mismatch, schema rejection, provisioning idempotence, generated-repo export behavior, and workflow/template drift. Flag brittle snapshots, host-specific assumptions, or tests that skip the risky behavior changed by the PR.
+
+  pre_merge_checks:
+    override_requested_reviewers_only: true
+    docstrings:
+      mode: warning
+      threshold: 75
+    title:
+      mode: warning
+      requirements: |
+        PR titles should be concise, imperative, and specific enough to describe the operator-facing or release-facing change. Avoid vague titles such as "updates", "fixes", or "misc".
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: Flash Safety Guardrails
+        mode: error
+        instructions: |
+          Pass if the PR does not change flash, disk discovery, image download, privilege escalation, or device-selection behavior. If it does, fail when any changed path weakens explicit device selection, --yes confirmation, dry-run preview, checksum verification, partition-path rejection, removable/external device checks, force-only overrides, unmount/sync/eject behavior, or partial-failure reporting.
+
+      - name: Provisioning Secret Cleanup
+        mode: error
+        instructions: |
+          Pass if the PR does not change provisioning, rendering, injection, OpenWrt overlay scripts, fleet examples, or first-boot behavior. If it does, fail when secrets such as mesh passwords, root hashes, SSH keys, tokens, or provision.json contents can be logged, published, committed to generated repos, kept on the boot partition after successful first boot, or exposed with permissions broader than 0600.
+
+      - name: Generated Product Repo Drift
+        mode: warning
+        instructions: |
+          Pass if the PR does not change publishing, packaging, product_repos templates, generated workflow templates, public repo docs, or release metadata. If it does, fail when easymanet-images, easymanet-cli, or easymanet-desktop would stop being reproducible from this authoring repo, lose source_commit provenance, publish stale workflows, omit required files, or require direct manual edits in generated repos.
+
+      - name: Risk-Matched Tests
+        mode: warning
+        instructions: |
+          Pass for docs-only changes and clearly mechanical metadata changes. Otherwise, fail when behavior changes in validation, rendering, flashing, downloading, provisioning, release, workflows, packaging, or public-repo publishing are not covered by targeted tests, smoke checks, or workflow assertions that would fail for the risky regression introduced by the PR.
+
+  tools:
+    github-checks:
+      enabled: true
+      timeout_ms: 900000
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    yamllint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    flake8:
+      enabled: true
+    pylint:
+      enabled: true
+    semgrep:
+      enabled: true
+    opengrep:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    osvScanner:
+      enabled: true
+    trivy:
+      enabled: true
+    checkov:
+      enabled: true
+    eslint:
+      enabled: true
+    htmlhint:
+      enabled: true
+    stylelint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    hadolint:
+      enabled: true
+    checkmake:
+      enabled: true
+    dotenvLint:
+      enabled: true
+
+chat:
+  auto_reply: true
+  art: false
+
+knowledge_base:
+  automatic_repository_linking: true
+  linked_repositories:
+    - repository: the-Drunken-coder/easymanet-images
+      instructions: "Generated public image build and release surface exported from this authoring repo."
+    - repository: the-Drunken-coder/easymanet-cli
+      instructions: "Generated public CLI package surface exported from this authoring repo."
+    - repository: the-Drunken-coder/easymanet-desktop
+      instructions: "Generated public desktop application surface exported from this authoring repo."
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - README.md
+      - docs/architecture.md
+      - docs/flashing.md
+      - docs/monorepo.md
+      - docs/public-repos.md
+      - docs/lessons-learned.md

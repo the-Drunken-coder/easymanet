@@ -303,7 +303,7 @@ def test_main_rejects_dispatch_without_push(monkeypatch, tmp_path):
         publish.main()
 
 
-def test_main_dispatches_only_after_published_commit(monkeypatch, tmp_path):
+def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):
     publish = load_publish_module()
     args = publish_args(tmp_path, push=True, dispatch=True)
     generated_dir = tmp_path / "generated"
@@ -321,7 +321,7 @@ def test_main_dispatches_only_after_published_commit(monkeypatch, tmp_path):
     assert len(dispatches) == 1
 
 
-def test_main_skips_dispatch_when_push_has_no_changes(monkeypatch, tmp_path):
+def test_main_dispatches_when_push_has_no_changes(monkeypatch, tmp_path):
     publish = load_publish_module()
     args = publish_args(tmp_path, push=True, dispatch=True)
     generated_dir = tmp_path / "generated"
@@ -336,7 +336,7 @@ def test_main_skips_dispatch_when_push_has_no_changes(monkeypatch, tmp_path):
 
     assert publish.main() == 0
 
-    assert dispatches == []
+    assert len(dispatches) == 1
 
 
 def test_publish_workflow_does_not_expand_inputs_inside_shell():

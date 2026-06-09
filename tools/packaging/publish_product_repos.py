@@ -440,18 +440,20 @@ def main() -> int:
             print(f"created {args.remote_owner}/{spec.name}")
 
         commit_sha = None
+        publish_synced = False
         if args.push:
             commit_sha = sync_to_remote(args.remote_owner, spec, generated_dir, args.output_dir, source_sha)
+            publish_synced = True
             if commit_sha:
                 print(f"pushed {args.remote_owner}/{spec.name}@{commit_sha}")
             else:
                 print(f"no changes for {args.remote_owner}/{spec.name}")
 
-        if args.dispatch and commit_sha:
+        if args.dispatch and publish_synced:
             dispatch_release(args.remote_owner, spec, payload)
             print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.name}")
         elif args.dispatch:
-            print(f"skipped dispatch for {args.remote_owner}/{spec.name}: no published commit")
+            print(f"skipped dispatch for {args.remote_owner}/{spec.name}: publish sync did not run")
 
     return 0
 

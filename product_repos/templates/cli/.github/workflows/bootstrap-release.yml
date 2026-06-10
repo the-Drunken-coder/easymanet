@@ -32,7 +32,7 @@ jobs:
           INPUT_RELEASE_TAG: ${{ inputs.release_tag || '' }}
           INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi || false }}
           PAYLOAD_RELEASE_TAG: ${{ github.event.client_payload.release_tag || '' }}
-          PAYLOAD_PUBLISH_PYPI: ${{ github.event.client_payload.publish_pypi || '' }}
+          PAYLOAD_PUBLISH_PYPI: ${{ github.event.client_payload.publish_pypi }}
           PAYLOAD_SOURCE_REPO: ${{ github.event.client_payload.source_repo || '' }}
           PAYLOAD_SOURCE_REF: ${{ github.event.client_payload.source_ref || '' }}
           PAYLOAD_SOURCE_SHA: ${{ github.event.client_payload.source_sha || '' }}

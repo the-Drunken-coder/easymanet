@@ -134,7 +134,13 @@ function registerIpc() {
 
 function runBridge(args) {
   return new Promise((resolve) => {
-    const bridge = bridgeCommand(args);
+    let bridge;
+    try {
+      bridge = bridgeCommand(args);
+    } catch (error) {
+      resolve({ ok: false, errors: [error.message] });
+      return;
+    }
     const child = spawn(bridge.command, bridge.args, {
       cwd: bridgeWorkingDirectory(),
       env: bridgeEnv(),
@@ -318,7 +324,11 @@ function staticRoot() {
 }
 
 function bridgeCommand(args) {
-  const bundledBridge = process.env.EASYMANET_BRIDGE_BIN || packagedBridgeBinary();
+  const overrideBridge = testingBridgeOverride();
+  if (overrideBridge) {
+    return { command: overrideBridge, args };
+  }
+  const bundledBridge = packagedBridgeBinary();
   if (bundledBridge) {
     return { command: bundledBridge, args };
   }
@@ -326,6 +336,36 @@ function bridgeCommand(args) {
     command: pythonPath(),
     args: ["-m", "easymanet_desktop.bridge", ...args],
   };
+}
+
+function testingBridgeOverride() {
+  const overrideBridge = process.env.EASYMANET_BRIDGE_BIN || "";
+  if (!overrideBridge) {
+    return "";
+  }
+  // EASYMANET_BRIDGE_BIN is a development/testing override; packaged apps use the bundled bridge by default.
+  if (app.isPackaged && process.env.EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE !== "1") {
+    console.warn("Ignoring EASYMANET_BRIDGE_BIN in a packaged app.");
+    return "";
+  }
+  validateExecutableOverride(overrideBridge, "EASYMANET_BRIDGE_BIN");
+  return overrideBridge;
+}
+
+function validateExecutableOverride(filePath, label) {
+  if (!path.isAbsolute(filePath)) {
+    throw new Error(`${label} must be an absolute path`);
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      throw new Error("path is not a file");
+    }
+    const accessMode = process.platform === "win32" ? fs.constants.R_OK : fs.constants.X_OK;
+    fs.accessSync(filePath, accessMode);
+  } catch (error) {
+    throw new Error(`${label} must point to an executable file: ${filePath} (${error.message})`);
+  }
 }
 
 function packagedBridgeBinary() {

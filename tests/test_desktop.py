@@ -142,6 +142,8 @@ def test_electron_shell_files_exist():
     assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
     assert "process.resourcesPath" in (electron / "main.js").read_text()
     assert "desktop-static" in (electron / "main.js").read_text()
+    assert "EASYMANET_BRIDGE_BIN is a development/testing override" in (electron / "main.js").read_text()
+    assert "EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE" in (electron / "main.js").read_text()
     assert "build:backend" in (electron / "package.json").read_text()
     assert "electron-builder" in (electron / "package.json").read_text()
     runner_text = bridge_runner.read_text()

@@ -1,11 +1,15 @@
 import importlib.util
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10.
+    import tomli as tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +84,7 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
 
     cli_pyproject = tomllib.loads((generated["cli"] / "pyproject.toml").read_text(encoding="utf-8"))
     assert cli_pyproject["project"]["name"] == "easymanet"
+    assert cli_pyproject["project"]["version"] == publish.project_version(ROOT / "pyproject.toml")
     assert cli_pyproject["project"]["license"] == "MIT"
     assert cli_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
     assert "apps/desktop/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
@@ -120,10 +125,14 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert (repo / "tests" / "test_desktop.py").exists()
     assert not (repo / "tools" / "packaging" / "publish_product_repos.py").exists()
 
-    pyproject = (repo / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'name = "easymanet-desktop"' in pyproject
-    assert 'easymanet-desktop = "easymanet_desktop.server:main"' in pyproject
-    assert '"easymanet_desktop" = ["static/*"]' in pyproject
+    pyproject = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["name"] == "easymanet-desktop"
+    assert pyproject["project"]["license"] == "MIT"
+    assert "License :: OSI Approved :: MIT License" not in pyproject["project"]["classifiers"]
+    assert pyproject["project"]["scripts"] == {
+        "easymanet-desktop": "easymanet_desktop.server:main"
+    }
+    assert pyproject["tool"]["setuptools"]["package-data"]["easymanet_desktop"] == ["static/*"]
 
 
 def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
@@ -134,6 +143,19 @@ def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
 
     assert '    ".",\n    "apps/desktop/src",' in pyproject
     assert '    "packages/core/src",' not in pyproject
+
+
+def test_cli_surface_pyproject_uses_authoring_version(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "easymanet"\nversion = "9.8.7"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(publish, "ROOT", tmp_path)
+
+    pyproject = tomllib.loads(publish.cli_surface_pyproject())
+
+    assert pyproject["project"]["version"] == "9.8.7"
 
 
 def test_generation_metadata_is_deterministic():
@@ -361,6 +383,15 @@ def test_build_payload_includes_pypi_publish_request(tmp_path):
 
     assert payload["release_tag"] == "cli-v0.1.0"
     assert payload["publish_pypi"] == "true"
+
+
+def test_cli_bootstrap_preserves_explicit_pypi_false_payload():
+    bootstrap = (
+        ROOT / "product_repos" / "templates" / "cli" / ".github" / "workflows" / "bootstrap-release.yml"
+    ).read_text()
+
+    assert "PAYLOAD_PUBLISH_PYPI: ${{ github.event.client_payload.publish_pypi }}" in bootstrap
+    assert "PAYLOAD_PUBLISH_PYPI: ${{ github.event.client_payload.publish_pypi || '' }}" not in bootstrap
 
 
 def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):

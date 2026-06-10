@@ -230,10 +230,19 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
         copy_source_path(rel_path, repo_dir)
 
     copy_template_tree(spec, repo_dir)
+    if spec.key == "cli":
+        write_text_file(repo_dir / "pyproject.toml", cli_surface_pyproject())
     if spec.key == "desktop":
         write_text_file(repo_dir / "pyproject.toml", desktop_surface_pyproject())
     write_text_file(repo_dir / "REPO_GENERATION.md", generation_metadata(spec, source_ref, source_sha))
     return repo_dir
+
+
+def cli_surface_pyproject() -> str:
+    return with_project_version(
+        (TEMPLATE_ROOT / "cli" / "pyproject.toml").read_text(),
+        project_version(ROOT / "pyproject.toml"),
+    )
 
 
 def desktop_surface_pyproject() -> str:
@@ -249,7 +258,7 @@ version = "{version}"
 description = "Local-first EasyMANET desktop operator console"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {{text = "MIT"}}
+license = "MIT"
 authors = [
     {{name = "EasyMANET Contributors"}}
 ]
@@ -257,7 +266,6 @@ keywords = ["openmanet", "mesh", "provisioning", "desktop"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -275,7 +283,7 @@ dev = [
     "pytest>=7",
     "pytest-cov",
     "setuptools>=68",
-    "tomli>=2",
+    "tomli>=2; python_version < '3.11'",
     "wheel",
 ]
 
@@ -316,6 +324,19 @@ def project_version(pyproject_path: Path) -> str:
     if not match:
         raise ValueError(f"Could not find project version in {pyproject_path}")
     return match.group(1)
+
+
+def with_project_version(pyproject_text: str, version: str) -> str:
+    updated, count = re.subn(
+        r'^version = "[^"]+"$',
+        f'version = "{version}"',
+        pyproject_text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise ValueError("Could not replace project version in pyproject template")
+    return updated
 
 
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:

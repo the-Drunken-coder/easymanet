@@ -181,7 +181,7 @@ jobs:
             echo "EasyMANET desktop packaged release."
             echo
             echo "Includes macOS and Windows Electron artifacts with a bundled Python bridge."
-            echo "Disk discovery and flashing flows still rely on the current macOS/Linux backend support."
+            echo "Disk discovery and flashing flows use the packaged macOS and Windows backend support."
             echo
             echo "Generated from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_SHA})."
           } > "$notes"

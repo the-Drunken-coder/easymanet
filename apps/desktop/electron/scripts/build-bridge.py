@@ -20,6 +20,7 @@ SPEC_ROOT = BUILD_ROOT / "pyinstaller-spec"
 APP_NAME = "easymanet-bridge"
 SOURCE_PATHS = (
     ROOT / "packages" / "core" / "src",
+    ROOT / "apps" / "cli" / "src",
     ROOT / "apps" / "desktop" / "src",
 )
 
@@ -55,10 +56,14 @@ def main() -> int:
         str(SOURCE_PATHS[0]),
         "--paths",
         str(SOURCE_PATHS[1]),
+        "--paths",
+        str(SOURCE_PATHS[2]),
         "--collect-data",
         "easymanet_desktop",
         "--collect-submodules",
         "easymanet",
+        "--collect-submodules",
+        "easymanet_cli",
         "--collect-submodules",
         "easymanet_desktop",
         str(ENTRYPOINT),

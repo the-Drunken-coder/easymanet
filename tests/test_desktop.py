@@ -2,6 +2,8 @@ from types import SimpleNamespace
 import json
 from pathlib import Path
 
+import typer
+
 from easymanet_desktop import bridge
 from easymanet_desktop import server
 from easymanet.workspace import WORKSPACE_ENV, ensure_workspace
@@ -100,6 +102,69 @@ def test_desktop_bridge_validate_outputs_json(capsys):
     assert "point01" in payload["nodes"]
 
 
+def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
+    calls = []
+
+    def fake_run_flash(**kwargs):
+        calls.append(kwargs)
+        print("Dry run complete. No changes were made.")
+
+    monkeypatch.setattr(bridge, "run_flash", fake_run_flash)
+    monkeypatch.setattr(
+        bridge,
+        "_flash_image_details",
+        lambda **_kwargs: {"target": "rpi4-mm6108-spi", "cached_path": "/tmp/openmanet.img.gz"},
+    )
+
+    exit_code = bridge.main(
+        [
+            "flash-plan",
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--node",
+            "point01",
+            "--device",
+            "/dev/disk4",
+            "--enable-ssh",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["image"]["cached_path"] == "/tmp/openmanet.img.gz"
+    assert calls[0]["dry_run"] is True
+    assert calls[0]["yes"] is False
+    assert calls[0]["enable_ssh"] is True
+
+
+def test_desktop_bridge_flash_returns_sudo_fallback_on_privilege_error(monkeypatch):
+    def fake_run_flash(**_kwargs):
+        print(bridge.PRIVILEGE_ERROR_MARKER)
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(bridge, "run_flash", fake_run_flash)
+    monkeypatch.setattr(
+        bridge,
+        "_flash_image_details",
+        lambda **_kwargs: {"cached_path": "/tmp/openmanet.img.gz", "sha256": "a" * 64},
+    )
+    monkeypatch.setattr(bridge.sys, "executable", "/Applications/EasyMANET.app/Contents/Resources/backend/easymanet-bridge/easymanet-bridge")
+    monkeypatch.setattr(bridge.sys, "frozen", True, raising=False)
+
+    payload = bridge.flash_payload(
+        config="/Users/example/fleet.yml",
+        node="point01",
+        device="/dev/disk4",
+        yes=True,
+    )
+
+    assert payload["ok"] is False
+    assert payload["sudo_command"].startswith("sudo ")
+    assert "easymanet-bridge flash" in payload["sudo_command"]
+    assert "--base-image /tmp/openmanet.img.gz --image-sha256 " + "a" * 64 in payload["sudo_command"]
+
+
 def test_desktop_static_supports_electron_and_http_modes():
     root = Path(__file__).resolve().parents[1]
     index = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "index.html"
@@ -112,9 +177,16 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "nativeApi.getState" in text
     assert "nativeApi.chooseConfig" in text
     assert "nativeApi.openFleetsFolder" in text
+    assert "nativeApi.flashPlan" in text
+    assert "nativeApi.flash" in text
+    assert "nativeApi.copyText" in text
     assert "fleet-select" in index.read_text()
     assert "open-fleets-folder" in index.read_text()
+    assert "flash-panel" in index.read_text()
+    assert "preview-flash" in index.read_text()
+    assert "start-flash" in index.read_text()
     assert "renderFleets" in text
+    assert "flashPanel.hidden = true" in text
 
 
 def test_desktop_static_containment_rejects_sibling_prefix(tmp_path):
@@ -138,6 +210,10 @@ def test_electron_shell_files_exist():
     assert "loadFile(indexHtmlPath())" in (electron / "main.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
+    assert "easymanet:flash-plan" in (electron / "main.js").read_text()
+    assert "easymanet:flash" in (electron / "main.js").read_text()
+    assert "flashBridgeTimeoutMs" in (electron / "main.js").read_text()
+    assert "copyText" in (electron / "preload.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
     assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
     assert "process.resourcesPath" in (electron / "main.js").read_text()
@@ -149,3 +225,6 @@ def test_electron_shell_files_exist():
     runner_text = bridge_runner.read_text()
     assert 'candidates.push("python", "py")' in runner_text
     assert 'process.env.PYTHON' in runner_text
+    build_text = (electron / "scripts" / "build-bridge.py").read_text()
+    assert '"easymanet_cli"' in build_text
+    assert 'ROOT / "apps" / "cli" / "src"' in build_text

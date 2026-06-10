@@ -1,6 +1,8 @@
 const state = {
   configPath: "",
   nodeName: "",
+  diskDevice: "",
+  sudoCommand: "",
 };
 
 const workspacePath = document.getElementById("workspace-path");
@@ -14,6 +16,13 @@ const imageCount = document.getElementById("image-count");
 const images = document.getElementById("images");
 const disks = document.getElementById("disks");
 const validationOutput = document.getElementById("validation-output");
+const flashPanel = document.getElementById("flash-panel");
+const flashReady = document.getElementById("flash-ready");
+const selectedDisk = document.getElementById("selected-disk");
+const previewFlash = document.getElementById("preview-flash");
+const startFlash = document.getElementById("start-flash");
+const flashOutput = document.getElementById("flash-output");
+const copySudo = document.getElementById("copy-sudo");
 const showAllDisks = document.getElementById("show-all-disks");
 const chooseConfig = document.getElementById("choose-config");
 const openFleetsFolder = document.getElementById("open-fleets-folder");
@@ -22,6 +31,7 @@ const nativeApi = window.easymanet || null;
 if (!nativeApi) {
   chooseConfig.hidden = true;
   openFleetsFolder.hidden = true;
+  flashPanel.hidden = true;
 }
 
 document.getElementById("refresh").addEventListener("click", () => {
@@ -30,8 +40,11 @@ document.getElementById("refresh").addEventListener("click", () => {
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
+    updateFlashControls();
   }
 });
+configInput.addEventListener("input", updateFlashControls);
+document.getElementById("node-name").addEventListener("input", updateFlashControls);
 chooseConfig.addEventListener("click", async () => {
   if (!nativeApi) {
     return;
@@ -40,6 +53,7 @@ chooseConfig.addEventListener("click", async () => {
   if (result.ok && result.path) {
     configInput.value = result.path;
     syncFleetSelect(result.path);
+    updateFlashControls();
   }
 });
 openFleetsFolder.addEventListener("click", async () => {
@@ -54,6 +68,48 @@ openFleetsFolder.addEventListener("click", async () => {
 showAllDisks.addEventListener("change", () => {
   loadDisks().catch(renderDiskError);
 });
+disks.addEventListener("click", event => {
+  const button = event.target.closest("[data-device]");
+  if (!button) {
+    return;
+  }
+  state.diskDevice = button.dataset.device || "";
+  selectedDisk.textContent = state.diskDevice || "None";
+  loadDisks().catch(renderDiskError);
+  updateFlashControls();
+});
+document.querySelectorAll("input[name='ssh-mode']").forEach(input => {
+  input.addEventListener("change", updateFlashControls);
+});
+previewFlash.addEventListener("click", async () => {
+  if (!nativeApi) {
+    return;
+  }
+  renderFlashStatus("Preparing flash preview...");
+  const response = await nativeApi.flashPlan(flashPayload());
+  renderFlash(response);
+});
+startFlash.addEventListener("click", async () => {
+  if (!nativeApi) {
+    return;
+  }
+  renderFlashStatus("Flashing selected disk...");
+  const response = await nativeApi.flash(flashPayload());
+  renderFlash(response);
+  await loadDisks().catch(renderDiskError);
+});
+copySudo.addEventListener("click", async () => {
+  if (!nativeApi || !state.sudoCommand) {
+    return;
+  }
+  const result = await nativeApi.copyText(state.sudoCommand);
+  if (result.ok) {
+    copySudo.textContent = "Copied";
+    setTimeout(() => {
+      copySudo.textContent = "Copy Sudo Command";
+    }, 1200);
+  }
+});
 document.getElementById("validate-form").addEventListener("submit", async event => {
   event.preventDefault();
   state.configPath = configInput.value.trim();
@@ -64,6 +120,7 @@ document.getElementById("validate-form").addEventListener("submit", async event 
       node: state.nodeName,
     });
     renderValidation(response);
+    updateFlashControls();
   } catch (error) {
     console.error("Validation request failed", error);
     renderValidation({ ok: false, errors: [errorMessage(error)] });
@@ -105,9 +162,17 @@ async function loadDisks() {
     }
     if (!payload.disks.length) {
       disks.innerHTML = `<div class="meta">No disks found.</div>`;
+      state.diskDevice = "";
+      selectedDisk.textContent = "None";
+      updateFlashControls();
       return;
     }
+    if (state.diskDevice && !payload.disks.some(disk => disk.device === state.diskDevice)) {
+      state.diskDevice = "";
+      selectedDisk.textContent = "None";
+    }
     disks.innerHTML = payload.disks.map(diskMarkup).join("");
+    updateFlashControls();
   } catch (error) {
     console.error("Disk refresh failed", error);
     renderDiskError(error);
@@ -143,6 +208,7 @@ function renderFleets(records, folder) {
     fleetSelect.add(new Option("No fleet files found", ""));
     fleetEmpty.hidden = false;
     configInput.value = "";
+    updateFlashControls();
     return;
   }
 
@@ -156,6 +222,7 @@ function renderFleets(records, folder) {
   const selected = current || records[0].path;
   configInput.value = selected;
   syncFleetSelect(selected);
+  updateFlashControls();
 }
 
 function syncFleetSelect(path) {
@@ -190,15 +257,88 @@ function imageMarkup(target, image) {
 
 function diskMarkup(disk) {
   const warnings = (disk.warnings || []).map(item => `<div class="status-bad">${escapeHtml(item)}</div>`).join("");
+  const selected = disk.device === state.diskDevice;
   return `
-    <div class="item">
-      <div class="name">${escapeHtml(disk.device)}</div>
-      <div class="meta">${escapeHtml(disk.model || "")}</div>
-      <div class="meta">${escapeHtml(disk.size_human || "")} - ${disk.removable ? "removable" : "fixed"}</div>
-      <div class="meta">${escapeHtml((disk.mounted || []).join(", ") || "not mounted")}</div>
-      ${warnings}
+    <div class="item selectable${selected ? " selected" : ""}">
+      <div>
+        <div class="name">${escapeHtml(disk.device)}</div>
+        <div class="meta">${escapeHtml(disk.model || "")}</div>
+        <div class="meta">${escapeHtml(disk.size_human || "")} - ${disk.removable ? "removable" : "fixed"}</div>
+        <div class="meta">${escapeHtml((disk.mounted || []).join(", ") || "not mounted")}</div>
+        ${warnings}
+      </div>
+      <button type="button" data-device="${escapeHtml(disk.device)}">${selected ? "Selected" : "Select"}</button>
     </div>
   `;
+}
+
+function flashPayload() {
+  state.configPath = configInput.value.trim();
+  state.nodeName = document.getElementById("node-name").value.trim();
+  return {
+    config: state.configPath,
+    node: state.nodeName,
+    device: state.diskDevice,
+    sshMode: selectedSshMode(),
+  };
+}
+
+function selectedSshMode() {
+  return document.querySelector("input[name='ssh-mode']:checked")?.value || "default";
+}
+
+function updateFlashControls() {
+  if (!nativeApi) {
+    return;
+  }
+  const config = configInput.value.trim();
+  const node = document.getElementById("node-name").value.trim();
+  const ready = Boolean(config && node && state.diskDevice);
+  previewFlash.disabled = !ready;
+  startFlash.disabled = !ready;
+  flashReady.textContent = ready ? "ready" : "needs config, node, disk";
+}
+
+function renderFlashStatus(message) {
+  state.sudoCommand = "";
+  copySudo.hidden = true;
+  copySudo.textContent = "Copy Sudo Command";
+  flashOutput.className = "";
+  flashOutput.textContent = message;
+}
+
+function renderFlash(payload) {
+  state.sudoCommand = payload.sudo_command || "";
+  copySudo.hidden = !state.sudoCommand;
+  const lines = [];
+  if (payload.ok) {
+    lines.push("ok");
+  }
+  if (payload.canceled) {
+    lines.push("canceled");
+  }
+  for (const error of payload.errors || []) {
+    lines.push(`error: ${error}`);
+  }
+  for (const warning of payload.warnings || []) {
+    lines.push(`warning: ${warning}`);
+  }
+  if (payload.image?.cached_path) {
+    lines.push(`image: ${payload.image.cached_path}`);
+  } else if (payload.image?.url) {
+    lines.push(`image: ${payload.image.url}`);
+  }
+  if (payload.output) {
+    lines.push("");
+    lines.push(payload.output);
+  }
+  if (state.sudoCommand) {
+    lines.push("");
+    lines.push("sudo:");
+    lines.push(state.sudoCommand);
+  }
+  flashOutput.textContent = lines.join("\n") || "no result";
+  flashOutput.className = payload.ok ? "status-ok" : "status-bad";
 }
 
 async function getJson(url) {
@@ -275,10 +415,12 @@ function renderStateError(error) {
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
   images.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
+  updateFlashControls();
 }
 
 function renderDiskError(error) {
   disks.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
+  updateFlashControls();
 }
 
 function errorMessage(error) {

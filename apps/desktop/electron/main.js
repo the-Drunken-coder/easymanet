@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -7,6 +7,8 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const fleetExtensions = new Set([".yml", ".yaml"]);
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const bridgeTimeoutMs = 15000;
+const flashBridgeTimeoutMs = 30 * 60 * 1000;
+const sshModes = new Set(["default", "enable", "disable"]);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -54,7 +56,8 @@ function createWindow() {
             selectedFleet: document.querySelector("#fleet-select")?.selectedOptions?.[0]?.textContent || "",
             configPath: document.querySelector("#config-path")?.value || "",
             emptyFleetVisible: !document.querySelector("#fleet-empty")?.hidden,
-            openFleetsFolderVisible: !document.querySelector("#open-fleets-folder")?.hidden
+            openFleetsFolderVisible: !document.querySelector("#open-fleets-folder")?.hidden,
+            hasFlashControls: Boolean(document.querySelector("#flash-panel"))
           });
         })()
       `);
@@ -102,6 +105,41 @@ function registerIpc() {
     }
     return runBridge(args);
   });
+  ipcMain.handle("easymanet:flash-plan", async (_event, payload = {}) => {
+    const validated = await validateFlashPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    return runBridge(["flash-plan", ...flashArgs(validated)], { timeoutMs: flashBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:flash", async (_event, payload = {}) => {
+    const validated = await validateFlashPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const confirmed = await dialog.showMessageBox({
+      type: "warning",
+      buttons: ["Flash", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Flash removable media",
+      message: `Flash ${validated.device} for ${validated.node}?`,
+      detail: "This writes an OpenMANET image to the selected disk and erases existing data on that disk.",
+      noLink: true,
+    });
+    if (confirmed.response !== 0) {
+      return { ok: false, canceled: true, errors: ["Flash canceled"] };
+    }
+    return runBridge(["flash", ...flashArgs(validated), "--yes"], { timeoutMs: flashBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:copy-text", (_event, payload = {}) => {
+    const text = typeof payload.text === "string" ? payload.text : "";
+    if (!text) {
+      return { ok: false, errors: ["Nothing to copy"] };
+    }
+    clipboard.writeText(text);
+    return { ok: true };
+  });
   ipcMain.handle("easymanet:choose-config", async () => {
     const state = await runBridge(["state"]);
     const defaultPath = state.ok && state.workspace ? state.workspace.fleets_dir : undefined;
@@ -132,7 +170,7 @@ function registerIpc() {
   });
 }
 
-function runBridge(args) {
+function runBridge(args, options = {}) {
   return new Promise((resolve) => {
     let bridge;
     try {
@@ -159,10 +197,11 @@ function runBridge(args) {
       resolve(payload);
     };
 
+    const timeoutMs = options.timeoutMs || bridgeTimeoutMs;
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, errors: [`EasyMANET bridge timed out after ${bridgeTimeoutMs / 1000}s`] });
-    }, bridgeTimeoutMs);
+      finish({ ok: false, errors: [`EasyMANET bridge timed out after ${timeoutMs / 1000}s`] });
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -211,6 +250,38 @@ async function validatePayload(payload) {
     return resolved;
   }
   return { ok: true, config: resolved.config, node };
+}
+
+async function validateFlashPayload(payload) {
+  const validated = await validatePayload(payload);
+  if (!validated.ok) {
+    return validated;
+  }
+  if (!validated.node) {
+    return { ok: false, errors: ["Node name is required"] };
+  }
+
+  const device = typeof payload.device === "string" ? payload.device.trim() : "";
+  if (!device) {
+    return { ok: false, errors: ["Disk device is required"] };
+  }
+
+  const sshMode = typeof payload.sshMode === "string" ? payload.sshMode.trim() : "default";
+  if (!sshModes.has(sshMode)) {
+    return { ok: false, errors: ["Unsupported SSH mode"] };
+  }
+
+  return { ...validated, device, sshMode };
+}
+
+function flashArgs(payload) {
+  const args = ["--config", payload.config, "--node", payload.node, "--device", payload.device];
+  if (payload.sshMode === "enable") {
+    args.push("--enable-ssh");
+  } else if (payload.sshMode === "disable") {
+    args.push("--disable-ssh");
+  }
+  return args;
 }
 
 async function resolveConfigPath(config) {

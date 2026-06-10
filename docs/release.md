@@ -1,12 +1,12 @@
 # Release Checklist
 
-EasyMANET `0.1.0` is the first clean monorepo release. It ships the CLI,
-image tooling, Electron desktop shell, shared Documents workspace, and local
-publish/export tooling as one coordinated product.
+EasyMANET `0.2.0` is the first desktop-flashing release. It ships the CLI,
+image tooling, Electron desktop flash workflow, shared Documents workspace, and
+local publish/export tooling as one coordinated product.
 
 ## Version Policy
 
-- `0.1.0` is the first release of the new monorepo shape.
+- `0.2.0` is the first release with desktop flash preview/execution support.
 - Python package metadata in `pyproject.toml` and Electron metadata in
   `apps/desktop/electron/package.json` must stay on the same release version.
 - The old Python module paths are intentionally not supported:
@@ -83,7 +83,7 @@ easymanet image manifest \
 Only tag after every verification item above passes:
 
 ```bash
-git tag -a v0.1.0 -m "EasyMANET v0.1.0"
+git tag -a v0.2.0 -m "EasyMANET v0.2.0"
 ```
 
 Publish the wheel, Electron artifact, image artifacts, and

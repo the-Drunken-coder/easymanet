@@ -66,6 +66,42 @@
             </div>
             <div id="disks"></div>
           </section>
+
+          <section class="panel wide" id="flash-panel">
+            <div class="panel-title">
+              <h2>Flash</h2>
+              <span id="flash-ready"></span>
+            </div>
+            <div class="flash-summary">
+              <div>
+                <div class="meta">Selected disk</div>
+                <div class="name" id="selected-disk">None</div>
+              </div>
+              <fieldset>
+                <legend>SSH</legend>
+                <div class="segmented">
+                  <label>
+                    <input type="radio" name="ssh-mode" value="default" checked>
+                    Role default
+                  </label>
+                  <label>
+                    <input type="radio" name="ssh-mode" value="enable">
+                    Enable
+                  </label>
+                  <label>
+                    <input type="radio" name="ssh-mode" value="disable">
+                    Disable
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+            <div class="actions">
+              <button id="preview-flash" type="button">Preview</button>
+              <button id="start-flash" type="button">Flash</button>
+            </div>
+            <button id="copy-sudo" type="button" hidden>Copy Sudo Command</button>
+            <pre id="flash-output"></pre>
+          </section>
         </section>
       </section>
     </main>

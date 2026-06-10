@@ -120,6 +120,7 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     )
 
     assert (repo / "pyproject.toml").exists()
+    assert (repo / "apps" / "cli" / "src" / "easymanet_cli" / "flash.py").exists()
     assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
     assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()
     assert (repo / "tests" / "test_desktop.py").exists()
@@ -132,6 +133,9 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert pyproject["project"]["scripts"] == {
         "easymanet-desktop": "easymanet_desktop.server:main"
     }
+    find_config = pyproject["tool"]["setuptools"]["packages"]["find"]
+    assert "apps/cli/src" in find_config["where"]
+    assert "easymanet_cli*" in find_config["include"]
     assert pyproject["tool"]["setuptools"]["package-data"]["easymanet_desktop"] == ["static/*"]
 
 
@@ -141,7 +145,7 @@ def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
 
     pyproject = publish.desktop_surface_pyproject()
 
-    assert '    ".",\n    "apps/desktop/src",' in pyproject
+    assert '    ".",\n    "apps/cli/src",\n    "apps/desktop/src",' in pyproject
     assert '    "packages/core/src",' not in pyproject
 
 

@@ -5,6 +5,10 @@ loads the UI from local files and talks to EasyMANET through a narrow
 preload API plus a Python JSON bridge. It does not depend on a hosted
 website or a localhost web server.
 
+The native shell can preview and execute the shared EasyMANET flash workflow.
+If the OS blocks direct block-device writes, the app returns a copyable sudo
+fallback command that reuses the bundled bridge.
+
 ## Run
 
 From the repository root:

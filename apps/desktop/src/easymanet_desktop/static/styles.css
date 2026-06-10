@@ -133,6 +133,11 @@ button:hover {
   background: var(--accent-strong);
 }
 
+button:disabled {
+  background: #8da297;
+  cursor: not-allowed;
+}
+
 #refresh {
   width: 40px;
   padding: 0;
@@ -175,9 +180,28 @@ pre {
   padding: 12px 0;
 }
 
+.item.selectable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.item.selected {
+  background: #edf6f1;
+  border: 1px solid #95bba9;
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 12px;
+}
+
 .item:first-child {
   border-top: 0;
   padding-top: 0;
+}
+
+.item.selected:first-child {
+  padding-top: 12px;
 }
 
 .name {
@@ -209,6 +233,66 @@ pre {
   margin: 0;
 }
 
+.flash-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, auto);
+  gap: 16px;
+  align-items: end;
+}
+
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+legend {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f9faf8;
+}
+
+.segmented label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 1px solid var(--line);
+  color: var(--ink);
+  text-align: center;
+}
+
+.segmented label:first-child {
+  border-left: 0;
+}
+
+.segmented input {
+  width: auto;
+  margin: 0 6px 0 0;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+#copy-sudo {
+  margin-top: 10px;
+}
+
 @media (max-width: 760px) {
   .workspace {
     width: min(100vw - 20px, 1180px);
@@ -225,5 +309,24 @@ pre {
 
   .path-picker {
     grid-template-columns: 1fr;
+  }
+
+  .item.selectable,
+  .flash-summary,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .segmented {
+    grid-template-columns: 1fr;
+  }
+
+  .segmented label {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .segmented label:first-child {
+    border-top: 0;
   }
 }

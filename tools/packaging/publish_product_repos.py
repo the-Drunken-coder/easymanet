@@ -87,6 +87,7 @@ DESKTOP_PRODUCT_SOURCE_PATHS = (
     "docs/manifest.md",
     "examples/three-node-field-mesh.yml",
     DESKTOP_CORE_PACKAGE_PATH,
+    "apps/cli",
     "apps/desktop",
     "tests/test_desktop.py",
 )
@@ -293,10 +294,12 @@ easymanet-desktop = "easymanet_desktop.server:main"
 [tool.setuptools.packages.find]
 where = [
     "{core_package_root}",
+    "apps/cli/src",
     "apps/desktop/src",
 ]
 include = [
     "easymanet*",
+    "easymanet_cli*",
     "easymanet_desktop*",
 ]
 

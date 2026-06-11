@@ -132,6 +132,29 @@ def test_flash_workflow_download_failure_is_classified(monkeypatch):
     assert result.events[-1].event_type == "error"
 
 
+def test_flash_workflow_unexpected_failure_is_internal(monkeypatch):
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(
+        flash,
+        "resolve_fleet_config",
+        lambda _config: (_ for _item in ()).throw(RuntimeError("boom")),
+    )
+
+    result = flash.run_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            dry_run=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.INTERNAL
+    assert result.errors == ["Unexpected flash workflow error: RuntimeError: boom"]
+    assert result.events[-1].event_type == "error"
+
+
 def test_flash_workflow_inject_failure_reports_partial_write(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)

@@ -232,11 +232,21 @@ def test_desktop_bridge_flash_streams_events_and_final_result(monkeypatch, capsy
     assert "events" not in lines[-1]
 
 
-def test_desktop_bridge_flash_exception_still_emits_final_result(monkeypatch, capsys):
-    def fail_flash_payload(**_kwargs):
-        raise OSError("download failed")
+def test_desktop_bridge_flash_uses_core_internal_result(monkeypatch, capsys):
+    def fake_run_flash_workflow(options, emit=None):
+        assert options.yes is True
+        assert emit is not None
+        return SimpleNamespace(
+            to_dict=lambda include_events=False: {
+                "ok": False,
+                "exit_code": 1,
+                "code": FlashErrorCode.INTERNAL.value,
+                "errors": ["Unexpected flash workflow error: OSError: download failed"],
+                "image": {},
+            }
+        )
 
-    monkeypatch.setattr(bridge, "flash_payload", fail_flash_payload)
+    monkeypatch.setattr(bridge, "run_flash_workflow", fake_run_flash_workflow)
     monkeypatch.setattr(
         bridge,
         "_safe_flash_image_details",
@@ -260,10 +270,8 @@ def test_desktop_bridge_flash_exception_still_emits_final_result(monkeypatch, ca
     payload = json.loads(capsys.readouterr().out)
     assert payload["type"] == "result"
     assert payload["ok"] is False
-    assert payload["code"] == FlashErrorCode.FLASH.value
-    assert payload["errors"] == ["download failed"]
-    assert payload["node"] == "point01"
-    assert payload["device"] == "/dev/disk4"
+    assert payload["code"] == FlashErrorCode.INTERNAL.value
+    assert payload["errors"] == ["Unexpected flash workflow error: OSError: download failed"]
 
 
 def test_desktop_static_supports_electron_and_http_modes():
@@ -325,6 +333,10 @@ def test_electron_shell_files_exist():
     assert "resolve-config" in path_utils_text
     assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
     assert "flashBridgeTimeoutMs" in (electron / "main.js").read_text()
+    assert "runBridgeStreaming" in (electron / "main.js").read_text()
+    assert "fullStdout" in (electron / "main.js").read_text()
+    assert "isDestroyed" in (electron / "main.js").read_text()
+    assert "streamEvents" not in (electron / "main.js").read_text()
     assert "copyText" in (electron / "preload.js").read_text()
     assert "onFlashEvent" in (electron / "preload.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()

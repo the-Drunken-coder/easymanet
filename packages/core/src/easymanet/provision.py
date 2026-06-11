@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from .manifest import Manifest, ManifestError
 
 
 @dataclass(frozen=True)
 class MeshConfig:
-    id: Any = ""
-    password: Any = ""
-    channel: Any = 0
-    bandwidth_mhz: Any = 0
-    country: Any = ""
+    id: object = ""
+    password: object = ""
+    channel: object = 0
+    bandwidth_mhz: object = 0
+    country: object = ""
 
     @classmethod
-    def from_mapping(cls, mesh: dict[str, Any]) -> "MeshConfig":
+    def from_mapping(cls, mesh: dict[str, object]) -> "MeshConfig":
         return cls(
             id=mesh.get("id", ""),
             password=mesh.get("password", ""),
@@ -27,7 +27,7 @@ class MeshConfig:
             country=mesh.get("country", ""),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
             "password": self.password,
@@ -39,81 +39,114 @@ class MeshConfig:
 
 @dataclass(frozen=True)
 class LocalApConfig:
-    data: dict[str, Any] = field(default_factory=dict)
+    enabled: object = False
+    ssid: object = ""
+    password: object = ""
+    extra: dict[str, object] = field(default_factory=dict)
+    fields: frozenset[str] = frozenset({"enabled"})
 
-    @property
-    def enabled(self) -> Any:
-        return self.data.get("enabled", False)
+    @classmethod
+    def from_mapping(cls, local_ap: dict[str, object]) -> "LocalApConfig":
+        return cls(
+            enabled=local_ap.get("enabled", False),
+            ssid=local_ap.get("ssid", ""),
+            password=local_ap.get("password", ""),
+            extra=_extra_fields(local_ap, {"enabled", "ssid", "password"}),
+            fields=_present_fields(local_ap, {"enabled", "ssid", "password"}),
+        )
 
-    @property
-    def password(self) -> Any:
-        return self.data.get("password", "")
-
-    @property
-    def ssid(self) -> Any:
-        return self.data.get("ssid", "")
-
-    def to_dict(self) -> dict[str, Any]:
-        return dict(self.data)
+    def to_dict(self) -> dict[str, object]:
+        return _with_present_fields(
+            self.extra,
+            self.fields,
+            {
+                "enabled": self.enabled,
+                "ssid": self.ssid,
+                "password": self.password,
+            },
+        )
 
 
 @dataclass(frozen=True)
 class GatewayWifiConfig:
-    data: dict[str, Any] = field(default_factory=dict)
+    enabled: object = False
+    ssid: object = ""
+    password: object = ""
+    encryption: object = None
+    extra: dict[str, object] = field(default_factory=dict)
+    fields: frozenset[str] = frozenset()
 
-    @property
-    def enabled(self) -> Any:
-        return self.data.get("enabled", False)
+    @classmethod
+    def from_mapping(cls, wifi: dict[str, object]) -> "GatewayWifiConfig":
+        return cls(
+            enabled=wifi.get("enabled", False),
+            ssid=wifi.get("ssid", ""),
+            password=wifi.get("password", ""),
+            encryption=wifi.get("encryption"),
+            extra=_extra_fields(wifi, {"enabled", "ssid", "password", "encryption"}),
+            fields=_present_fields(wifi, {"enabled", "ssid", "password", "encryption"}),
+        )
 
-    @property
-    def ssid(self) -> Any:
-        return self.data.get("ssid", "")
-
-    @property
-    def password(self) -> Any:
-        return self.data.get("password", "")
-
-    @property
-    def encryption(self) -> Any:
-        return self.data.get("encryption")
-
-    def to_dict(self) -> dict[str, Any]:
-        return dict(self.data)
+    def to_dict(self) -> dict[str, object]:
+        return _with_present_fields(
+            self.extra,
+            self.fields,
+            {
+                "enabled": self.enabled,
+                "ssid": self.ssid,
+                "password": self.password,
+                "encryption": self.encryption,
+            },
+        )
 
 
 @dataclass(frozen=True)
 class GatewayConfig:
-    data: dict[str, Any] = field(default_factory=dict)
+    enabled: object = False
+    uplink_interface: object = ""
+    wifi_config: GatewayWifiConfig | None = None
+    raw_wifi: object = None
+    extra: dict[str, object] = field(default_factory=dict)
+    fields: frozenset[str] = frozenset({"enabled"})
 
-    @property
-    def enabled(self) -> Any:
-        return self.data.get("enabled", False)
-
-    @property
-    def uplink_interface(self) -> Any:
-        return self.data.get("uplink_interface", "")
+    @classmethod
+    def from_mapping(cls, gateway: dict[str, object]) -> "GatewayConfig":
+        wifi = gateway.get("wifi")
+        return cls(
+            enabled=gateway.get("enabled", False),
+            uplink_interface=gateway.get("uplink_interface", ""),
+            wifi_config=GatewayWifiConfig.from_mapping(wifi) if isinstance(wifi, dict) else None,
+            raw_wifi=wifi,
+            extra=_extra_fields(gateway, {"enabled", "uplink_interface", "wifi"}),
+            fields=_present_fields(gateway, {"enabled", "uplink_interface", "wifi"}),
+        )
 
     @property
     def wifi(self) -> GatewayWifiConfig | None:
-        wifi = self.data.get("wifi", {})
-        if not isinstance(wifi, dict):
-            return None
-        return GatewayWifiConfig(dict(wifi))
+        return self.wifi_config
 
-    def to_dict(self) -> dict[str, Any]:
-        return dict(self.data)
+    def to_dict(self) -> dict[str, object]:
+        values: dict[str, object] = {
+            "enabled": self.enabled,
+            "uplink_interface": self.uplink_interface,
+        }
+        if self.wifi_config is not None:
+            values["wifi"] = self.wifi_config.to_dict()
+        else:
+            values["wifi"] = self.raw_wifi
+        return _with_present_fields(self.extra, self.fields, values)
 
 
 @dataclass(frozen=True)
 class ManagementConfig:
-    root_password_hash: Any = ""
-    ssh_authorized_keys: Any = field(default_factory=list)
+    root_password_hash: object = ""
+    ssh_authorized_keys: object = field(default_factory=list)
     ssh_enabled: Optional[bool] = None
 
     @classmethod
     def from_mapping(
         cls,
-        management: dict[str, Any],
+        management: dict[str, object],
         *,
         ssh_enabled: Optional[bool] = None,
     ) -> "ManagementConfig":
@@ -123,7 +156,7 @@ class ManagementConfig:
             ssh_enabled=ssh_enabled,
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = {
             "root_password_hash": self.root_password_hash,
             "ssh_authorized_keys": self.ssh_authorized_keys,
@@ -136,14 +169,14 @@ class ManagementConfig:
 @dataclass(frozen=True)
 class ResolvedNode:
     name: str
-    hostname: Any
-    role: Any
-    target: Any
-    ip: Any
+    hostname: object
+    role: object
+    target: object
+    ip: object
     local_ap: LocalApConfig
     gateway: GatewayConfig
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "hostname": self.hostname,
@@ -162,7 +195,7 @@ class ProvisionPayload:
     node: ResolvedNode
     management: ManagementConfig
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "version": self.version,
             "mesh": self.mesh.to_dict(),
@@ -190,8 +223,8 @@ def resolve_node_model(manifest: Manifest, node_name: str) -> ResolvedNode:
         role=node.get("role", defaults.get("role", "point")),
         target=node.get("target", defaults.get("target", "rpi4-mm6108-spi")),
         ip=node.get("ip", ""),
-        local_ap=LocalApConfig(local_ap),
-        gateway=GatewayConfig(gateway),
+        local_ap=LocalApConfig.from_mapping(local_ap),
+        gateway=GatewayConfig.from_mapping(gateway),
     )
 
 
@@ -217,7 +250,7 @@ def resolve_provision(
     )
 
 
-def _require_mapping(value: Any, label: str) -> dict[str, Any]:
+def _require_mapping(value: object, label: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ManifestError(
             f"Manifest section '{label}' must be a mapping, got {type(value).__name__}"
@@ -225,15 +258,41 @@ def _require_mapping(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _mapping_or_empty(value: Any) -> dict[str, Any]:
+def _mapping_or_empty(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _extra_fields(
+    data: dict[str, object],
+    known: set[str],
+) -> dict[str, object]:
+    return {key: value for key, value in data.items() if key not in known}
+
+
+def _present_fields(
+    data: dict[str, object],
+    known: set[str],
+) -> frozenset[str]:
+    return frozenset(key for key in known if key in data)
+
+
+def _with_present_fields(
+    extra: dict[str, object],
+    fields: frozenset[str],
+    values: dict[str, object],
+) -> dict[str, object]:
+    payload = dict(extra)
+    for key, value in values.items():
+        if key in fields:
+            payload[key] = value
+    return payload
+
+
 def _resolved_local_ap(
-    defaults: dict[str, Any],
-    node: dict[str, Any],
+    defaults: dict[str, object],
+    node: dict[str, object],
     node_name: str,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     resolved = {
         **_mapping_or_empty(defaults.get("local_ap", {})),
         **_mapping_or_empty(node.get("local_ap", {})),
@@ -250,11 +309,11 @@ def _resolved_local_ap(
 
 
 def _resolved_gateway(
-    defaults: dict[str, Any],
-    node: dict[str, Any],
+    defaults: dict[str, object],
+    node: dict[str, object],
     *,
-    role: Any,
-) -> dict[str, Any]:
+    role: object,
+) -> dict[str, object]:
     resolved = {
         **_mapping_or_empty(defaults.get("gateway", {})),
         **_mapping_or_empty(node.get("gateway", {})),

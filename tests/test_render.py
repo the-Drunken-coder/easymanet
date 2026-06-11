@@ -144,6 +144,11 @@ def test_resolve_provision_returns_typed_payload_used_by_render():
 
     assert isinstance(payload, ProvisionPayload)
     assert payload.management.ssh_enabled is True
+    assert payload.node.local_ap.enabled is True
+    assert payload.node.local_ap.ssid == "node02-local"
+    assert payload.node.local_ap.password == "ap-password"
+    assert payload.node.gateway.enabled is False
+    assert payload.node.gateway.wifi is None
     assert payload.to_dict() == render_dict(m, "node02", ssh_enabled=True)
     os.unlink(path)
 
@@ -179,8 +184,12 @@ nodes:
 """
     path = _write_config(config)
     m = load_manifest(path)
+    payload = resolve_provision(m, "n1")
     data = render_dict(m, "n1")
 
+    assert payload.node.gateway.enabled is True
+    assert payload.node.gateway.wifi is not None
+    assert payload.node.gateway.wifi.enabled is True
     assert data["node"]["gateway"]["wifi"] == {"enabled": True}
     os.unlink(path)
 

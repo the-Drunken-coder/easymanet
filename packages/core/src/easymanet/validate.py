@@ -260,16 +260,13 @@ def _validate_local_ap(
 def _validate_gateway_wifi(
     result: ValidationResult,
     node_label: str,
-    gateway: GatewayConfig | dict,
+    gateway: GatewayConfig,
 ) -> None:
-    gateway_data = gateway.to_dict() if isinstance(gateway, GatewayConfig) else gateway
-    if not isinstance(gateway_data, dict):
+    wifi = gateway.wifi
+    if wifi is None or not wifi.enabled:
         return
-    wifi = gateway_data.get("wifi", {})
-    if not isinstance(wifi, dict) or not wifi.get("enabled"):
-        return
-    ssid = wifi.get("ssid", "")
-    password = wifi.get("password", "")
+    ssid = wifi.ssid
+    password = wifi.password
     if not ssid:
         result.add_error(
             f"Node '{node_label}': gateway.wifi.enabled requires gateway.wifi.ssid"
@@ -278,7 +275,7 @@ def _validate_gateway_wifi(
         result.add_error(
             f"Node '{node_label}': gateway.wifi.enabled requires gateway.wifi.password"
         )
-    encryption = wifi.get("encryption")
+    encryption = wifi.encryption
     if encryption is not None and encryption not in VALID_WIFI_ENCRYPTION:
         result.add_error(
             f"Node '{node_label}': gateway.wifi.encryption must be one of "

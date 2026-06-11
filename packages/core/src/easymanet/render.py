@@ -1,7 +1,6 @@
 """Render resolved provision.json from fleet manifest."""
 
-import json
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from .manifest import Manifest
 from .provision import resolve_provision
@@ -21,5 +20,5 @@ def render_dict(
     node_name: str,
     *,
     ssh_enabled: Optional[bool] = None,
-) -> Dict[str, Any]:
-    return json.loads(render(manifest, node_name, ssh_enabled=ssh_enabled))
+) -> dict[str, object]:
+    return resolve_provision(manifest, node_name, ssh_enabled=ssh_enabled).to_dict()

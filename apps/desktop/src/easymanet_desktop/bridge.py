@@ -68,9 +68,6 @@ def flash_payload(
     disable_ssh: bool = False,
     emit: Callable[[FlashEvent], None] | None = None,
 ) -> dict[str, Any]:
-    if not yes:
-        return {"ok": False, "errors": ["--yes is required for desktop flash execution"]}
-
     result = run_flash_workflow(
         FlashOptions(
             config=config,
@@ -79,7 +76,7 @@ def flash_payload(
             base_image=base_image,
             image_sha256=image_sha256,
             dry_run=False,
-            yes=True,
+            yes=yes,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
         ),
@@ -142,25 +139,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 disable_ssh=args.disable_ssh,
             )
         elif args.command == "flash":
-            try:
-                payload = flash_payload(
-                    config=args.config,
-                    node=args.node,
-                    device=args.device,
-                    yes=args.yes,
-                    base_image=args.base_image,
-                    image_sha256=args.image_sha256,
-                    enable_ssh=args.enable_ssh,
-                    disable_ssh=args.disable_ssh,
-                    emit=_print_bridge_event,
-                )
-            except Exception as exc:  # noqa: BLE001 - streamed flash still needs a final result.
-                payload = _flash_exception_payload(
-                    exc,
-                    config=args.config,
-                    node=args.node,
-                    device=args.device,
-                )
+            payload = flash_payload(
+                config=args.config,
+                node=args.node,
+                device=args.device,
+                yes=args.yes,
+                base_image=args.base_image,
+                image_sha256=args.image_sha256,
+                enable_ssh=args.enable_ssh,
+                disable_ssh=args.disable_ssh,
+                emit=_print_bridge_event,
+            )
             print(json.dumps({"type": "result", **payload}), flush=True)
             return 0
         else:
@@ -186,32 +175,6 @@ def _add_flash_args(parser: argparse.ArgumentParser, *, include_yes: bool) -> No
 
 def _print_bridge_event(event: FlashEvent) -> None:
     print(json.dumps(event.to_dict()), flush=True)
-
-
-def _flash_exception_payload(
-    exc: Exception,
-    *,
-    config: str,
-    node: str,
-    device: str,
-) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "exit_code": 1,
-        "code": FlashErrorCode.FLASH.value,
-        "errors": [str(exc)],
-        "warnings": [],
-        "config_path": "",
-        "node": node,
-        "device": device,
-        "image": _best_image_details({}, config=config, node=node),
-        "plan": {},
-        "provision": {},
-        "provision_display": "",
-        "dry_run_info": "",
-        "inject_results": [],
-        "sudo_command": "",
-    }
 
 
 def _best_image_details(

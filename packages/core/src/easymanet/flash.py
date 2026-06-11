@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -31,6 +32,7 @@ SECRET_FIELD_NAMES = {"password", "root_password_hash"}
 SECRET_LIST_FIELD_NAMES = {"ssh_authorized_keys"}
 REDACTED_VALUE = "<redacted>"
 CUSTOM_IMAGE_VERSION = "custom"
+LOGGER = logging.getLogger(__name__)
 
 
 class FlashErrorCode(str, Enum):
@@ -45,6 +47,7 @@ class FlashErrorCode(str, Enum):
     FLASH = "flash"
     INJECT = "inject"
     FINISH = "finish"
+    INTERNAL = "internal"
 
 
 @dataclass(frozen=True)
@@ -378,6 +381,19 @@ def run_flash_workflow(
             errors=exc.errors,
             events=events,
             warnings=exc.warnings or warnings,
+            context=context,
+        )
+    except Exception as exc:  # noqa: BLE001 - API boundary returns structured failures.
+        message = f"Unexpected flash workflow error: {type(exc).__name__}: {exc}"
+        LOGGER.exception("Unexpected flash workflow error")
+        send("error", message, level="error")
+        return _result(
+            ok=False,
+            code=FlashErrorCode.INTERNAL,
+            exit_code=1,
+            errors=[message],
+            events=events,
+            warnings=warnings,
             context=context,
         )
 

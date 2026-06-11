@@ -142,17 +142,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 disable_ssh=args.disable_ssh,
             )
         elif args.command == "flash":
-            payload = flash_payload(
-                config=args.config,
-                node=args.node,
-                device=args.device,
-                yes=args.yes,
-                base_image=args.base_image,
-                image_sha256=args.image_sha256,
-                enable_ssh=args.enable_ssh,
-                disable_ssh=args.disable_ssh,
-                emit=_print_bridge_event,
-            )
+            try:
+                payload = flash_payload(
+                    config=args.config,
+                    node=args.node,
+                    device=args.device,
+                    yes=args.yes,
+                    base_image=args.base_image,
+                    image_sha256=args.image_sha256,
+                    enable_ssh=args.enable_ssh,
+                    disable_ssh=args.disable_ssh,
+                    emit=_print_bridge_event,
+                )
+            except Exception as exc:  # noqa: BLE001 - streamed flash still needs a final result.
+                payload = _flash_exception_payload(
+                    exc,
+                    config=args.config,
+                    node=args.node,
+                    device=args.device,
+                )
             print(json.dumps({"type": "result", **payload}), flush=True)
             return 0
         else:
@@ -178,6 +186,32 @@ def _add_flash_args(parser: argparse.ArgumentParser, *, include_yes: bool) -> No
 
 def _print_bridge_event(event: FlashEvent) -> None:
     print(json.dumps(event.to_dict()), flush=True)
+
+
+def _flash_exception_payload(
+    exc: Exception,
+    *,
+    config: str,
+    node: str,
+    device: str,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "exit_code": 1,
+        "code": FlashErrorCode.FLASH.value,
+        "errors": [str(exc)],
+        "warnings": [],
+        "config_path": "",
+        "node": node,
+        "device": device,
+        "image": _best_image_details({}, config=config, node=node),
+        "plan": {},
+        "provision": {},
+        "provision_display": "",
+        "dry_run_info": "",
+        "inject_results": [],
+        "sudo_command": "",
+    }
 
 
 def _best_image_details(

@@ -545,7 +545,13 @@ def resolve_base_image(
                 warnings,
             )
 
-    path = download_image(target, latest.version, latest.url, latest.sha256, force=download, emit=emit)
+    try:
+        path = download_image(target, latest.version, latest.url, latest.sha256, force=download, emit=emit)
+    except OSError as exc:
+        raise FlashWorkflowError(
+            FlashErrorCode.IMAGE,
+            f"Image download error: {exc}",
+        ) from exc
     return (
         str(path),
         _image_payload(

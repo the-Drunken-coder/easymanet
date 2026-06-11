@@ -62,6 +62,17 @@ def test_desktop_validate_resolves_workspace_fleet_name(tmp_path, monkeypatch):
     assert "point01" in payload["nodes"]
 
 
+def test_desktop_resolve_config_rejects_non_yaml_file(tmp_path):
+    config = tmp_path / "notes.txt"
+    config.write_text("not: fleet\n")
+
+    payload = payloads.resolve_config_payload(config=str(config))
+
+    assert payload["ok"] is False
+    assert payload["errors"] == ["Fleet config file must be .yml or .yaml"]
+    assert payload["config_path"] == str(config)
+
+
 def test_desktop_disks_payload_serializes_disk_info(monkeypatch):
     monkeypatch.setattr(payloads, "check_platform", lambda: None)
     monkeypatch.setattr(
@@ -219,6 +230,40 @@ def test_desktop_bridge_flash_streams_events_and_final_result(monkeypatch, capsy
     assert lines[-1]["type"] == "result"
     assert lines[-1]["ok"] is True
     assert "events" not in lines[-1]
+
+
+def test_desktop_bridge_flash_exception_still_emits_final_result(monkeypatch, capsys):
+    def fail_flash_payload(**_kwargs):
+        raise OSError("download failed")
+
+    monkeypatch.setattr(bridge, "flash_payload", fail_flash_payload)
+    monkeypatch.setattr(
+        bridge,
+        "_safe_flash_image_details",
+        lambda **_kwargs: {"target": "rpi4-mm6108-spi"},
+    )
+
+    exit_code = bridge.main(
+        [
+            "flash",
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--node",
+            "point01",
+            "--device",
+            "/dev/disk4",
+            "--yes",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["type"] == "result"
+    assert payload["ok"] is False
+    assert payload["code"] == FlashErrorCode.FLASH.value
+    assert payload["errors"] == ["download failed"]
+    assert payload["node"] == "point01"
+    assert payload["device"] == "/dev/disk4"
 
 
 def test_desktop_static_supports_electron_and_http_modes():

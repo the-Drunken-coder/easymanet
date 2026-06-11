@@ -15,7 +15,7 @@ from easymanet.download import (
 from easymanet.manifest import ManifestError, load_manifest
 from easymanet.platform import check_platform
 from easymanet.validate import validate
-from easymanet.workspace import resolve_fleet_config, workspace_payload
+from easymanet.workspace import FLEET_SUFFIXES, resolve_fleet_config, workspace_payload
 
 
 def state_payload() -> dict[str, Any]:
@@ -100,4 +100,6 @@ def resolve_config_payload(*, config: str) -> dict[str, Any]:
         return {"ok": False, "errors": ["Fleet config file does not exist"], "config_path": str(path)}
     if not path.is_file():
         return {"ok": False, "errors": ["Fleet config path is not a file"], "config_path": str(path)}
+    if path.suffix.lower() not in FLEET_SUFFIXES:
+        return {"ok": False, "errors": ["Fleet config file must be .yml or .yaml"], "config_path": str(path)}
     return {"ok": True, "config_path": str(Path(path).resolve())}

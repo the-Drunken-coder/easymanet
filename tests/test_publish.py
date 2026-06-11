@@ -52,6 +52,9 @@ def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
     desktop_pyproject = (output / "desktop" / "pyproject.toml").read_text()
 
     assert 'name = "easymanet-images"' in image_pyproject
+    assert 'requires-python = ">=3.10"' in image_pyproject
+    assert '"Programming Language :: Python :: 3.9"' not in image_pyproject
+    assert '"Programming Language :: Python :: 3.10"' in image_pyproject
     assert 'easymanet = "easymanet_cli.app:main"' in image_pyproject
     assert "apps/desktop/src" not in image_pyproject
     assert "tools/publish/src" not in image_pyproject

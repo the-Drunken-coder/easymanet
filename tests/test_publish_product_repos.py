@@ -86,6 +86,9 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert cli_pyproject["project"]["name"] == "easymanet"
     assert cli_pyproject["project"]["version"] == publish.project_version(ROOT / "pyproject.toml")
     assert cli_pyproject["project"]["license"] == "MIT"
+    assert cli_pyproject["project"]["requires-python"] == ">=3.10"
+    assert "Programming Language :: Python :: 3.9" not in cli_pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.10" in cli_pyproject["project"]["classifiers"]
     assert cli_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
     assert "apps/desktop/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
     assert "tools/publish/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]

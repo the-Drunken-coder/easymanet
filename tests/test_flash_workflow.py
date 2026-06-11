@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import easymanet.flash as flash
 from easymanet.inject import InjectError
@@ -97,6 +98,38 @@ def test_flash_workflow_privilege_error_is_classified(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.code is flash.FlashErrorCode.PRIVILEGE_REQUIRED
     assert result.errors == ["write access required"]
+
+
+def test_flash_workflow_download_failure_is_classified(monkeypatch):
+    def fail_download(*_args, **_kwargs):
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(
+        flash,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="1.6.5",
+            url="https://example.test/openmanet.img.gz",
+            sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(flash, "download_image", fail_download)
+
+    result = flash.run_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            download=True,
+            yes=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.IMAGE
+    assert result.errors == ["Image download error: network unavailable"]
+    assert result.events[-1].event_type == "error"
 
 
 def test_flash_workflow_inject_failure_reports_partial_write(tmp_path, monkeypatch):

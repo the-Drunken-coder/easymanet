@@ -209,7 +209,7 @@ SURFACES = {
 
 def selected_surface_specs(product: str) -> list[SurfaceSpec]:
     if product == "all":
-        return [SURFACES["images"], SURFACES["cli"], SURFACES["desktop"]]
+        return list(SURFACES.values())
     return [SURFACES[product]]
 
 

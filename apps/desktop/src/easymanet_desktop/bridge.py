@@ -185,11 +185,13 @@ def _best_image_details(
 ) -> dict[str, Any]:
     details = _safe_flash_image_details(config=config, node=node)
     merged = dict(details)
-    for key, value in image.items():
-        if value:
-            merged[key] = value
+    merged.update(image)
     path = str(merged.get("path") or "")
-    if path and not path.startswith("<") and not merged.get("cached_path"):
+    if (
+        path
+        and not path.startswith("<")
+        and ("path" in image or not merged.get("cached_path"))
+    ):
         merged["cached_path"] = merged["path"]
     return merged
 
@@ -216,10 +218,12 @@ def _sudo_flash_command(
     if disable_ssh:
         args.append("--disable-ssh")
 
-    cached_path = str(image.get("cached_path") or "")
+    cached_path = str(image.get("cached_path") or image.get("path") or "")
     sha256 = str(image.get("sha256") or "")
-    if cached_path and sha256:
-        args.extend(["--base-image", cached_path, "--image-sha256", sha256])
+    if cached_path:
+        args.extend(["--base-image", cached_path])
+        if sha256:
+            args.extend(["--image-sha256", sha256])
 
     return " ".join(shlex.quote(part) for part in args)
 

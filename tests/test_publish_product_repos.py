@@ -44,6 +44,7 @@ def test_publish_script_stays_decomposed():
 def test_repo_spec_source_paths_exist_in_current_layout():
     publish = load_publish_module()
 
+    assert publish.selected_specs("all") == list(publish.REPO_SPECS.values())
     for spec in publish.selected_specs("all"):
         for rel_path in spec.source_paths:
             assert (ROOT / rel_path).exists(), f"{spec.key} source path is missing: {rel_path}"

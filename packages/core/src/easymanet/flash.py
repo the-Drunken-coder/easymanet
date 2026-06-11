@@ -335,12 +335,14 @@ def run_flash_workflow(
             context["inject_results"] = inject_results
         except InjectError as exc:
             warnings.append(
-                "Image was written but boot-partition provisioning failed. "
-                "Re-run the full flash command after fixing the issue."
+                "Image was written but boot-partition provisioning failed: "
+                f"{exc}. Check that the boot partition is mounted, writable, "
+                "and healthy, then re-run the flash command after fixing the issue."
             )
             raise FlashWorkflowError(
                 FlashErrorCode.INJECT,
-                f"Boot payload error: {exc}",
+                "Boot payload error: "
+                f"{exc}. Check the boot partition mount, filesystem, and permissions before retrying.",
                 warnings=warnings,
             ) from exc
 

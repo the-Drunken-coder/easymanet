@@ -134,10 +134,14 @@ def test_flash_workflow_download_failure_is_classified(monkeypatch):
 
 def test_flash_workflow_unexpected_failure_is_internal(monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
+
+    def fail_resolve_fleet_config(_config):
+        raise RuntimeError("boom")
+
     monkeypatch.setattr(
         flash,
         "resolve_fleet_config",
-        lambda _config: (_ for _item in ()).throw(RuntimeError("boom")),
+        fail_resolve_fleet_config,
     )
 
     result = flash.run_flash_workflow(
@@ -171,8 +175,8 @@ def test_flash_workflow_inject_failure_reports_partial_write(tmp_path, monkeypat
 
     assert result.ok is False
     assert result.code is flash.FlashErrorCode.INJECT
-    assert "Boot payload error: boot partition missing" in result.errors
-    assert any("Image was written" in warning for warning in result.warnings)
+    assert any("Boot payload error: boot partition missing" in error for error in result.errors)
+    assert any("mounted, writable, and healthy" in warning for warning in result.warnings)
 
 
 def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):

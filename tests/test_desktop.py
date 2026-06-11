@@ -190,6 +190,36 @@ def test_desktop_bridge_flash_returns_sudo_fallback_on_privilege_error(monkeypat
     assert "--base-image /tmp/openmanet.img.gz --image-sha256 " + "a" * 64 in payload["sudo_command"]
 
 
+def test_desktop_bridge_sudo_fallback_preserves_unverified_custom_image(monkeypatch):
+    def fake_run_flash_workflow(options, emit=None):
+        del options, emit
+        return SimpleNamespace(
+            to_dict=lambda include_events=False: {
+                "ok": False,
+                "code": FlashErrorCode.PRIVILEGE_REQUIRED.value,
+                "errors": ["Write access is required"],
+                "image": {"path": "/tmp/custom-openmanet.img.gz", "sha256": ""},
+            }
+        )
+
+    monkeypatch.setattr(bridge, "run_flash_workflow", fake_run_flash_workflow)
+    monkeypatch.setattr(
+        bridge,
+        "_safe_flash_image_details",
+        lambda **_kwargs: {"cached_path": "/tmp/default.img.gz", "sha256": "b" * 64},
+    )
+
+    payload = bridge.flash_payload(
+        config="/Users/example/fleet.yml",
+        node="point01",
+        device="/dev/disk4",
+        yes=True,
+    )
+
+    assert "--base-image /tmp/custom-openmanet.img.gz" in payload["sudo_command"]
+    assert "--image-sha256" not in payload["sudo_command"]
+
+
 def test_desktop_bridge_flash_streams_events_and_final_result(monkeypatch, capsys):
     def fake_run_flash_workflow(options, emit=None):
         assert options.yes is True

@@ -2,9 +2,9 @@ const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("elect
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const fleetExtensions = new Set([".yml", ".yaml"]);
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const bridgeTimeoutMs = 15000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
@@ -112,7 +112,7 @@ function registerIpc() {
     }
     return runBridge(["flash-plan", ...flashArgs(validated)], { timeoutMs: flashBridgeTimeoutMs });
   });
-  ipcMain.handle("easymanet:flash", async (_event, payload = {}) => {
+  ipcMain.handle("easymanet:flash", async (event, payload = {}) => {
     const validated = await validateFlashPayload(payload);
     if (!validated.ok) {
       return validated;
@@ -130,7 +130,11 @@ function registerIpc() {
     if (confirmed.response !== 0) {
       return { ok: false, canceled: true, errors: ["Flash canceled"] };
     }
-    return runBridge(["flash", ...flashArgs(validated), "--yes"], { timeoutMs: flashBridgeTimeoutMs });
+    return runBridge(["flash", ...flashArgs(validated), "--yes"], {
+      timeoutMs: flashBridgeTimeoutMs,
+      streamEvents: true,
+      webContents: event.sender,
+    });
   });
   ipcMain.handle("easymanet:copy-text", (_event, payload = {}) => {
     const text = typeof payload.text === "string" ? payload.text : "";
@@ -186,6 +190,7 @@ function runBridge(args, options = {}) {
     });
     let stdout = "";
     let stderr = "";
+    let finalPayload = null;
     let settled = false;
 
     const finish = (payload) => {
@@ -205,6 +210,11 @@ function runBridge(args, options = {}) {
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
+      if (options.streamEvents) {
+        stdout = processBridgeLines(stdout, options, (payload) => {
+          finalPayload = payload;
+        });
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -213,6 +223,27 @@ function runBridge(args, options = {}) {
       finish({ ok: false, errors: [error.message] });
     });
     child.on("close", () => {
+      if (options.streamEvents) {
+        const remaining = stdout.trim();
+        if (remaining) {
+          try {
+            const payload = JSON.parse(remaining);
+            if (payload.type === "result") {
+              finalPayload = payload;
+            } else if (payload.type === "event" && options.webContents) {
+              options.webContents.send("easymanet:flash-event", payload);
+            }
+          } catch (_error) {
+            // The normal parse error below will report the raw bridge output.
+          }
+        }
+        if (finalPayload) {
+          finish(finalPayload);
+          return;
+        }
+        finish({ ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no flash result"], raw: stdout.trim() });
+        return;
+      }
       const text = stdout.trim();
       if (!text) {
         finish({ ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no output"] });
@@ -225,6 +256,35 @@ function runBridge(args, options = {}) {
       }
     });
   });
+}
+
+function processBridgeLines(buffer, options, setFinalPayload) {
+  const lines = buffer.split(/\r?\n/);
+  const tail = lines.pop() || "";
+  for (const line of lines) {
+    const text = line.trim();
+    if (!text) {
+      continue;
+    }
+    try {
+      const payload = JSON.parse(text);
+      if (payload.type === "result") {
+        setFinalPayload(payload);
+      } else if (payload.type === "event" && options.webContents) {
+        options.webContents.send("easymanet:flash-event", payload);
+      }
+    } catch (_error) {
+      if (options.webContents) {
+        options.webContents.send("easymanet:flash-event", {
+          type: "event",
+          event_type: "bridge_output",
+          level: "info",
+          message: text,
+        });
+      }
+    }
+  }
+  return tail;
 }
 
 async function validatePayload(payload) {
@@ -245,7 +305,10 @@ async function validatePayload(payload) {
     return { ok: false, errors: ["Node name contains unsupported characters"] };
   }
 
-  const resolved = await resolveConfigPath(config);
+  const resolved = await resolveConfigPath(config, {
+    runBridge,
+    homeDir: () => app.getPath("home"),
+  });
   if (!resolved.ok) {
     return resolved;
   }
@@ -284,67 +347,6 @@ function flashArgs(payload) {
   return args;
 }
 
-async function resolveConfigPath(config) {
-  const expanded = expandHome(config);
-  if (path.isAbsolute(expanded)) {
-    return existingFleetFile(expanded);
-  }
-
-  const state = await runBridge(["state"]);
-  if (!state.ok || !state.workspace || !state.workspace.fleets_dir) {
-    return { ok: false, errors: state.errors || ["Fleets folder is unavailable"] };
-  }
-  const fleetRoot = path.resolve(state.workspace.fleets_dir);
-  const candidate = path.resolve(fleetRoot, expanded);
-  if (!isInside(fleetRoot, candidate)) {
-    return { ok: false, errors: ["Fleet config path must stay inside the Fleets folder"] };
-  }
-  return existingFleetFile(candidate);
-}
-
-function existingFleetFile(configPath) {
-  for (const candidate of fleetPathCandidates(path.resolve(configPath))) {
-    if (!fleetExtensions.has(path.extname(candidate).toLowerCase())) {
-      continue;
-    }
-    try {
-      const stat = fs.statSync(candidate);
-      if (stat.isFile()) {
-        return { ok: true, config: candidate };
-      }
-    } catch (_error) {
-      // Try the next extension candidate.
-    }
-  }
-  return { ok: false, errors: ["Fleet config file must exist and use .yml or .yaml"] };
-}
-
-function fleetPathCandidates(configPath) {
-  if (path.extname(configPath)) {
-    return [configPath];
-  }
-  return [configPath, `${configPath}.yml`, `${configPath}.yaml`];
-}
-
-function expandHome(value) {
-  if (value === "~") {
-    return app.getPath("home");
-  }
-  if (value.startsWith(`~${path.sep}`) || value.startsWith("~/") || value.startsWith("~\\")) {
-    return path.join(app.getPath("home"), value.slice(2));
-  }
-  return value;
-}
-
-function hasTraversalSegment(value) {
-  return value.split(/[\\/]+/).some((part) => part === "..");
-}
-
-function isInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
-
 function pythonPath() {
   if (process.env.EASYMANET_PYTHON) {
     return process.env.EASYMANET_PYTHON;
@@ -371,10 +373,7 @@ function bridgeEnv() {
   }
   const sourceRoots = process.env.EASYMANET_ELECTRON_NO_SOURCE_PATHS === "1" ? [] : [
     path.join(repoRoot, "packages", "core", "src"),
-    path.join(repoRoot, "packages", "image", "src"),
-    path.join(repoRoot, "apps", "cli", "src"),
     path.join(repoRoot, "apps", "desktop", "src"),
-    path.join(repoRoot, "tools", "publish", "src"),
   ];
   const existing = process.env.PYTHONPATH ? process.env.PYTHONPATH.split(path.delimiter) : [];
   return {

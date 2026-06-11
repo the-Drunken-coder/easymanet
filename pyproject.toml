@@ -62,7 +62,6 @@ include = [
 
 [tool.setuptools.package-data]
 "easymanet_desktop" = ["static/*"]
-"easymanet_publish" = ["templates/*/.github/workflows/*.yml"]
 
 [tool.setuptools.data-files]
 "share/easymanet/images/openmanet/provisioning" = [

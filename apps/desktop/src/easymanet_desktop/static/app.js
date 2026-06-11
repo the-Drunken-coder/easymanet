@@ -32,6 +32,8 @@ if (!nativeApi) {
   chooseConfig.hidden = true;
   openFleetsFolder.hidden = true;
   flashPanel.hidden = true;
+} else if (nativeApi.onFlashEvent) {
+  nativeApi.onFlashEvent(renderFlashEvent);
 }
 
 document.getElementById("refresh").addEventListener("click", () => {
@@ -305,6 +307,21 @@ function renderFlashStatus(message) {
   copySudo.textContent = "Copy Sudo Command";
   flashOutput.className = "";
   flashOutput.textContent = message;
+}
+
+function renderFlashEvent(event) {
+  if (!event || !event.message) {
+    return;
+  }
+  const prefix = event.level === "warning" ? "warning: " : event.level === "error" ? "error: " : "";
+  const current = flashOutput.textContent.trim();
+  const next = `${prefix}${event.message}`;
+  flashOutput.textContent = current ? `${current}\n${next}` : next;
+  if (event.level === "warning") {
+    flashOutput.className = "status-warn";
+  } else if (event.level === "error") {
+    flashOutput.className = "status-bad";
+  }
 }
 
 function renderFlash(payload) {

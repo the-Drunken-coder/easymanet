@@ -32,9 +32,9 @@ def image_cache(tmp_path, monkeypatch):
     cache.mkdir()
     manifest = tmp_path / "images.json"
     version_file = tmp_path / "version.json"
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
-    monkeypatch.setattr(download, "VERSION_FILE", version_file)
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "images_manifest_path", lambda: manifest)
+    monkeypatch.setattr(download, "version_file_path", lambda: version_file)
     return SimpleNamespace(cache=cache, manifest=manifest, version_file=version_file)
 
 
@@ -170,9 +170,22 @@ def test_get_cached_image_rejects_checksum_mismatch(image_cache):
     assert download.get_cached_image("rpi4-mm6108-spi") is None
 
 
+def test_download_paths_resolve_workspace_after_import(tmp_path, monkeypatch):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+
+    monkeypatch.setenv("EASYMANET_WORKSPACE", str(first))
+    assert download.cache_dir() == first / "Images"
+
+    monkeypatch.setenv("EASYMANET_WORKSPACE", str(second))
+    assert download.cache_dir() == second / "Images"
+    assert download.images_manifest_path() == second / "Images" / "images.json"
+    assert download.version_file_path() == second / "Images" / "version.json"
+
+
 def test_download_image_rejects_non_https_url(tmp_path, monkeypatch):
-    monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
-    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download, "cache_dir", lambda: tmp_path / "images")
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
 
     with pytest.raises(OSError, match="Unsupported image URL scheme"):
         download.download_image("rpi4-mm6108-spi", "test", "file:///etc/passwd", "0" * 64)
@@ -194,19 +207,30 @@ def test_download_image_verifies_sha256(tmp_path, monkeypatch):
     body = compressed.getvalue()
     expected = hashlib.sha256(body).hexdigest()
 
-    monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
-    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download, "cache_dir", lambda: tmp_path / "images")
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
     monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: BytesResponse(body))
+    events = []
 
     path = download.download_image(
         "rpi4-mm6108-spi",
         "test",
         "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
         expected,
+        emit=events.append,
     )
 
     assert path.read_bytes() == body
     assert _part_files(path.parent) == []
+    assert [event["type"] for event in events] == [
+        "download_started",
+        "download_url",
+        "download_progress",
+        "download_completed",
+    ]
+    assert events[2]["downloaded_bytes"] == len(body)
+    assert events[2]["total_bytes"] == len(body)
+    assert events[2]["percent"] == 100
 
 
 def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
@@ -216,8 +240,8 @@ def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
         f.write(payload)
     body = compressed.getvalue()
 
-    monkeypatch.setattr(download, "CACHE_DIR", tmp_path / "images")
-    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download, "cache_dir", lambda: tmp_path / "images")
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
     monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: BytesResponse(body))
 
     with pytest.raises(OSError, match="SHA-256 mismatch"):
@@ -247,8 +271,8 @@ def test_download_image_removes_part_file_on_stream_error(tmp_path, monkeypatch)
             pass
 
     cache = tmp_path / "images"
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
     monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: FailingResponse())
 
     with pytest.raises(OSError, match="disk full"):
@@ -287,8 +311,8 @@ def test_download_image_preserves_existing_cache_when_force_download_fails(tmp_p
     cache.mkdir()
     dest = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
     dest.write_bytes(existing_body)
-    monkeypatch.setattr(download, "CACHE_DIR", cache)
-    monkeypatch.setattr(download, "VERSION_FILE", tmp_path / "version.json")
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
     monkeypatch.setattr(download.urllib.request, "urlopen", lambda *_a, **_k: FailingResponse())
 
     with pytest.raises(TimeoutError, match="temporary read timeout"):
@@ -334,7 +358,7 @@ def test_pick_release_asset_uses_fuzzy_match_when_exact_name_missing(capsys):
     assert result is not None
     assert result.version == "2.0.0"
     assert result.url == "https://example.com/custom.img.gz"
-    assert "Using release asset" in capsys.readouterr().out
+    assert "Using release asset" in capsys.readouterr().err
 
 
 def test_pick_release_asset_uses_github_asset_digest():
@@ -433,7 +457,7 @@ def test_check_latest_version_treats_invalid_configured_sha256_as_missing(
             "sha256": "not-a-sha256",
         }
     }))
-    monkeypatch.setattr(download, "IMAGES_MANIFEST", manifest)
+    monkeypatch.setattr(download, "images_manifest_path", lambda: manifest)
 
     result = download.check_latest_version("rpi4-mm6108-spi")
 

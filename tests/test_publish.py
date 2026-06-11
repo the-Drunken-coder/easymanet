@@ -13,15 +13,15 @@ def test_export_public_surfaces_writes_local_outputs(tmp_path):
 
     assert record["source_ref"] == "abc123"
     assert record["subrepos_configured"] is False
-    for surface in ("image", "cli", "desktop"):
+    for surface in ("images", "cli", "desktop"):
         assert (output / surface / "README.generated.md").exists()
-        assert (output / surface / ".github" / "workflows" / "easymanet-bootstrap.yml").exists()
+        assert (output / surface / ".github" / "workflows" / "bootstrap-release.yml").exists()
         assert surface in record["surfaces"]
 
     record_path = output / EXPORT_RECORD
     assert record_path.exists()
     payload = json.loads(record_path.read_text())
-    assert payload["surfaces"]["image"]["files"]
+    assert payload["surfaces"]["images"]["files"]
 
 
 def test_export_surfaces_include_installable_python_roots(tmp_path):
@@ -29,7 +29,7 @@ def test_export_surfaces_include_installable_python_roots(tmp_path):
 
     record = export_public_surfaces(output, source_ref="abc123")
 
-    image_files = set(record["surfaces"]["image"]["files"])
+    image_files = set(record["surfaces"]["images"]["files"])
     cli_files = set(record["surfaces"]["cli"]["files"])
     desktop_files = set(record["surfaces"]["desktop"]["files"])
     assert "pyproject.toml" in image_files
@@ -47,11 +47,11 @@ def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
 
     export_public_surfaces(output, source_ref="abc123")
 
-    image_pyproject = (output / "image" / "pyproject.toml").read_text()
+    image_pyproject = (output / "images" / "pyproject.toml").read_text()
     cli_pyproject = (output / "cli" / "pyproject.toml").read_text()
     desktop_pyproject = (output / "desktop" / "pyproject.toml").read_text()
 
-    assert 'name = "easymanet-image"' in image_pyproject
+    assert 'name = "easymanet-images"' in image_pyproject
     assert 'easymanet = "easymanet_cli.app:main"' in image_pyproject
     assert "apps/desktop/src" not in image_pyproject
     assert "tools/publish/src" not in image_pyproject
@@ -59,7 +59,7 @@ def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
     assert "easymanet-publish" not in image_pyproject
     assert '"rich>=13"' not in image_pyproject
 
-    assert 'name = "easymanet-cli"' in cli_pyproject
+    assert 'name = "easymanet"' in cli_pyproject
     assert 'easymanet = "easymanet_cli.app:main"' in cli_pyproject
     assert "apps/desktop/src" not in cli_pyproject
     assert "tools/publish/src" not in cli_pyproject
@@ -82,20 +82,20 @@ def test_export_templates_dispatch_and_checkout_requested_refs(tmp_path):
     export_public_surfaces(output, source_ref="abc123")
 
     cli_bootstrap = (
-        output / "cli" / ".github" / "workflows" / "easymanet-bootstrap.yml"
+        output / "cli" / ".github" / "workflows" / "bootstrap-release.yml"
     ).read_text()
     image_bootstrap = (
-        output / "image" / ".github" / "workflows" / "easymanet-bootstrap.yml"
+        output / "images" / ".github" / "workflows" / "bootstrap-release.yml"
     ).read_text()
-    cli_release = (output / "cli" / ".github" / "workflows" / "release-cli.yml").read_text()
+    cli_release = (output / "cli" / ".github" / "workflows" / "cli-release.yml").read_text()
     desktop_release = (
-        output / "desktop" / ".github" / "workflows" / "release-desktop.yml"
+        output / "desktop" / ".github" / "workflows" / "desktop-release.yml"
     ).read_text()
 
-    assert "gh workflow run release-cli.yml -R ${{ github.repository }}" in cli_bootstrap
-    assert "-R ${{ github.repository }}" in image_bootstrap
-    assert "ref: ${{ inputs.source_ref || github.sha }}" in cli_release
-    assert "ref: ${{ inputs.source_ref || github.sha }}" in desktop_release
+    assert "types: [easymanet-cli-release]" in cli_bootstrap
+    assert '--repo "$GITHUB_REPOSITORY"' in image_bootstrap
+    assert "workflow_dispatch" in cli_release
+    assert "workflow_dispatch" in desktop_release
 
 
 def test_export_copy_paths_fails_on_missing_sources(tmp_path):

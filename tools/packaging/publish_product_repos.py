@@ -10,15 +10,29 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PUBLISH_SRC = ROOT / "tools" / "publish" / "src"
+if str(PUBLISH_SRC) not in sys.path:
+    sys.path.insert(0, str(PUBLISH_SRC))
+
+from easymanet_publish.surfaces import (  # noqa: E402
+    CLI_RUNTIME_SOURCE_PATHS,
+    COMMON_PRODUCT_SOURCE_PATHS,
+    PRODUCT_DOC_PATHS,
+    PRODUCT_TEST_PATHS,
+    SURFACES,
+    SurfaceSpec,
+    render_surface_pyproject,
+    selected_surface_specs,
+)
+
 DEFAULT_OWNER = "the-Drunken-coder"
 DEFAULT_OUTPUT_DIR = ROOT / "build" / "product-repos"
 GITHUB_HOST = "github.com"
-TEMPLATE_ROOT = ROOT / "product_repos" / "templates"
 
 
 def existing_path(*candidates: str) -> str:
@@ -32,107 +46,8 @@ def optional_existing_paths(*candidates: str) -> tuple[str, ...]:
     return tuple(rel_path for rel_path in candidates if (ROOT / rel_path).exists())
 
 
-PRODUCT_DOC_PATHS = (
-    "docs/README.md",
-    "docs/architecture.md",
-    "docs/flashing.md",
-    "docs/lessons-learned.md",
-    "docs/manifest.md",
-    "docs/openmanet-config-investigation.md",
-)
-
-PRODUCT_TEST_PATHS = (
-    "tests/shell_harness",
-    "tests/test_build.py",
-    "tests/test_cli.py",
-    "tests/test_cli_common.py",
-    "tests/test_disks.py",
-    "tests/test_download.py",
-    "tests/test_extra_packages.py",
-    "tests/test_firstboot.py",
-    "tests/test_image.py",
-    "tests/test_inject.py",
-    "tests/test_manifest.py",
-    "tests/test_packaging.py",
-    "tests/test_privileges.py",
-    "tests/test_provision_behavior.py",
-    "tests/test_render.py",
-    "tests/test_sysctl.py",
-    "tests/test_validate.py",
-)
-
-COMMON_PRODUCT_SOURCE_PATHS = (
-    ".gitignore",
-    "pyproject.toml",
-    *PRODUCT_DOC_PATHS,
-    existing_path("packages/core/src/easymanet", "easymanet"),
-    "examples/three-node-field-mesh.yml",
-    existing_path("images/openmanet/provisioning", "provisioning"),
-    existing_path("tools/packaging/verify_overlay_packaging.py", "scripts/verify_overlay_packaging.py"),
-    *optional_existing_paths("tools/release_smoke.py"),
-    *PRODUCT_TEST_PATHS,
-)
-
-CLI_RUNTIME_SOURCE_PATHS = optional_existing_paths("apps/cli", "packages/image")
-
-CLI_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PATHS
-
-IMAGE_PRODUCT_SOURCE_PATHS = COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PATHS + (
-    "tests/test_image_workflows.py",
-)
-
-DESKTOP_CORE_PACKAGE_PATH = existing_path("packages/core/src/easymanet", "easymanet")
-DESKTOP_PRODUCT_SOURCE_PATHS = (
-    ".gitignore",
-    "docs/manifest.md",
-    "examples/three-node-field-mesh.yml",
-    DESKTOP_CORE_PACKAGE_PATH,
-    "apps/cli",
-    "apps/desktop",
-    "tests/test_desktop.py",
-)
-
-
-@dataclass(frozen=True)
-class RepoSpec:
-    key: str
-    name: str
-    description: str
-    source_paths: tuple[str, ...]
-    template_dir: Path
-    dispatch_event: str
-    release_workflow: str
-
-
-REPO_SPECS = {
-    "images": RepoSpec(
-        key="images",
-        name="easymanet-images",
-        description="Public firmware image factory for EasyMANET/OpenMANET releases.",
-        source_paths=IMAGE_PRODUCT_SOURCE_PATHS,
-        template_dir=TEMPLATE_ROOT / "images",
-        dispatch_event="easymanet-image-release",
-        release_workflow="image-release.yml",
-    ),
-    "cli": RepoSpec(
-        key="cli",
-        name="easymanet-cli",
-        description="Public CLI and automation surface for EasyMANET.",
-        source_paths=CLI_PRODUCT_SOURCE_PATHS,
-        template_dir=TEMPLATE_ROOT / "cli",
-        dispatch_event="easymanet-cli-release",
-        release_workflow="cli-release.yml",
-    ),
-    "desktop": RepoSpec(
-        key="desktop",
-        name="easymanet-desktop",
-        description="Public local-first desktop operator console for EasyMANET.",
-        source_paths=DESKTOP_PRODUCT_SOURCE_PATHS,
-        template_dir=TEMPLATE_ROOT / "desktop",
-        dispatch_event="easymanet-desktop-release",
-        release_workflow="desktop-release.yml",
-    ),
-}
+RepoSpec = SurfaceSpec
+REPO_SPECS = SURFACES
 
 
 def run(
@@ -159,9 +74,7 @@ def git_output(args: list[str], *, cwd: Path = ROOT) -> str:
 
 
 def selected_specs(product: str) -> list[RepoSpec]:
-    if product == "all":
-        return [REPO_SPECS["images"], REPO_SPECS["cli"], REPO_SPECS["desktop"]]
-    return [REPO_SPECS[product]]
+    return selected_surface_specs(product)
 
 
 def tracked_files_for(rel_path: str) -> tuple[str, ...]:
@@ -189,12 +102,13 @@ def copy_source_path(rel_path: str, target_root: Path) -> None:
 
 
 def copy_template_tree(spec: RepoSpec, target_root: Path) -> None:
-    if not spec.template_dir.is_dir():
-        raise FileNotFoundError(f"Template directory does not exist: {spec.template_dir}")
+    template_dir = spec.template_dir(ROOT)
+    if not template_dir.is_dir():
+        raise FileNotFoundError(f"Template directory does not exist: {template_dir}")
 
-    for src in sorted(spec.template_dir.rglob("*")):
+    for src in sorted(template_dir.rglob("*")):
         if src.is_file():
-            dest = target_root / src.relative_to(spec.template_dir)
+            dest = target_root / src.relative_to(template_dir)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
 
@@ -210,7 +124,7 @@ def generation_metadata(spec: RepoSpec, source_ref: str, source_sha: str) -> str
 This repository is a generated EasyMANET public product surface.
 
 - Product key: `{spec.key}`
-- Public repo: `{spec.name}`
+- Public repo: `{spec.repo_name}`
 - Authoring repo: `the-Drunken-coder/easymanet`
 - Source ref: `{source_ref}`
 - Source commit: `{source_sha}`
@@ -222,7 +136,7 @@ not drift from the shared EasyMANET model.
 
 
 def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha: str) -> Path:
-    repo_dir = output_dir / spec.name
+    repo_dir = output_dir / spec.repo_name
     if repo_dir.exists():
         shutil.rmtree(repo_dir)
     repo_dir.mkdir(parents=True)
@@ -231,95 +145,12 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
         copy_source_path(rel_path, repo_dir)
 
     copy_template_tree(spec, repo_dir)
-    if spec.key == "cli":
-        write_text_file(repo_dir / "pyproject.toml", cli_surface_pyproject())
-    if spec.key == "desktop":
-        write_text_file(repo_dir / "pyproject.toml", desktop_surface_pyproject())
+    write_text_file(
+        repo_dir / "pyproject.toml",
+        render_surface_pyproject(spec, project_version(ROOT / "pyproject.toml")),
+    )
     write_text_file(repo_dir / "REPO_GENERATION.md", generation_metadata(spec, source_ref, source_sha))
     return repo_dir
-
-
-def cli_surface_pyproject() -> str:
-    return with_project_version(
-        (TEMPLATE_ROOT / "cli" / "pyproject.toml").read_text(),
-        project_version(ROOT / "pyproject.toml"),
-    )
-
-
-def desktop_surface_pyproject() -> str:
-    version = project_version(ROOT / "pyproject.toml")
-    core_package_root = package_find_root(DESKTOP_CORE_PACKAGE_PATH)
-    return f"""[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "easymanet-desktop"
-version = "{version}"
-description = "Local-first EasyMANET desktop operator console"
-readme = "README.md"
-requires-python = ">=3.9"
-license = "MIT"
-authors = [
-    {{name = "EasyMANET Contributors"}}
-]
-keywords = ["openmanet", "mesh", "provisioning", "desktop"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: System Administrators",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Topic :: System :: Installation/Setup",
-    "Topic :: System :: Systems Administration",
-]
-dependencies = [
-    "typer>=0.9",
-    "pyyaml>=6",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7",
-    "pytest-cov",
-    "setuptools>=68",
-    "tomli>=2; python_version < '3.11'",
-    "wheel",
-]
-
-[project.scripts]
-easymanet-desktop = "easymanet_desktop.server:main"
-
-[tool.setuptools.packages.find]
-where = [
-    "{core_package_root}",
-    "apps/cli/src",
-    "apps/desktop/src",
-]
-include = [
-    "easymanet*",
-    "easymanet_cli*",
-    "easymanet_desktop*",
-]
-
-[tool.setuptools.package-data]
-"easymanet_desktop" = ["static/*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-pythonpath = [
-    "{core_package_root}",
-    "apps/desktop/src",
-    ".",
-]
-"""
-
-
-def package_find_root(package_path: str) -> str:
-    parent = Path(package_path).parent.as_posix()
-    return "." if parent in {"", "."} else parent
 
 
 def project_version(pyproject_path: Path) -> str:
@@ -329,22 +160,9 @@ def project_version(pyproject_path: Path) -> str:
     return match.group(1)
 
 
-def with_project_version(pyproject_text: str, version: str) -> str:
-    updated, count = re.subn(
-        r'^version = "[^"]+"$',
-        f'version = "{version}"',
-        pyproject_text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    if count != 1:
-        raise ValueError("Could not replace project version in pyproject template")
-    return updated
-
-
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:
     result = run(
-        ["gh", "repo", "view", f"{owner}/{spec.name}", "--json", "name"],
+        ["gh", "repo", "view", f"{owner}/{spec.repo_name}", "--json", "name"],
         env=github_cli_env(),
         check=False,
     )
@@ -357,7 +175,7 @@ def create_github_repo(owner: str, spec: RepoSpec) -> None:
             "gh",
             "repo",
             "create",
-            f"{owner}/{spec.name}",
+            f"{owner}/{spec.repo_name}",
             "--public",
             "--description",
             spec.description,
@@ -383,7 +201,7 @@ def github_cli_env() -> dict[str, str] | None:
 
 
 def remote_url(owner: str, spec: RepoSpec) -> str:
-    return f"https://{GITHUB_HOST}/{owner}/{spec.name}.git"
+    return f"https://{GITHUB_HOST}/{owner}/{spec.repo_name}.git"
 
 
 def git_auth_env() -> dict[str, str] | None:
@@ -458,7 +276,7 @@ def ensure_worktree(owner: str, spec: RepoSpec, worktree_dir: Path) -> str:
 
 
 def sync_to_remote(owner: str, spec: RepoSpec, generated_dir: Path, output_dir: Path, source_sha: str) -> str | None:
-    worktree_dir = output_dir.parent / "product-repo-worktrees" / spec.name
+    worktree_dir = output_dir.parent / "product-repo-worktrees" / spec.repo_name
     branch = ensure_worktree(owner, spec, worktree_dir)
     clear_worktree(worktree_dir)
     shutil.copytree(generated_dir, worktree_dir, dirs_exist_ok=True)
@@ -493,7 +311,7 @@ def dispatch_release(owner: str, spec: RepoSpec, payload: dict[str, str]) -> Non
             "api",
             "--method",
             "POST",
-            f"repos/{owner}/{spec.name}/dispatches",
+            f"repos/{owner}/{spec.repo_name}/dispatches",
             "--input",
             "-",
         ],
@@ -555,11 +373,11 @@ def main() -> int:
     payload = build_payload(args, source_ref, source_sha)
     for spec in selected_specs(args.product):
         generated_dir = generate_repo(spec, args.output_dir, source_ref, source_sha)
-        print(f"generated {spec.name}: {generated_dir}")
+        print(f"generated {spec.repo_name}: {generated_dir}")
 
         if args.create_missing and not github_repo_exists(args.remote_owner, spec):
             create_github_repo(args.remote_owner, spec)
-            print(f"created {args.remote_owner}/{spec.name}")
+            print(f"created {args.remote_owner}/{spec.repo_name}")
 
         commit_sha = None
         publish_synced = False
@@ -567,15 +385,15 @@ def main() -> int:
             commit_sha = sync_to_remote(args.remote_owner, spec, generated_dir, args.output_dir, source_sha)
             publish_synced = True
             if commit_sha:
-                print(f"pushed {args.remote_owner}/{spec.name}@{commit_sha}")
+                print(f"pushed {args.remote_owner}/{spec.repo_name}@{commit_sha}")
             else:
-                print(f"no changes for {args.remote_owner}/{spec.name}")
+                print(f"no changes for {args.remote_owner}/{spec.repo_name}")
 
         if args.dispatch and publish_synced:
             dispatch_release(args.remote_owner, spec, payload)
-            print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.name}")
+            print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.repo_name}")
         elif args.dispatch:
-            print(f"skipped dispatch for {args.remote_owner}/{spec.name}: publish sync did not run")
+            print(f"skipped dispatch for {args.remote_owner}/{spec.repo_name}: publish sync did not run")
 
     return 0
 

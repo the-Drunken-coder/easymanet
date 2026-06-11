@@ -72,16 +72,23 @@ before falling back to filename-based image discovery.
 
 ## Public Repositories
 
-The current implementation intentionally does not configure public
-subrepositories, credentials, protected branches, remotes, or dispatch
-targets. Instead, `easymanet-publish export` writes local generated
-surfaces under `dist/public-surfaces/` and records a provenance file
-named `easymanet-public-surfaces.json`.
+Public product repositories are generated from this authoring monorepo rather
+than edited by hand. The authoritative surface definitions live in
+`easymanet_publish.surfaces` and are consumed by both:
 
-Exported surfaces also receive small bootstrap workflow templates under
-`.github/workflows/`. Those templates are inert until a later setup step
-publishes them into actual public repositories and configures dispatch
-credentials.
+- `easymanet-publish export`, which writes local previews under
+  `dist/public-surfaces/` and records `easymanet-public-surfaces.json`
+- `.github/workflows/publish-product-repos.yml`, which runs
+  `tools/packaging/publish_product_repos.py` to generate, optionally push, and
+  optionally dispatch release workflows in the public repositories
 
-Those local exports are the handoff point for later public repository
-setup.
+The generated public repositories are:
+
+| Product | Public repo | Purpose |
+| --- | --- | --- |
+| `images` | `easymanet-images` | Firmware image build and image release surface. |
+| `cli` | `easymanet-cli` | CLI/PyPI release and automation surface. |
+| `desktop` | `easymanet-desktop` | Electron desktop packaging and release surface. |
+
+Normal development stays in this authoring repo. Public repos should be treated
+as generated outputs with provenance in `REPO_GENERATION.md`.

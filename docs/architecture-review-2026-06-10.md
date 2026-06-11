@@ -4,6 +4,10 @@ Scope: high-level design review of the full monorepo at v0.2.0
 (`HEAD` ≈ `14bd4ce`). Focus is architecture and cross-surface seams, not
 line-level bugs.
 
+Snapshot note: this review records the pre-fix `14bd4ce` architecture state;
+the PR that adds this document also addresses Issues 1-3 and several smaller
+items below.
+
 Overall verdict: the core model is sound — the pipeline shape
 (manifest → validate → render → flash → inject → first boot), the
 host/device split, the safety layering around flashing, and the
@@ -242,6 +246,11 @@ helpers), but it is non-obvious and embeds `sys.executable` paths.
 ---
 
 ## Suggested priority
+
+PR alignment note: this priority list described the ideal order from the
+`14bd4ce` snapshot. This PR implements the Issue 1 shared core flash workflow
+and streaming execution, the Issue 2 canonical surface registry, and the Issue
+3 typed config/provision model while preserving v1 shallow merge semantics.
 
 1. Issue 1 — promote flash orchestration into core with structured
    results + progress events (also resolves the layering violation and

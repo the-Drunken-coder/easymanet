@@ -49,7 +49,7 @@ reviews:
     - "!apps/desktop/electron/out/**"
     - "!apps/desktop/electron/dist/**"
     - "!**/.DS_Store"
-    - "apps/desktop/electron/package-lock.json"
+    - "!apps/desktop/electron/package-lock.json"
 
   path_instructions:
     - path: "{apps/cli/src/easymanet_cli/flash.py,packages/core/src/easymanet/disks/**,packages/core/src/easymanet/{download,image,privileges}.py}"

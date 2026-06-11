@@ -208,6 +208,7 @@ if ! command -v jsonfilter >/dev/null 2>&1; then
     exit 1
 fi
 
+PROVISION_VERSION="$(json_val version)"
 MESH_ID="$(json_val mesh id)"
 MESH_PASSWORD="$(json_val mesh password)"
 HOSTNAME="$(json_val node hostname)"
@@ -217,10 +218,44 @@ MESH_CHANNEL="$(json_val mesh channel)"
 MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
 
-if [ -z "$MESH_ID" ] || [ -z "$MESH_PASSWORD" ] || [ -z "$HOSTNAME" ] || [ -z "$NODE_IP" ]; then
-    echo "FATAL: missing required mesh/node fields in provision.json" | tee -a "$LOG_FILE"
+missing_fields=""
+[ -n "$PROVISION_VERSION" ] || missing_fields="$missing_fields version"
+[ -n "$MESH_ID" ] || missing_fields="$missing_fields mesh.id"
+[ -n "$MESH_PASSWORD" ] || missing_fields="$missing_fields mesh.password"
+[ -n "$MESH_CHANNEL" ] || missing_fields="$missing_fields mesh.channel"
+[ -n "$MESH_BW" ] || missing_fields="$missing_fields mesh.bandwidth_mhz"
+[ -n "$MESH_COUNTRY" ] || missing_fields="$missing_fields mesh.country"
+[ -n "$HOSTNAME" ] || missing_fields="$missing_fields node.hostname"
+[ -n "$NODE_ROLE" ] || missing_fields="$missing_fields node.role"
+[ -n "$NODE_IP" ] || missing_fields="$missing_fields node.ip"
+if [ -n "$missing_fields" ]; then
+    echo "FATAL: missing required provision.json fields:$missing_fields" | tee -a "$LOG_FILE"
     exit 1
 fi
+if [ "$PROVISION_VERSION" != "1" ]; then
+    echo "FATAL: unsupported provision.json version: $PROVISION_VERSION" | tee -a "$LOG_FILE"
+    exit 1
+fi
+case "$NODE_ROLE" in
+    gate|point) ;;
+    *)
+        echo "FATAL: unsupported node.role in provision.json: $NODE_ROLE" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+case "$MESH_BW" in
+    1|2|4|8) ;;
+    *)
+        echo "FATAL: unsupported mesh.bandwidth_mhz in provision.json: $MESH_BW" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+case "$MESH_CHANNEL" in
+    *[!0-9]*)
+        echo "FATAL: mesh.channel must be numeric in provision.json: $MESH_CHANNEL" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
 
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"

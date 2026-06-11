@@ -44,6 +44,7 @@ def test_publish_script_stays_decomposed():
 def test_repo_spec_source_paths_exist_in_current_layout():
     publish = load_publish_module()
 
+    assert publish.selected_specs("all") == list(publish.REPO_SPECS.values())
     for spec in publish.selected_specs("all"):
         for rel_path in spec.source_paths:
             assert (ROOT / rel_path).exists(), f"{spec.key} source path is missing: {rel_path}"
@@ -86,6 +87,9 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert cli_pyproject["project"]["name"] == "easymanet"
     assert cli_pyproject["project"]["version"] == publish.project_version(ROOT / "pyproject.toml")
     assert cli_pyproject["project"]["license"] == "MIT"
+    assert cli_pyproject["project"]["requires-python"] == ">=3.10"
+    assert "Programming Language :: Python :: 3.9" not in cli_pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.10" in cli_pyproject["project"]["classifiers"]
     assert cli_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
     assert "apps/desktop/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
     assert "tools/publish/src" not in cli_pyproject["tool"]["setuptools"]["packages"]["find"]["where"]
@@ -100,6 +104,9 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "uv publish --trusted-publishing always dist/*.tar.gz dist/*.whl" in cli_release
 
     image_workflows = generated["images"] / ".github" / "workflows"
+    image_pyproject = tomllib.loads((generated["images"] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert image_pyproject["project"]["name"] == "easymanet-images"
+    assert image_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
     assert (image_workflows / "image-release.yml").exists()
     assert not (image_workflows / "build-openmanet-image.yml").exists()
     assert not (image_workflows / "prove-overlay-weekly.yml").exists()
@@ -120,7 +127,7 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     )
 
     assert (repo / "pyproject.toml").exists()
-    assert (repo / "apps" / "cli" / "src" / "easymanet_cli" / "flash.py").exists()
+    assert not (repo / "apps" / "cli").exists()
     assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
     assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()
     assert (repo / "tests" / "test_desktop.py").exists()
@@ -134,31 +141,33 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
         "easymanet-desktop": "easymanet_desktop.server:main"
     }
     find_config = pyproject["tool"]["setuptools"]["packages"]["find"]
-    assert "apps/cli/src" in find_config["where"]
-    assert "easymanet_cli*" in find_config["include"]
+    assert "apps/cli/src" not in find_config["where"]
+    assert "easymanet_cli*" not in find_config["include"]
     assert pyproject["tool"]["setuptools"]["package-data"]["easymanet_desktop"] == ["static/*"]
 
 
-def test_desktop_surface_pyproject_matches_legacy_core_layout(monkeypatch):
+def test_surface_pyproject_uses_shared_spec_package_roots():
     publish = load_publish_module()
-    monkeypatch.setattr(publish, "DESKTOP_CORE_PACKAGE_PATH", "easymanet")
 
-    pyproject = publish.desktop_surface_pyproject()
-
-    assert '    ".",\n    "apps/cli/src",\n    "apps/desktop/src",' in pyproject
-    assert '    "packages/core/src",' not in pyproject
-
-
-def test_cli_surface_pyproject_uses_authoring_version(monkeypatch, tmp_path):
-    publish = load_publish_module()
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "easymanet"\nversion = "9.8.7"\n',
-        encoding="utf-8",
+    pyproject = tomllib.loads(
+        publish.render_surface_pyproject(publish.REPO_SPECS["desktop"], "9.8.7")
     )
-    monkeypatch.setattr(publish, "ROOT", tmp_path)
 
-    pyproject = tomllib.loads(publish.cli_surface_pyproject())
+    assert pyproject["project"]["version"] == "9.8.7"
+    assert pyproject["tool"]["setuptools"]["packages"]["find"]["where"] == [
+        "packages/core/src",
+        "apps/desktop/src",
+    ]
 
+
+def test_cli_surface_pyproject_uses_surface_package_name():
+    publish = load_publish_module()
+
+    pyproject = tomllib.loads(
+        publish.render_surface_pyproject(publish.REPO_SPECS["cli"], "9.8.7")
+    )
+
+    assert pyproject["project"]["name"] == "easymanet"
     assert pyproject["project"]["version"] == "9.8.7"
 
 

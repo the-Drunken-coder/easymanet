@@ -488,7 +488,71 @@ def test_provision_requires_node_ip(tmp_path):
     result = _run_provision(prefix, provision_data, uci_state)
 
     assert result.returncode != 0
-    assert "missing required mesh/node fields" in result.stdout
+    assert "missing required provision.json fields: node.ip" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("field_path", "expected"),
+    [
+        (("version",), "version"),
+        (("mesh", "id"), "mesh.id"),
+        (("mesh", "password"), "mesh.password"),
+        (("mesh", "channel"), "mesh.channel"),
+        (("mesh", "bandwidth_mhz"), "mesh.bandwidth_mhz"),
+        (("mesh", "country"), "mesh.country"),
+        (("node", "hostname"), "node.hostname"),
+        (("node", "role"), "node.role"),
+        (("node", "ip"), "node.ip"),
+    ],
+)
+def test_provision_reports_missing_required_fields(tmp_path, field_path, expected):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    _delete_nested(provision_data, field_path)
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode != 0
+    assert "missing required provision.json fields:" in result.stdout
+    assert expected in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "expected"),
+    [
+        (("version",), 2, "unsupported provision.json version"),
+        (("node", "role"), "relay", "unsupported node.role"),
+        (("mesh", "bandwidth_mhz"), 3, "unsupported mesh.bandwidth_mhz"),
+        (("mesh", "channel"), "abc", "mesh.channel must be numeric"),
+    ],
+)
+def test_provision_rejects_invalid_required_values(tmp_path, field_path, value, expected):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    _set_nested(provision_data, field_path, value)
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode != 0
+    assert expected in result.stdout
+
+
+def _delete_nested(data: dict, field_path: tuple[str, ...]) -> None:
+    current = data
+    for part in field_path[:-1]:
+        current = current[part]
+    del current[field_path[-1]]
+
+
+def _set_nested(data: dict, field_path: tuple[str, ...], value: object) -> None:
+    current = data
+    for part in field_path[:-1]:
+        current = current[part]
+    current[field_path[-1]] = value
 
 
 def test_em_mesh_encryption_override_propagates_to_uci(tmp_path):

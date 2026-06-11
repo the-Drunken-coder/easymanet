@@ -32,7 +32,7 @@ npm --prefix apps/desktop/electron run check
 
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 \
   .github/workflows/*.yml \
-  tools/publish/src/easymanet_publish/templates/*/.github/workflows/*.yml
+  product_repos/templates/*/.github/workflows/*.yml
 
 git diff --check
 ```

@@ -36,20 +36,17 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import re
           import tomllib
           from pathlib import Path
 
+          import easymanet
+
           pyproject_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          init_text = Path("packages/core/src/easymanet/__init__.py").read_text()
-          init_match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
-          if not init_match:
-              raise SystemExit("packages/core/src/easymanet/__init__.py does not define __version__")
-          package_version = init_match.group(1)
+          package_version = easymanet.__version__
           electron_version = json.loads(Path("apps/desktop/electron/package.json").read_text())["version"]
           versions = {
               "pyproject.toml": pyproject_version,
-              "packages/core/src/easymanet/__init__.py": package_version,
+              "installed easymanet package": package_version,
               "apps/desktop/electron/package.json": electron_version,
           }
           if len(set(versions.values())) != 1:

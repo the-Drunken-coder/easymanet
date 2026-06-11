@@ -2,9 +2,9 @@ const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("elect
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const fleetExtensions = new Set([".yml", ".yaml"]);
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const bridgeTimeoutMs = 15000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
@@ -112,7 +112,7 @@ function registerIpc() {
     }
     return runBridge(["flash-plan", ...flashArgs(validated)], { timeoutMs: flashBridgeTimeoutMs });
   });
-  ipcMain.handle("easymanet:flash", async (_event, payload = {}) => {
+  ipcMain.handle("easymanet:flash", async (event, payload = {}) => {
     const validated = await validateFlashPayload(payload);
     if (!validated.ok) {
       return validated;
@@ -130,7 +130,10 @@ function registerIpc() {
     if (confirmed.response !== 0) {
       return { ok: false, canceled: true, errors: ["Flash canceled"] };
     }
-    return runBridge(["flash", ...flashArgs(validated), "--yes"], { timeoutMs: flashBridgeTimeoutMs });
+    return runBridgeStreaming(["flash", ...flashArgs(validated), "--yes"], {
+      timeoutMs: flashBridgeTimeoutMs,
+      webContents: event.sender,
+    });
   });
   ipcMain.handle("easymanet:copy-text", (_event, payload = {}) => {
     const text = typeof payload.text === "string" ? payload.text : "";
@@ -171,6 +174,51 @@ function registerIpc() {
 }
 
 function runBridge(args, options = {}) {
+  return runBridgeJson(args, { timeoutMs: options.timeoutMs || bridgeTimeoutMs });
+}
+
+function runBridgeJson(args, options = {}) {
+  return runBridgeProcess(args, {
+    timeoutMs: options.timeoutMs || bridgeTimeoutMs,
+    onStdout: (state, chunk) => {
+      state.stdout += chunk;
+    },
+    onClose: (state, finish) => {
+      finish(parseBridgeJsonOutput(state.stdout, state.stderr));
+    },
+  });
+}
+
+function runBridgeStreaming(args, options = {}) {
+  return runBridgeProcess(args, {
+    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+    onStdout: (state, chunk) => {
+      state.stdout += chunk;
+      state.stdout = processBridgeStreamBuffer(state.stdout, options.webContents, (payload) => {
+        state.finalPayload = payload;
+      });
+    },
+    onClose: (state, finish) => {
+      const remaining = state.stdout.trim();
+      if (remaining) {
+        processBridgeStreamLine(remaining, options.webContents, (payload) => {
+          state.finalPayload = payload;
+        });
+      }
+      if (state.finalPayload) {
+        finish(state.finalPayload);
+        return;
+      }
+      finish({
+        ok: false,
+        errors: [state.stderr.trim() || "EasyMANET bridge returned no flash result"],
+        raw: state.fullStdout.trim(),
+      });
+    },
+  });
+}
+
+function runBridgeProcess(args, handlers) {
   return new Promise((resolve) => {
     let bridge;
     try {
@@ -184,8 +232,12 @@ function runBridge(args, options = {}) {
       env: bridgeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
+    const state = {
+      stdout: "",
+      fullStdout: "",
+      stderr: "",
+      finalPayload: null,
+    };
     let settled = false;
 
     const finish = (payload) => {
@@ -197,34 +249,81 @@ function runBridge(args, options = {}) {
       resolve(payload);
     };
 
-    const timeoutMs = options.timeoutMs || bridgeTimeoutMs;
+    const timeoutMs = handlers.timeoutMs;
     const timer = setTimeout(() => {
       child.kill();
       finish({ ok: false, errors: [`EasyMANET bridge timed out after ${timeoutMs / 1000}s`] });
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      state.fullStdout += text;
+      handlers.onStdout(state, text);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      state.stderr += chunk.toString();
     });
     child.on("error", (error) => {
       finish({ ok: false, errors: [error.message] });
     });
     child.on("close", () => {
-      const text = stdout.trim();
-      if (!text) {
-        finish({ ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no output"] });
-        return;
-      }
-      try {
-        finish(JSON.parse(text));
-      } catch (error) {
-        finish({ ok: false, errors: [error.message], raw: text, stderr: stderr.trim() });
-      }
+      handlers.onClose(state, finish);
     });
   });
+}
+
+function parseBridgeJsonOutput(stdout, stderr) {
+  const text = stdout.trim();
+  if (!text) {
+    return { ok: false, errors: [stderr.trim() || "EasyMANET bridge returned no output"] };
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return { ok: false, errors: [error.message], raw: text, stderr: stderr.trim() };
+  }
+}
+
+function processBridgeStreamBuffer(buffer, webContents, setFinalPayload) {
+  const lines = buffer.split(/\r?\n/);
+  const tail = lines.pop() || "";
+  for (const line of lines) {
+    const text = line.trim();
+    if (!text) {
+      continue;
+    }
+    processBridgeStreamLine(text, webContents, setFinalPayload);
+  }
+  return tail;
+}
+
+function processBridgeStreamLine(text, webContents, setFinalPayload) {
+  try {
+    const payload = JSON.parse(text);
+    if (payload.type === "result") {
+      setFinalPayload(payload);
+    } else if (payload.type === "event") {
+      sendBridgeFlashEvent(webContents, payload);
+    }
+  } catch (_error) {
+    sendBridgeFlashEvent(webContents, {
+      type: "event",
+      event_type: "bridge_output",
+      level: "info",
+      message: text,
+    });
+  }
+}
+
+function sendBridgeFlashEvent(webContents, payload) {
+  if (!webContents || (typeof webContents.isDestroyed === "function" && webContents.isDestroyed())) {
+    return;
+  }
+  try {
+    webContents.send("easymanet:flash-event", payload);
+  } catch (_error) {
+    // The renderer may close between the isDestroyed check and the send call.
+  }
 }
 
 async function validatePayload(payload) {
@@ -245,7 +344,10 @@ async function validatePayload(payload) {
     return { ok: false, errors: ["Node name contains unsupported characters"] };
   }
 
-  const resolved = await resolveConfigPath(config);
+  const resolved = await resolveConfigPath(config, {
+    runBridge,
+    homeDir: () => app.getPath("home"),
+  });
   if (!resolved.ok) {
     return resolved;
   }
@@ -284,67 +386,6 @@ function flashArgs(payload) {
   return args;
 }
 
-async function resolveConfigPath(config) {
-  const expanded = expandHome(config);
-  if (path.isAbsolute(expanded)) {
-    return existingFleetFile(expanded);
-  }
-
-  const state = await runBridge(["state"]);
-  if (!state.ok || !state.workspace || !state.workspace.fleets_dir) {
-    return { ok: false, errors: state.errors || ["Fleets folder is unavailable"] };
-  }
-  const fleetRoot = path.resolve(state.workspace.fleets_dir);
-  const candidate = path.resolve(fleetRoot, expanded);
-  if (!isInside(fleetRoot, candidate)) {
-    return { ok: false, errors: ["Fleet config path must stay inside the Fleets folder"] };
-  }
-  return existingFleetFile(candidate);
-}
-
-function existingFleetFile(configPath) {
-  for (const candidate of fleetPathCandidates(path.resolve(configPath))) {
-    if (!fleetExtensions.has(path.extname(candidate).toLowerCase())) {
-      continue;
-    }
-    try {
-      const stat = fs.statSync(candidate);
-      if (stat.isFile()) {
-        return { ok: true, config: candidate };
-      }
-    } catch (_error) {
-      // Try the next extension candidate.
-    }
-  }
-  return { ok: false, errors: ["Fleet config file must exist and use .yml or .yaml"] };
-}
-
-function fleetPathCandidates(configPath) {
-  if (path.extname(configPath)) {
-    return [configPath];
-  }
-  return [configPath, `${configPath}.yml`, `${configPath}.yaml`];
-}
-
-function expandHome(value) {
-  if (value === "~") {
-    return app.getPath("home");
-  }
-  if (value.startsWith(`~${path.sep}`) || value.startsWith("~/") || value.startsWith("~\\")) {
-    return path.join(app.getPath("home"), value.slice(2));
-  }
-  return value;
-}
-
-function hasTraversalSegment(value) {
-  return value.split(/[\\/]+/).some((part) => part === "..");
-}
-
-function isInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
-
 function pythonPath() {
   if (process.env.EASYMANET_PYTHON) {
     return process.env.EASYMANET_PYTHON;
@@ -371,10 +412,7 @@ function bridgeEnv() {
   }
   const sourceRoots = process.env.EASYMANET_ELECTRON_NO_SOURCE_PATHS === "1" ? [] : [
     path.join(repoRoot, "packages", "core", "src"),
-    path.join(repoRoot, "packages", "image", "src"),
-    path.join(repoRoot, "apps", "cli", "src"),
     path.join(repoRoot, "apps", "desktop", "src"),
-    path.join(repoRoot, "tools", "publish", "src"),
   ];
   const existing = process.env.PYTHONPATH ? process.env.PYTHONPATH.split(path.delimiter) : [];
   return {

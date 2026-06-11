@@ -416,3 +416,33 @@ def test_gateway_wifi_requires_ssid_and_password():
     assert any("gateway.wifi.ssid" in e for e in result.errors)
     assert any("gateway.wifi.password" in e for e in result.errors)
     os.unlink(path)
+
+
+def test_gateway_wifi_validation_uses_preserved_shallow_merge():
+    config = VALID_CONFIG.replace(
+        "defaults:\n  target: rpi4-mm6108-spi",
+        """
+defaults:
+  target: rpi4-mm6108-spi
+  gateway:
+    wifi:
+      enabled: false
+      ssid: default-uplink
+      password: default-password
+""".strip(),
+    ) + """
+  node03:
+    role: gate
+    hostname: node03
+    ip: 10.41.3.1
+    gateway:
+      wifi:
+        enabled: true
+"""
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m, node_name="node03")
+    assert not result.valid
+    assert any("gateway.wifi.ssid" in e for e in result.errors)
+    assert any("gateway.wifi.password" in e for e in result.errors)
+    os.unlink(path)

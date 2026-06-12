@@ -6,7 +6,9 @@ const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const sshUserPattern = /^[A-Za-z0-9_.-]{1,64}$/;
 const bridgeTimeoutMs = 15000;
+const meshBridgeTimeoutMs = 45000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
 const sshModes = new Set(["default", "enable", "disable"]);
 
@@ -111,6 +113,20 @@ function registerIpc() {
       return validated;
     }
     return runBridge(["flash-plan", ...flashArgs(validated)], { timeoutMs: flashBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:mesh-discover", async (_event, payload = {}) => {
+    const validated = await validateMeshPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const args = ["mesh-discover", "--user", validated.user];
+    if (validated.config) {
+      args.push("--config", validated.config);
+    }
+    if (validated.scanSubnet) {
+      args.push("--scan-subnet");
+    }
+    return runBridge(args, { timeoutMs: meshBridgeTimeoutMs });
   });
   ipcMain.handle("easymanet:flash", async (event, payload = {}) => {
     const validated = await validateFlashPayload(payload);
@@ -712,6 +728,40 @@ async function validateFlashPayload(payload) {
   const adminPassword = typeof payload.adminPassword === "string" ? payload.adminPassword : "";
 
   return { ...validated, device, sshMode, adminPassword };
+}
+
+async function validateMeshPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Mesh discovery payload must be an object"] };
+  }
+
+  const rawConfig = typeof payload.config === "string" ? payload.config.trim() : "";
+  let config = "";
+  if (rawConfig) {
+    if (hasTraversalSegment(rawConfig)) {
+      return { ok: false, errors: ["Fleet config path must not contain traversal segments"] };
+    }
+    const resolved = await resolveConfigPath(rawConfig, {
+      runBridge,
+      homeDir: () => app.getPath("home"),
+    });
+    if (!resolved.ok) {
+      return resolved;
+    }
+    config = resolved.config;
+  }
+
+  const user = typeof payload.user === "string" && payload.user.trim() ? payload.user.trim() : "root";
+  if (!sshUserPattern.test(user)) {
+    return { ok: false, errors: ["SSH user contains unsupported characters"] };
+  }
+
+  return {
+    ok: true,
+    config,
+    user,
+    scanSubnet: Boolean(payload.scanSubnet || payload.scan_subnet),
+  };
 }
 
 function flashArgs(payload) {

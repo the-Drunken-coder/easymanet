@@ -40,16 +40,27 @@
 
   function imageItem(target, image) {
     const cached = Boolean(image.cached_path);
-    const sha = String(image.sha256 || "");
+    const configuredSha = String(image.sha256 || "");
+    const cachedSha = String(image.cached_sha256 || "");
+    const cachedSize = formatBytes(image.cached_size_bytes);
     const lines = [
-      `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(cached ? "ok" : "warn", cached ? "cached" : "not cached")}</div>`,
+      `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(cached ? "ok" : "warn", cached ? "cached" : "will download")}</div>`,
       `<div class="meta-line">${escapeHtml(image.version || "unversioned")}</div>`,
     ];
+    if (cached && cachedSize) {
+      lines.push(`<div class="meta-line">${escapeHtml(cachedSize)}</div>`);
+    }
+    if (!cached) {
+      lines.push(`<div class="meta-line image-action">Preview or flash will fetch this image.</div>`);
+    }
     if (image.url) {
       lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(image.url)}">${escapeHtml(image.url)}</div>`);
     }
-    if (sha) {
-      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(sha)}">sha256 ${escapeHtml(sha.slice(0, 16))}&hellip;</div>`);
+    if (configuredSha) {
+      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(configuredSha)}">configured sha ${escapeHtml(configuredSha.slice(0, 16))}&hellip;</div>`);
+    }
+    if (cachedSha && cachedSha !== configuredSha) {
+      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(cachedSha)}">cached sha ${escapeHtml(cachedSha.slice(0, 16))}&hellip;</div>`);
     }
     return `<div class="image-item">${lines.join("")}</div>`;
   }
@@ -139,6 +150,62 @@
     ].join("");
   }
 
+  function meshRadioCard(radio) {
+    const host = radio.host || radio.address || "unknown";
+    const title = radio.hostname || radio.expected_hostname || host;
+    const status = radio.status === "connected" ? "connected" : radio.status || "seen";
+    const rows = [
+      meshDetail("Host", host),
+      meshDetail("Address", radio.address),
+      meshDetail("Node", radio.node),
+      meshDetail("Expected IP", radio.expected_ip),
+      meshDetail("Expected host", radio.expected_hostname),
+      meshDetail("Status", status.replaceAll("_", " ")),
+      meshDetail("Role", radio.role),
+      meshDetail("Mesh", radio.mesh_id),
+      meshDetail("Node IP", radio.node_ip),
+      meshDetail("Target", radio.target),
+      meshDetail("Source", radio.source),
+      meshDetail("Error", radio.error || radio.stderr),
+    ].filter(Boolean).join("");
+    return `
+      <article class="radio-card">
+        <div class="radio-top">
+          <div class="radio-title">
+            <span class="radio-name mono">${escapeHtml(title)}</span>
+            <span class="radio-sub mono">${escapeHtml(radio.summary || radio.address || "")}</span>
+          </div>
+          ${chip(radio.ok ? "ok" : "warn", status.replaceAll("_", " "))}
+        </div>
+        <div class="radio-details">${rows}</div>
+      </article>
+    `;
+  }
+
+  function meshDetail(label, value) {
+    if (!value) {
+      return "";
+    }
+    return `<span class="radio-key">${escapeHtml(label)}</span><span class="radio-value mono">${escapeHtml(value)}</span>`;
+  }
+
+  function meshDiscoveryMarkup(payload) {
+    const rows = [];
+    const checked = Number(payload.candidates_checked) || 0;
+    const radios = payload.radios || [];
+    if (payload.ok) {
+      rows.push(statusRow(radios.length ? "ok" : "subtle", `${radios.length} radios found`));
+      rows.push(statusRow("subtle", `${checked} candidates checked`));
+    }
+    for (const warning of payload.warnings || []) {
+      rows.push(statusRow("warn", warning));
+    }
+    for (const error of payload.errors || []) {
+      rows.push(statusRow("bad", error));
+    }
+    return rows.join("") || statusRow("subtle", "No discovery result");
+  }
+
   window.EMRender = {
     escapeHtml,
     formatBytes,
@@ -147,5 +214,7 @@
     diskCard,
     validationMarkup,
     planMarkup,
+    meshRadioCard,
+    meshDiscoveryMarkup,
   };
 })();

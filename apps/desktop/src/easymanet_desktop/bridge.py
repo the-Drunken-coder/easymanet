@@ -22,6 +22,7 @@ from .payloads import (
     state_payload,
     validate_payload as shared_validate_payload,
 )
+from .mesh import mesh_discover_payload
 
 
 def validate_payload(*, config: str, node: str = "") -> dict[str, Any]:
@@ -112,6 +113,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     resolve_config = subparsers.add_parser("resolve-config")
     resolve_config.add_argument("--config", required=True)
 
+    mesh_discover = subparsers.add_parser("mesh-discover")
+    mesh_discover.add_argument("--config", default="")
+    mesh_discover.add_argument("--user", default="root")
+    mesh_discover.add_argument("--scan-subnet", action="store_true")
+
     flash_plan = subparsers.add_parser("flash-plan")
     _add_flash_args(flash_plan, include_yes=False)
 
@@ -128,6 +134,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = validate_payload(config=args.config, node=args.node)
         elif args.command == "resolve-config":
             payload = resolve_config_payload(config=args.config)
+        elif args.command == "mesh-discover":
+            payload = mesh_discover_payload(
+                {
+                    "config": args.config,
+                    "user": args.user,
+                    "scan_subnet": args.scan_subnet,
+                }
+            )
         elif args.command == "flash-plan":
             payload = flash_plan_payload(
                 config=args.config,
@@ -184,8 +198,18 @@ def _best_image_details(
     node: str,
 ) -> dict[str, Any]:
     details = _safe_flash_image_details(config=config, node=node)
+    image_path = str(image.get("path") or "")
+    default_cached_path = str(details.get("cached_path") or "")
+    uses_default_image = (
+        not image_path
+        or image_path.startswith("<")
+        or (default_cached_path and image_path == default_cached_path)
+    )
     merged = dict(details)
-    merged.update(image)
+    if uses_default_image:
+        merged.update({key: value for key, value in image.items() if value not in ("", None)})
+    else:
+        merged.update(image)
     path = str(merged.get("path") or "")
     if (
         path

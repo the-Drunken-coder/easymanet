@@ -34,150 +34,276 @@
       </div>
     </header>
 
-    <main class="layout">
-      <form class="rail" id="validate-form">
-        <section class="card">
-          <header class="card-head">
-            <span class="step" id="step-fleet">1</span>
-            <h2>Fleet</h2>
-            <span class="chip subtle" id="fleet-count"></span>
-          </header>
-          <div class="card-body">
-            <label class="field">
-              <span class="field-label">Saved fleet</span>
-              <select id="fleet-select"></select>
-            </label>
-            <div class="empty-state" id="fleet-empty" hidden>
-              <p class="empty-title">No fleet files yet</p>
-              <p class="empty-meta">Drop a <code>.yml</code> fleet config into<br><span class="mono" id="fleet-empty-path"></span></p>
-              <button id="open-fleets-folder" class="btn ghost" type="button">Open Fleets Folder</button>
-            </div>
-            <label class="field">
-              <span class="field-label">Config path</span>
-              <span class="path-picker">
-                <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off" spellcheck="false">
-                <button id="choose-config" class="btn ghost" type="button">Browse</button>
-              </span>
-            </label>
-            <div class="meta-line mono" id="fleet-folder"></div>
-          </div>
-        </section>
-
-        <section class="card">
-          <header class="card-head">
-            <span class="step" id="step-node">2</span>
-            <h2>Node</h2>
-            <span class="chip subtle" id="node-role" hidden></span>
-          </header>
-          <div class="card-body">
-            <label class="field">
-              <span class="field-label">Node to provision</span>
-              <select id="node-name" name="node" disabled>
-                <option value="">Select a fleet first</option>
-              </select>
-            </label>
-            <button class="btn ghost block" type="submit">Validate Fleet</button>
-            <div id="validation-output" class="validation" hidden></div>
-          </div>
-        </section>
-
-        <section class="card">
-          <header class="card-head">
-            <h2>Images</h2>
-            <span class="chip subtle" id="image-count"></span>
-          </header>
-          <div class="card-body">
-            <div id="images" class="stack"></div>
-          </div>
-        </section>
-      </form>
-
-      <div class="main-col">
-        <section class="card">
-          <header class="card-head">
-            <span class="step" id="step-disk">3</span>
-            <h2>Target Disk</h2>
-            <label class="switch">
-              <input id="show-all-disks" type="checkbox">
-              <span>Show all disks</span>
-            </label>
-          </header>
-          <div class="card-body">
-            <div id="disks" class="disk-grid"></div>
-          </div>
-        </section>
-
-        <section class="card" id="flash-panel">
-          <header class="card-head">
-            <span class="step" id="step-flash">4</span>
-            <h2>Flash</h2>
-            <span class="chip subtle" id="flash-ready"></span>
-          </header>
-          <div class="card-body">
-            <div class="flash-target">
-              <div class="flash-target-cell">
-                <span class="field-label">Node</span>
-                <span class="mono target-value" id="summary-node">&mdash;</span>
-              </div>
-              <span class="flash-arrow" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M5 12h14M13 6l6 6-6 6"></path>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="EasyMANET sections">
+        <nav class="sidebar-nav" aria-label="Workspace sections" role="tablist">
+          <div class="sidebar-section">
+            <span class="sidebar-label">Operations</span>
+            <button class="nav-item active" id="nav-flash" type="button" role="tab" aria-selected="true" aria-controls="tab-flash" data-tab-target="tab-flash">
+              <span class="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 3h12v5H6z"></path>
+                  <path d="M8 8v4a4 4 0 0 0 8 0V8"></path>
+                  <path d="M10 19h4"></path>
                 </svg>
               </span>
-              <div class="flash-target-cell">
-                <span class="field-label">Disk</span>
-                <span class="mono target-value" id="selected-disk">None</span>
-              </div>
-            </div>
+              <span class="nav-title">Flash</span>
+            </button>
+            <button class="nav-item" id="nav-mesh" type="button" role="tab" aria-selected="false" aria-controls="tab-mesh" data-tab-target="tab-mesh">
+              <span class="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path>
+                </svg>
+              </span>
+              <span class="nav-title">Mesh</span>
+            </button>
+          </div>
+          <div class="sidebar-section">
+            <span class="sidebar-label">System</span>
+            <button class="nav-item" type="button" role="tab" aria-selected="false" disabled>
+              <span class="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 19h16"></path>
+                  <path d="M6 16V8"></path>
+                  <path d="M12 16V5"></path>
+                  <path d="M18 16v-4"></path>
+                </svg>
+              </span>
+              <span class="nav-title">Diagnostics</span>
+            </button>
+            <button class="nav-item" type="button" role="tab" aria-selected="false" disabled>
+              <span class="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2 2-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6V20h-3v-.1a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2 .4l-.1.1-2-2 .1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.6-1H4v-3h.1a1.8 1.8 0 0 0 1.6-1 1.8 1.8 0 0 0-.4-2l-.1-.1 2-2 .1.1a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1-1.6V4h3v.1a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1 2 2-.1.1a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.6 1h.1v3h-.1a1.8 1.8 0 0 0-1.6 1z"></path>
+                </svg>
+              </span>
+              <span class="nav-title">Settings</span>
+            </button>
+          </div>
+        </nav>
+      </aside>
 
-            <fieldset class="field">
-              <legend class="field-label">SSH access</legend>
-              <div class="segmented">
-                <input type="radio" name="ssh-mode" id="role-default-ssh" value="auto" checked>
-                <label for="role-default-ssh">Auto <small id="ssh-auto-hint">role default</small></label>
-                <input type="radio" name="ssh-mode" id="ssh-enable" value="enable">
-                <label for="ssh-enable">On</label>
-                <input type="radio" name="ssh-mode" id="ssh-disable" value="disable">
-                <label for="ssh-disable">Off</label>
-              </div>
-            </fieldset>
+      <main class="workspace">
+        <section class="tab-panel active" id="tab-flash" role="tabpanel" aria-labelledby="nav-flash" data-tab-panel>
+          <div class="layout flash-layout">
+            <form class="rail" id="validate-form">
+              <section class="card">
+                <header class="card-head">
+                  <span class="step" id="step-fleet">1</span>
+                  <h2>Fleet</h2>
+                  <span class="chip subtle" id="fleet-count"></span>
+                </header>
+                <div class="card-body">
+                  <label class="field">
+                    <span class="field-label">Saved fleet</span>
+                    <select id="fleet-select"></select>
+                  </label>
+                  <div class="empty-state" id="fleet-empty" hidden>
+                    <p class="empty-title">No fleet files yet</p>
+                    <p class="empty-meta">Drop a <code>.yml</code> fleet config into<br><span class="mono" id="fleet-empty-path"></span></p>
+                    <button id="open-fleets-folder" class="btn ghost" type="button">Open Fleets Folder</button>
+                  </div>
+                  <label class="field">
+                    <span class="field-label">Fleet file path</span>
+                    <span class="path-picker">
+                      <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off" spellcheck="false">
+                      <button id="choose-config" class="btn ghost" type="button">Browse</button>
+                    </span>
+                  </label>
+                  <div class="meta-line mono" id="fleet-folder"></div>
+                </div>
+              </section>
 
-            <label class="field" id="admin-password-row" hidden>
-              <span class="field-label">Mac admin password</span>
-              <input id="admin-password" type="password" autocomplete="current-password" placeholder="Required to write the disk">
-            </label>
+              <section class="card">
+                <header class="card-head">
+                  <span class="step" id="step-node">2</span>
+                  <h2>Node</h2>
+                  <span class="chip subtle" id="node-role" hidden></span>
+                </header>
+                <div class="card-body">
+                  <label class="field">
+                    <span class="field-label">Node to provision</span>
+                    <select id="node-name" name="node" disabled>
+                      <option value="">Select a fleet first</option>
+                    </select>
+                  </label>
+                  <button class="btn ghost block" type="submit">Validate Fleet</button>
+                  <div id="validation-output" class="validation" hidden></div>
+                </div>
+              </section>
 
-            <div class="actions">
-              <button id="preview-flash" class="btn ghost" type="button">Preview Plan</button>
-              <button id="start-flash" class="btn primary" type="button">Flash Disk</button>
-            </div>
+              <section class="card">
+                <header class="card-head">
+                  <h2>Images</h2>
+                  <span class="chip subtle" id="image-count"></span>
+                </header>
+                <div class="card-body">
+                  <div id="images" class="stack"></div>
+                </div>
+              </section>
+            </form>
 
-            <div id="flash-status" class="flash-status" hidden>
-              <span class="status-icon" aria-hidden="true"></span>
-              <span id="flash-status-text"></span>
-            </div>
+            <div class="main-col">
+              <section class="card" id="disk-panel">
+                <header class="card-head">
+                  <span class="step" id="step-disk">3</span>
+                  <h2>Target Disk</h2>
+                  <label class="switch">
+                    <input id="show-all-disks" type="checkbox">
+                    <span>Show all disks</span>
+                  </label>
+                </header>
+                <div class="card-body">
+                  <div id="all-disks-warning" class="callout warn" hidden>
+                    <strong>All disks are visible.</strong>
+                    <span>Fixed and internal drives may appear. Choose only the removable media you intend to erase.</span>
+                  </div>
+                  <div id="disks" class="disk-grid"></div>
+                </div>
+              </section>
 
-            <div id="flash-progress" class="progress" hidden>
-              <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-              <span class="progress-text mono" id="progress-text"></span>
-            </div>
+              <section class="card" id="flash-panel">
+                <header class="card-head">
+                  <span class="step" id="step-flash">4</span>
+                  <h2>Flash</h2>
+                  <span class="chip subtle" id="flash-ready"></span>
+                </header>
+                <div class="card-body">
+                  <div class="flash-target">
+                    <div class="flash-target-cell">
+                      <span class="field-label">Node</span>
+                      <span class="mono target-value" id="summary-node">&mdash;</span>
+                    </div>
+                    <span class="flash-arrow" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14M13 6l6 6-6 6"></path>
+                      </svg>
+                    </span>
+                    <div class="flash-target-cell">
+                      <span class="field-label">Disk</span>
+                      <span class="mono target-value" id="selected-disk">None</span>
+                    </div>
+                  </div>
 
-            <div id="flash-plan" class="plan" hidden></div>
+                  <div class="flash-review" id="flash-review">
+                    <div class="review-head">
+                      <span class="field-label">Review before flashing</span>
+                      <span class="chip subtle" id="review-status">waiting</span>
+                    </div>
+                    <div class="review-grid">
+                      <span>Node</span>
+                      <strong class="mono" id="review-node">Select a node</strong>
+                      <span>Disk</span>
+                      <strong class="mono" id="review-disk">Select a disk</strong>
+                      <span>Image</span>
+                      <strong id="review-image">Image status pending</strong>
+                      <span>SSH</span>
+                      <strong id="review-ssh">Auto</strong>
+                    </div>
+                    <div class="erase-warning" id="erase-warning" hidden>
+                      The selected disk will be erased when flashing starts.
+                    </div>
+                  </div>
 
-            <div class="console-wrap" id="console-wrap" hidden>
-              <header class="console-head">
-                <span class="field-label">Activity log</span>
-                <span class="console-actions">
-                  <button id="copy-sudo" class="btn ghost small" type="button" hidden>Copy Sudo Command</button>
-                  <button id="copy-flash-log" class="btn ghost small" type="button">Copy Log</button>
-                </span>
-              </header>
-              <div id="flash-output" class="console" aria-live="polite"></div>
+                  <fieldset class="field">
+                    <legend class="field-label">SSH access</legend>
+                    <div class="segmented">
+                      <input type="radio" name="ssh-mode" id="role-default-ssh" value="auto" checked>
+                      <label for="role-default-ssh">Auto <small id="ssh-auto-hint">role default</small></label>
+                      <input type="radio" name="ssh-mode" id="ssh-enable" value="enable">
+                      <label for="ssh-enable">On</label>
+                      <input type="radio" name="ssh-mode" id="ssh-disable" value="disable">
+                      <label for="ssh-disable">Off</label>
+                    </div>
+                  </fieldset>
+
+                  <label class="field" id="admin-password-row" hidden>
+                    <span class="field-label">Mac admin password</span>
+                    <input id="admin-password" type="password" autocomplete="current-password" placeholder="Required to write the disk">
+                  </label>
+
+                  <div class="actions">
+                    <button id="preview-flash" class="btn ghost" type="button">Preview Plan</button>
+                    <button id="start-flash" class="btn primary" type="button">Flash Disk</button>
+                  </div>
+
+                  <div id="flash-status" class="flash-status" hidden>
+                    <span class="status-icon" aria-hidden="true"></span>
+                    <span id="flash-status-text"></span>
+                  </div>
+
+                  <div id="flash-progress" class="progress" hidden>
+                    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+                    <span class="progress-text mono" id="progress-text"></span>
+                  </div>
+
+                  <div id="flash-plan" class="plan" hidden></div>
+
+                  <div class="console-wrap" id="console-wrap" hidden>
+                    <header class="console-head">
+                      <span class="field-label">Activity log</span>
+                      <span class="console-actions">
+                        <button id="copy-sudo" class="btn ghost small" type="button" hidden>Copy Sudo Command</button>
+                        <button id="copy-flash-log" class="btn ghost small" type="button">Copy Log</button>
+                      </span>
+                    </header>
+                    <div id="flash-output" class="console" aria-live="polite"></div>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </section>
-      </div>
-    </main>
+
+        <section class="tab-panel" id="tab-mesh" role="tabpanel" aria-labelledby="nav-mesh" data-tab-panel hidden>
+          <div class="layout mesh-layout">
+            <form class="rail" id="mesh-discovery-form">
+              <section class="card">
+                <header class="card-head">
+                  <h2>Discovery</h2>
+                  <span class="chip subtle" id="mesh-status-chip">idle</span>
+                </header>
+                <div class="card-body">
+                  <label class="field">
+                    <span class="field-label">Fleet source</span>
+                    <span class="mesh-source mono trunc" id="mesh-config-source"></span>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">SSH user</span>
+                    <input id="mesh-ssh-user" value="root" autocomplete="username" spellcheck="false">
+                  </label>
+                  <label class="switch mesh-scan-toggle">
+                    <input id="mesh-scan-subnet" type="checkbox" checked>
+                    <span>Scan local network</span>
+                  </label>
+                  <button id="mesh-discover" class="btn primary block" type="submit">Scan Mesh</button>
+                  <div id="mesh-summary" class="validation" hidden></div>
+                </div>
+              </section>
+            </form>
+
+            <div class="main-col">
+              <section class="card" id="mesh-panel">
+                <header class="card-head">
+                  <h2>Mesh</h2>
+                  <span class="chip subtle" id="mesh-count">0</span>
+                </header>
+                <div class="card-body">
+                  <div id="mesh-radios" class="mesh-grid">
+                    <div class="empty-state slim">
+                      <p class="empty-title">No radios found</p>
+                      <p class="empty-meta">Run Scan Mesh to refresh this view.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <script src="render.js"></script>
     <script src="app.js"></script>

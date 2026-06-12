@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+import hashlib
 import json
 from pathlib import Path
 import subprocess
 
 from easymanet_desktop import bridge
+from easymanet_desktop import mesh
 from easymanet_desktop import payloads
 from easymanet_desktop import server
 from easymanet.flash import FlashErrorCode, FlashEvent
@@ -22,6 +24,8 @@ def test_desktop_validate_payload_returns_nodes():
     assert "point01" in payload["nodes"]
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
+    assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
+    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
 
 
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):
@@ -49,6 +53,31 @@ def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypat
     assert payload["workspace"]["fleet_files"][0]["relative_path"] == "field.yml"
     assert payload["image_cache_dir"] == str(cache)
     assert payload["images"]["rpi4-mm6108-spi"]["version"] == "1.6.5"
+
+
+def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    image.write_bytes(b"firmware")
+    version_file = tmp_path / "version.json"
+    version_file.write_text(json.dumps({"rpi4-mm6108-spi": "1.6.5"}))
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+
+    payload = payloads.state_payload()
+    entry = payload["images"]["rpi4-mm6108-spi"]
+
+    assert entry["version"] == "1.6.5"
+    assert entry["cached_path"] == str(image)
+    assert entry["cached_size_bytes"] == len(b"firmware")
+    assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
 def test_desktop_validate_resolves_workspace_fleet_name(tmp_path, monkeypatch):
@@ -99,6 +128,37 @@ def test_desktop_disks_payload_serializes_disk_info(monkeypatch):
     assert payload["disks"][0]["device"] == "/dev/disk4"
 
 
+def test_desktop_mesh_discovery_uses_fleet_candidates(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    def fake_probe(candidate, user):
+        assert user == "root"
+        if candidate.node == "gate01" and candidate.host == "gate01.local":
+            return {
+                **candidate.to_dict(),
+                "ok": True,
+                "status": "connected",
+                "hostname": "gate01",
+                "role": "gate",
+                "node_ip": "10.41.1.1",
+                "mesh_id": "field-deployment-alpha",
+                "summary": "gate01 / gate / 10.41.1.1",
+            }
+        return {**candidate.to_dict(), "ok": False, "status": "ssh_closed"}
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "examples/three-node-field-mesh.yml", "user": "root", "scanSubnet": False},
+        probe=fake_probe,
+    )
+
+    assert payload["ok"] is True
+    assert payload["candidates_checked"] >= 10
+    assert payload["radios"][0]["hostname"] == "gate01"
+    assert payload["radios"][0]["mesh_id"] == "field-deployment-alpha"
+    assert payload["seen"] == []
+
+
 def test_desktop_bridge_validate_outputs_json(capsys):
     exit_code = bridge.main(
         [
@@ -114,6 +174,31 @@ def test_desktop_bridge_validate_outputs_json(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert "point01" in payload["nodes"]
+
+
+def test_desktop_bridge_mesh_discover_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "mesh_discover_payload",
+        lambda payload: {"ok": True, "radios": [], "received": payload},
+    )
+
+    exit_code = bridge.main(
+        [
+            "mesh-discover",
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--user",
+            "root",
+            "--scan-subnet",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["received"]["user"] == "root"
+    assert payload["received"]["scan_subnet"] is True
 
 
 def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
@@ -157,6 +242,48 @@ def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
     assert calls[0].dry_run is True
     assert calls[0].yes is False
     assert calls[0].enable_ssh is True
+
+
+def test_desktop_bridge_flash_plan_preserves_cached_image_metadata(monkeypatch):
+    def fake_run_flash_workflow(options, emit=None):
+        del options, emit
+        return SimpleNamespace(
+            to_dict=lambda include_events=False: {
+                "ok": True,
+                "events": [] if include_events else None,
+                "image": {
+                    "path": "/tmp/openmanet.img.gz",
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "version": "",
+                    "url": "",
+                    "sha256": "",
+                },
+            }
+        )
+
+    monkeypatch.setattr(bridge, "run_flash_workflow", fake_run_flash_workflow)
+    monkeypatch.setattr(
+        bridge,
+        "_safe_flash_image_details",
+        lambda **_kwargs: {
+            "target": "rpi4-mm6108-spi",
+            "cached_path": "/tmp/openmanet.img.gz",
+            "version": "test-cache",
+            "url": "https://example.invalid/openmanet.img.gz",
+            "sha256": "a" * 64,
+        },
+    )
+
+    payload = bridge.flash_plan_payload(
+        config="examples/three-node-field-mesh.yml",
+        node="point01",
+        device="/dev/disk4",
+    )
+
+    assert payload["image"]["cached_path"] == "/tmp/openmanet.img.gz"
+    assert payload["image"]["version"] == "test-cache"
+    assert payload["image"]["url"] == "https://example.invalid/openmanet.img.gz"
+    assert payload["image"]["sha256"] == "a" * 64
 
 
 def test_desktop_bridge_flash_returns_sudo_fallback_on_privilege_error(monkeypatch):
@@ -321,12 +448,20 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "nativeApi.getState" in text
     assert "nativeApi.chooseConfig" in text
     assert "nativeApi.openFleetsFolder" in text
+    assert "nativeApi.discoverMesh" in text
     assert "nativeApi.flashPlan" in text
     assert "nativeApi.flash" in text
     assert "nativeApi.onFlashEvent" in text
     assert "nativeApi.copyText" in text
     assert "fleet-select" in index.read_text()
     assert "open-fleets-folder" in index.read_text()
+    assert "app-shell" in index.read_text()
+    assert "sidebar-nav" in index.read_text()
+    assert 'data-tab-target="tab-flash"' in index.read_text()
+    assert 'data-tab-target="tab-mesh"' in index.read_text()
+    assert 'data-tab-panel' in index.read_text()
+    assert "mesh-discover" in index.read_text()
+    assert "mesh-radios" in index.read_text()
     assert "flash-panel" in index.read_text()
     assert "preview-flash" in index.read_text()
     assert "start-flash" in index.read_text()
@@ -337,21 +472,35 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert '<select id="node-name" name="node" disabled>' in index.read_text()
     assert '<input id="node-name"' not in index.read_text()
     assert "renderFleets" in text
+    assert "setupTabNavigation" in text
+    assert "activateTab" in text
     assert "loadNodesForSelectedFleet" in text
     assert "renderNodeOptions" in text
+    assert "discoverMesh" in text
+    assert "renderMeshDiscovery" in text
     assert "applyRoleDefaultSsh" in text
     assert "node_roles" in text
+    assert "node_access" in text
+    assert "flashAccessHint" in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
     assert "detectMacPlatform" in text
     assert "classList.toggle" in text
     assert "flash-busy" in text
+    assert "startDiskWatcher" in text
+    assert "refreshDisksIfChanged" in text
+    assert "diskInventorySignature" in text
+    assert "visibilitychange" in text
+    assert "setInterval(refreshDisksIfChanged" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
+    assert "meshRadioCard" in render_js.read_text()
+    assert "meshDiscoveryMarkup" in render_js.read_text()
     assert "ALLOWED_TONES" in render_js.read_text()
     assert '["ok", "warn", "bad", "subtle"]' in render_js.read_text()
     assert "body.flash-busy .appbar" in styles.read_text()
+    assert "mesh-grid" in styles.read_text()
     assert "@media print" in styles.read_text()
 
 
@@ -411,6 +560,7 @@ def test_electron_shell_files_exist():
     assert "loadFile(indexHtmlPath())" in (electron / "main.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
+    assert "easymanet:mesh-discover" in (electron / "main.js").read_text()
     assert "easymanet:flash-plan" in (electron / "main.js").read_text()
     assert "easymanet:flash" in (electron / "main.js").read_text()
     assert "easymanet:flash-event" in (electron / "main.js").read_text()
@@ -441,9 +591,11 @@ def test_electron_shell_files_exist():
     assert 'spawn("osascript"' not in (electron / "main.js").read_text()
     assert "streamEvents" not in (electron / "main.js").read_text()
     assert "copyText" in (electron / "preload.js").read_text()
+    assert "discoverMesh" in (electron / "preload.js").read_text()
     assert "onFlashEvent" in (electron / "preload.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
     assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
+    assert "meshBridgeTimeoutMs" in (electron / "main.js").read_text()
     assert "process.resourcesPath" in (electron / "main.js").read_text()
     assert "desktop-static" in (electron / "main.js").read_text()
     assert "EASYMANET_BRIDGE_BIN is a development/testing override" in (electron / "main.js").read_text()

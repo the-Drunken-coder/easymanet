@@ -100,6 +100,29 @@ def test_invalid_bandwidth_5():
     os.unlink(path)
 
 
+def test_mm6108_us_rejects_untested_channel_bandwidth_pair():
+    config = VALID_CONFIG.replace("channel: 42", "channel: 36").replace(
+        "bandwidth_mhz: 2",
+        "bandwidth_mhz: 4",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("rpi4-mm6108-spi in US" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_mesh_channel_must_be_numeric():
+    config = VALID_CONFIG.replace("channel: 42", "channel: abc")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("mesh.channel must be numeric" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_duplicate_hostname():
     config = VALID_CONFIG.replace("hostname: node02", "hostname: node01")
     path = _write_config(config)

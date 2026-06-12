@@ -1,6 +1,15 @@
 // Controller for the EasyMANET operator console.
 // Markup builders live in render.js (EMRender); this file owns state and wiring.
-const { escapeHtml, formatBytes, imageItem, diskCard, validationMarkup, planMarkup } = window.EMRender;
+const {
+  escapeHtml,
+  formatBytes,
+  imageItem,
+  diskCard,
+  validationMarkup,
+  planMarkup,
+  meshRadioCard,
+  meshDiscoveryMarkup,
+} = window.EMRender;
 
 const state = {
   configPath: "",
@@ -9,8 +18,18 @@ const state = {
   sudoCommand: "",
   nodeLoadSeq: 0,
   nodeRoles: {},
+  nodeAccess: {},
+  images: {},
+  diskSignature: "",
+  diskLoadInFlight: false,
   flashBusy: false,
   lastFlashOk: false,
+  meshBusy: false,
+  meshHasScanned: false,
+  meshRadios: [],
+  flashSignature: "",
+  planSignature: "",
+  planImageSummary: "",
   logLines: [],
 };
 
@@ -29,12 +48,20 @@ const nodeRoleChip = $("node-role");
 const validationOutput = $("validation-output");
 const imageCount = $("image-count");
 const images = $("images");
+const diskPanel = $("disk-panel");
 const disks = $("disks");
 const showAllDisks = $("show-all-disks");
+const allDisksWarning = $("all-disks-warning");
 const flashPanel = $("flash-panel");
 const flashReady = $("flash-ready");
 const summaryNode = $("summary-node");
 const selectedDisk = $("selected-disk");
+const reviewStatus = $("review-status");
+const reviewNode = $("review-node");
+const reviewDisk = $("review-disk");
+const reviewImage = $("review-image");
+const reviewSsh = $("review-ssh");
+const eraseWarning = $("erase-warning");
 const sshAutoRadio = $("role-default-ssh");
 const sshAutoHint = $("ssh-auto-hint");
 const adminPasswordRow = $("admin-password-row");
@@ -51,15 +78,28 @@ const consoleWrap = $("console-wrap");
 const flashOutput = $("flash-output");
 const copyFlashLog = $("copy-flash-log");
 const copySudo = $("copy-sudo");
+const meshDiscoveryForm = $("mesh-discovery-form");
+const meshStatusChip = $("mesh-status-chip");
+const meshConfigSource = $("mesh-config-source");
+const meshSshUser = $("mesh-ssh-user");
+const meshScanSubnet = $("mesh-scan-subnet");
+const meshDiscover = $("mesh-discover");
+const meshSummary = $("mesh-summary");
+const meshCount = $("mesh-count");
+const meshRadios = $("mesh-radios");
 const steps = {
   fleet: $("step-fleet"),
   node: $("step-node"),
   disk: $("step-disk"),
   flash: $("step-flash"),
 };
+const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
 const nativeApi = window.easymanet || null;
 const isMac = detectMacPlatform();
+const diskWatchIntervalMs = 2500;
+let diskWatchTimer = null;
 
 if (!nativeApi) {
   chooseConfig.hidden = true;
@@ -68,7 +108,8 @@ if (!nativeApi) {
 } else if (nativeApi.onFlashEvent) {
   nativeApi.onFlashEvent(renderFlashEvent);
 }
-adminPasswordRow.hidden = !nativeApi || !isMac;
+adminPasswordRow.hidden = true;
+setupTabNavigation();
 
 $("refresh").addEventListener("click", () => {
   refreshAll().catch(handleRefreshError);
@@ -76,6 +117,7 @@ $("refresh").addEventListener("click", () => {
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
+    updateMeshFleetSource();
     loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
   }
@@ -83,10 +125,12 @@ fleetSelect.addEventListener("change", () => {
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
   resetNodeSelect("Update fleet path to load nodes");
+  updateMeshFleetSource();
   updateFlashControls();
 });
 configInput.addEventListener("change", () => {
   syncFleetSelect(configInput.value.trim());
+  updateMeshFleetSource();
   loadNodesForSelectedFleet().catch(handleNodeLoadError);
 });
 nodeSelect.addEventListener("change", () => {
@@ -102,6 +146,7 @@ chooseConfig.addEventListener("click", async () => {
   if (result.ok && result.path) {
     configInput.value = result.path;
     syncFleetSelect(result.path);
+    updateMeshFleetSource();
     await loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
   }
@@ -116,6 +161,7 @@ openFleetsFolder.addEventListener("click", async () => {
   }
 });
 showAllDisks.addEventListener("change", () => {
+  updateDiskMode();
   loadDisks().catch(renderDiskError);
 });
 disks.addEventListener("click", (event) => {
@@ -192,6 +238,10 @@ copyFlashLog.addEventListener("click", async () => {
     showCopied(copyFlashLog, "Copy Log");
   }
 });
+meshDiscoveryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await discoverMesh();
+});
 $("validate-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   state.configPath = configInput.value.trim();
@@ -201,7 +251,12 @@ $("validate-form").addEventListener("submit", async (event) => {
       config: state.configPath,
       node: state.nodeName,
     });
-    renderNodeOptions(response.nodes || [], state.nodeName, response.node_roles || {});
+    renderNodeOptions(
+      response.nodes || [],
+      state.nodeName,
+      response.node_roles || {},
+      response.node_access || {}
+    );
     renderValidation(response);
     updateFlashControls();
   } catch (error) {
@@ -229,8 +284,11 @@ async function loadState() {
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     const entries = Object.entries(payload.images || {});
+    state.images = payload.images || {};
     imageCount.textContent = `${entries.length}`;
     images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
+    updateMeshFleetSource();
+    updateFlashControls();
   } catch (error) {
     console.error("State refresh failed", error);
     renderStateError(error);
@@ -238,27 +296,67 @@ async function loadState() {
 }
 
 async function loadDisks() {
+  return refreshDisks({ renderIfUnchanged: true, reportErrors: true });
+}
+
+async function refreshDisks({ renderIfUnchanged, reportErrors }) {
+  if (state.diskLoadInFlight) {
+    return;
+  }
+  state.diskLoadInFlight = true;
   try {
     const payload = await getDisks(showAllDisks.checked);
     if (!payload.ok) {
-      disks.innerHTML = `<div class="inline-error">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
+      if (reportErrors) {
+        disks.innerHTML = `<div class="inline-error">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
+      }
       return;
     }
-    if (!payload.disks.length) {
-      disks.innerHTML = `<div class="empty-state slim"><p class="empty-title">No disks found</p><p class="empty-meta">Insert an SD card, then refresh.</p></div>`;
-      state.diskDevice = "";
-      updateFlashControls();
-      return;
+    const signature = diskInventorySignature(payload.disks || []);
+    if (renderIfUnchanged || signature !== state.diskSignature) {
+      renderDisksPayload(payload, signature);
     }
-    if (state.diskDevice && !payload.disks.some((disk) => disk.device === state.diskDevice)) {
-      state.diskDevice = "";
-    }
-    disks.innerHTML = payload.disks.map((disk) => diskCard(disk, state.diskDevice)).join("");
-    updateFlashControls();
   } catch (error) {
-    console.error("Disk refresh failed", error);
-    renderDiskError(error);
+    if (reportErrors) {
+      console.error("Disk refresh failed", error);
+      renderDiskError(error);
+    } else {
+      console.debug("Disk watcher refresh failed", error);
+    }
+  } finally {
+    state.diskLoadInFlight = false;
   }
+}
+
+function renderDisksPayload(payload, signature = diskInventorySignature(payload.disks || [])) {
+  const diskRecords = payload.disks || [];
+  state.diskSignature = signature;
+  if (!diskRecords.length) {
+    disks.innerHTML = `<div class="empty-state slim"><p class="empty-title">No disks found</p><p class="empty-meta">Insert an SD card, then refresh.</p></div>`;
+    state.diskDevice = "";
+    updateFlashControls();
+    return;
+  }
+  if (state.diskDevice && !diskRecords.some((disk) => disk.device === state.diskDevice)) {
+    state.diskDevice = "";
+  }
+  disks.innerHTML = diskRecords.map((disk) => diskCard(disk, state.diskDevice)).join("");
+  updateFlashControls();
+}
+
+function diskInventorySignature(diskRecords) {
+  return JSON.stringify(
+    [...diskRecords]
+      .map((disk) => ({
+        device: disk.device || "",
+        model: disk.model || "",
+        mounted: [...(disk.mounted || [])].sort(),
+        removable: Boolean(disk.removable),
+        size: disk.size_human || "",
+        warnings: [...(disk.warnings || [])].sort(),
+      }))
+      .sort((left, right) => left.device.localeCompare(right.device))
+  );
 }
 
 function renderValidation(payload) {
@@ -294,6 +392,7 @@ async function renderFleets(records, folder) {
   const selected = current || records[0].path;
   configInput.value = selected;
   syncFleetSelect(selected);
+  updateMeshFleetSource();
   await loadNodesForSelectedFleet(state.nodeName).catch(handleNodeLoadError);
   updateFlashControls();
 }
@@ -330,15 +429,21 @@ async function loadNodesForSelectedFleet(preferredNode = "") {
   if (seq !== state.nodeLoadSeq) {
     return;
   }
-  renderNodeOptions(response.nodes || [], selectedNode, response.node_roles || {});
+  renderNodeOptions(
+    response.nodes || [],
+    selectedNode,
+    response.node_roles || {},
+    response.node_access || {}
+  );
   if (!response.ok) {
     renderValidation(response);
   }
 }
 
-function renderNodeOptions(nodes, preferredNode = "", nodeRoles = {}) {
+function renderNodeOptions(nodes, preferredNode = "", nodeRoles = {}, nodeAccess = {}) {
   const uniqueNodes = [...new Set((nodes || []).map((node) => String(node).trim()).filter(Boolean))];
   state.nodeRoles = { ...nodeRoles };
+  state.nodeAccess = { ...nodeAccess };
   nodeSelect.replaceChildren();
 
   if (!uniqueNodes.length) {
@@ -372,10 +477,72 @@ function renderNodeOptions(nodes, preferredNode = "", nodeRoles = {}) {
 function resetNodeSelect(label) {
   state.nodeName = "";
   state.nodeRoles = {};
+  state.nodeAccess = {};
   nodeSelect.replaceChildren();
   nodeSelect.add(new Option(label, ""));
   nodeSelect.disabled = true;
   applyRoleDefaultSsh();
+}
+
+async function discoverMesh() {
+  state.meshHasScanned = true;
+  setMeshBusy(true);
+  meshSummary.hidden = true;
+  setMeshStatus("warn", "scanning");
+  try {
+    const response = await postJson("/api/mesh/discover", {
+      config: configInput.value.trim(),
+      user: meshSshUser.value.trim() || "root",
+      scanSubnet: meshScanSubnet.checked,
+    });
+    renderMeshDiscovery(response);
+  } catch (error) {
+    renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], radios: [], candidates_checked: 0 });
+  } finally {
+    setMeshBusy(false);
+  }
+}
+
+function renderMeshDiscovery(payload) {
+  const radios = payload.radios || [];
+  state.meshRadios = radios;
+  meshCount.textContent = `${radios.length}`;
+  meshSummary.hidden = false;
+  meshSummary.className = `validation ${payload.ok ? "ok" : "bad"}`;
+  meshSummary.innerHTML = meshDiscoveryMarkup(payload);
+  if (radios.length) {
+    meshRadios.innerHTML = radios.map((radio) => meshRadioCard(radio)).join("");
+    setMeshStatus("ok", `${radios.length} found`);
+  } else {
+    meshRadios.innerHTML = `
+      <div class="empty-state slim">
+        <p class="empty-title">No radios found</p>
+        <p class="empty-meta">No EasyMANET SSH identity answered.</p>
+      </div>
+    `;
+    setMeshStatus(payload.ok ? "subtle" : "bad", payload.ok ? "none found" : "error");
+  }
+}
+
+function setMeshBusy(busy) {
+  state.meshBusy = busy;
+  meshDiscover.disabled = busy;
+  meshSshUser.disabled = busy;
+  meshScanSubnet.disabled = busy;
+  if (busy) {
+    setMeshStatus("warn", "scanning");
+  }
+}
+
+function setMeshStatus(tone, label) {
+  meshStatusChip.textContent = label;
+  meshStatusChip.className = `chip ${tone}`;
+}
+
+function updateMeshFleetSource() {
+  const config = configInput.value.trim();
+  meshConfigSource.textContent = config || "No fleet selected";
+  meshConfigSource.title = config || "";
 }
 
 function flashPayload(options = {}) {
@@ -399,6 +566,17 @@ function selectedSshMode() {
   return value === "auto" ? "default" : value;
 }
 
+function selectedSshLabel() {
+  const mode = selectedSshMode();
+  if (mode === "enable") {
+    return "On";
+  }
+  if (mode === "disable") {
+    return "Off";
+  }
+  return `Auto (${sshAutoHint.textContent || "role default"})`;
+}
+
 function applyRoleDefaultSsh() {
   sshAutoRadio.checked = true;
   updateRoleDefaultSsh();
@@ -408,6 +586,20 @@ function applyRoleDefaultSsh() {
 function selectedNodeRole() {
   const node = nodeSelect.value.trim();
   return node ? String(state.nodeRoles[node] || "").toLowerCase() : "";
+}
+
+function selectedNodeAccess(node = nodeSelect.value.trim()) {
+  return node ? state.nodeAccess[node] || {} : {};
+}
+
+function flashAccessHint(node) {
+  const access = selectedNodeAccess(node);
+  const address = access.management_ip || "10.41.254.1";
+  const ssid = access.local_ap_enabled && access.local_ap_ssid ? access.local_ap_ssid : "";
+  if (ssid) {
+    return `Join ${ssid} or connect Ethernet, then SSH to root@${address}.`;
+  }
+  return `Connect to the node management network, then SSH to root@${address}.`;
 }
 
 function updateRoleDefaultSsh() {
@@ -436,6 +628,16 @@ function setStep(stepEl, done) {
 function updateFlashControls() {
   const config = configInput.value.trim();
   const node = nodeSelect.value.trim();
+  const signature = currentFlashSignature(config, node);
+  if (state.planSignature && state.planSignature !== signature) {
+    state.planSignature = "";
+    state.planImageSummary = "";
+    clearPlan();
+  }
+  if (state.flashSignature && state.flashSignature !== signature) {
+    state.flashSignature = "";
+    state.lastFlashOk = false;
+  }
   setStep(steps.fleet, Boolean(config));
   setStep(steps.node, Boolean(node));
   setStep(steps.disk, Boolean(state.diskDevice));
@@ -445,8 +647,12 @@ function updateFlashControls() {
   }
   const ready = Boolean(config && node && state.diskDevice);
   const needsPassword = ready && isMac && !adminPasswordInput.value;
+  adminPasswordRow.hidden = !isMac || !ready;
   previewFlash.disabled = !ready || state.flashBusy;
   startFlash.disabled = !ready || needsPassword || state.flashBusy;
+  flashPanel.classList.toggle("ready", ready && !needsPassword && !state.flashBusy);
+  flashPanel.classList.toggle("needs-attention", ready && needsPassword && !state.flashBusy);
+  flashPanel.classList.toggle("busy", state.flashBusy);
   summaryNode.textContent = node || "—";
   selectedDisk.textContent = state.diskDevice || "None";
 
@@ -470,6 +676,129 @@ function updateFlashControls() {
   }
   flashReady.textContent = label;
   flashReady.className = `chip ${tone}`;
+  updateFlashReview({ node, ready, needsPassword, label, tone });
+}
+
+function currentFlashSignature(config = configInput.value.trim(), node = nodeSelect.value.trim()) {
+  return [config, node, state.diskDevice, selectedSshMode()].join("|");
+}
+
+function updateFlashReview({ node, ready, needsPassword, label, tone }) {
+  reviewNode.textContent = node || "Select a node";
+  reviewDisk.textContent = state.diskDevice || "Select a disk";
+  reviewSsh.textContent = selectedSshLabel();
+  reviewImage.textContent = state.planImageSummary || imageReadinessSummary();
+  eraseWarning.hidden = !state.diskDevice;
+  reviewStatus.textContent = label;
+  reviewStatus.className = `chip ${tone}`;
+  reviewNode.classList.toggle("pending", !node);
+  reviewDisk.classList.toggle("pending", !state.diskDevice);
+  reviewImage.classList.toggle("pending", !state.planImageSummary && !imagesFullyCached());
+  reviewSsh.classList.remove("pending");
+  if (ready && !needsPassword && !state.flashBusy) {
+    reviewStatus.textContent = state.planImageSummary ? "reviewed" : "ready";
+    reviewStatus.className = `chip ${state.planImageSummary ? "ok" : tone}`;
+  }
+}
+
+function imageReadinessSummary() {
+  const entries = Object.entries(state.images || {});
+  if (!entries.length) {
+    return "No image targets found";
+  }
+  const missing = entries.filter(([, image]) => !image || !image.cached_path);
+  if (!missing.length) {
+    return entries.length === 1 ? "Image cache ready" : `${entries.length} image targets cached`;
+  }
+  const label = missing.length === 1 ? "target" : "targets";
+  return `${missing.length} image ${label} will download during preview or flash`;
+}
+
+function imagesFullyCached() {
+  const entries = Object.values(state.images || {});
+  return Boolean(entries.length) && entries.every((image) => image && image.cached_path);
+}
+
+function planImageSummary(payload) {
+  const image = payload.image || {};
+  const plan = payload.plan || {};
+  const imagePath = image.cached_path || plan.base_image || image.url || "";
+  const version = image.version ? ` ${image.version}` : "";
+  if (imagePath) {
+    return `Plan confirmed${version}: ${imagePath}`;
+  }
+  return "Plan confirmed exact image";
+}
+
+function updateDiskMode() {
+  const showingAll = showAllDisks.checked;
+  allDisksWarning.hidden = !showingAll;
+  diskPanel.classList.toggle("danger-mode", showingAll);
+}
+
+function setupTabNavigation() {
+  for (const button of tabButtons) {
+    button.addEventListener("click", () => {
+      if (button.disabled) {
+        return;
+      }
+      activateTab(button.dataset.tabTarget);
+    });
+  }
+  const selected = tabButtons.find((button) => button.getAttribute("aria-selected") === "true") || tabButtons[0];
+  if (selected) {
+    activateTab(selected.dataset.tabTarget);
+  }
+}
+
+function activateTab(tabId) {
+  if (!tabId) {
+    return;
+  }
+  for (const button of tabButtons) {
+    const selected = button.dataset.tabTarget === tabId;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+  for (const panel of tabPanels) {
+    const selected = panel.id === tabId;
+    panel.hidden = !selected;
+    panel.classList.toggle("active", selected);
+  }
+  if (tabId === "tab-mesh" && nativeApi && !state.meshHasScanned && !state.meshBusy) {
+    discoverMesh().catch((error) => {
+      renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], radios: [], candidates_checked: 0 });
+    });
+  }
+}
+
+function startDiskWatcher() {
+  if (diskWatchTimer) {
+    return;
+  }
+  diskWatchTimer = setInterval(refreshDisksIfChanged, diskWatchIntervalMs);
+  window.addEventListener("focus", refreshDisksIfChanged);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshDisksIfChanged();
+    }
+  });
+  window.addEventListener("beforeunload", stopDiskWatcher);
+}
+
+function stopDiskWatcher() {
+  if (!diskWatchTimer) {
+    return;
+  }
+  clearInterval(diskWatchTimer);
+  diskWatchTimer = null;
+}
+
+function refreshDisksIfChanged() {
+  if (state.flashBusy || document.hidden) {
+    return;
+  }
+  refreshDisks({ renderIfUnchanged: false, reportErrors: false });
 }
 
 function setBusy(busy) {
@@ -609,14 +938,19 @@ function renderPlanResult(payload) {
     appendLog("error", error);
   }
   if (payload.ok) {
+    state.planSignature = currentFlashSignature();
+    state.planImageSummary = planImageSummary(payload);
     setFlashStatus("ok", "Dry run complete. No changes were made.");
     renderPlanCard(payload);
   } else {
+    state.planSignature = "";
+    state.planImageSummary = "";
     setFlashStatus("bad", (payload.errors || [])[0] || "Could not build the flash plan");
     if (payload.plan && Object.keys(payload.plan).length) {
       renderPlanCard(payload);
     }
   }
+  updateFlashControls();
   updateCopyFlashLogVisibility();
 }
 
@@ -640,9 +974,13 @@ function renderFlash(payload) {
     appendLog("info", state.sudoCommand);
   }
   if (payload.ok) {
+    const node = payload.node || state.nodeName || "the node";
+    const hint = flashAccessHint(node);
+    state.flashSignature = currentFlashSignature();
     state.lastFlashOk = true;
     appendLog("success", "Flash complete.");
-    setFlashStatus("ok", `Flash complete. Insert the disk into ${payload.node || state.nodeName || "the node"} and boot.`);
+    appendLog("info", hint);
+    setFlashStatus("ok", `Flash complete. Insert the disk into ${node} and boot. ${hint}`);
   } else if (payload.canceled) {
     setFlashStatus("warn", "Flash canceled. The disk was not modified.");
   } else {
@@ -662,6 +1000,9 @@ async function getJson(url) {
 async function postJson(url, body) {
   if (nativeApi && url === "/api/validate") {
     return nativeApi.validate(body);
+  }
+  if (nativeApi && nativeApi.discoverMesh && url === "/api/mesh/discover") {
+    return nativeApi.discoverMesh(body);
   }
   return fetchJson(url, {
     method: "POST",
@@ -726,6 +1067,7 @@ function renderStateError(error) {
   resetNodeSelect("No nodes available");
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
+  state.images = {};
   images.innerHTML = `<div class="inline-error">${escapeHtml(errorMessage(error))}</div>`;
   updateFlashControls();
 }
@@ -766,5 +1108,7 @@ async function getDisks(includeAll) {
 }
 
 updateRoleDefaultSsh();
+updateDiskMode();
+updateMeshFleetSource();
 updateFlashControls();
-refreshAll().catch(handleRefreshError);
+refreshAll().catch(handleRefreshError).finally(startDiskWatcher);

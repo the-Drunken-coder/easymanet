@@ -214,6 +214,7 @@ MESH_PASSWORD="$(json_val mesh password)"
 HOSTNAME="$(json_val node hostname)"
 NODE_ROLE="$(json_val node role)"
 NODE_IP="$(json_val node ip)"
+NODE_TARGET="$(json_val node target)"
 MESH_CHANNEL="$(json_val mesh channel)"
 MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
@@ -228,6 +229,7 @@ missing_fields=""
 [ -n "$HOSTNAME" ] || missing_fields="$missing_fields node.hostname"
 [ -n "$NODE_ROLE" ] || missing_fields="$missing_fields node.role"
 [ -n "$NODE_IP" ] || missing_fields="$missing_fields node.ip"
+[ -n "$NODE_TARGET" ] || NODE_TARGET="rpi4-mm6108-spi"
 if [ -n "$missing_fields" ]; then
     echo "FATAL: missing required provision.json fields:$missing_fields" | tee -a "$LOG_FILE"
     exit 1
@@ -256,6 +258,15 @@ case "$MESH_CHANNEL" in
         exit 1
         ;;
 esac
+if [ "$NODE_TARGET" = "rpi4-mm6108-spi" ] && [ "$MESH_COUNTRY" = "US" ]; then
+    case "${MESH_CHANNEL}:${MESH_BW}" in
+        0:2|42:2) ;;
+        *)
+            echo "FATAL: rpi4-mm6108-spi in US requires mesh.channel 42 and mesh.bandwidth_mhz 2; got channel $MESH_CHANNEL bandwidth $MESH_BW" | tee -a "$LOG_FILE"
+            exit 1
+            ;;
+    esac
+fi
 
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"
@@ -464,17 +475,19 @@ fi
 if [ "$NODE_ROLE" = "gate" ] && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$UPLINK" ] || UPLINK="eth0"
-    WAN_DEVICE="$UPLINK"
     if [ "$UPLINK" = "eth0" ]; then
-        WAN_DEVICE="br-lan"
+        uci -q delete network.wan 2>/dev/null || true
+        uci -q delete network.wan6 2>/dev/null || true
+        uci_commit network
+    else
+        uci_set network.wan=interface
+        uci_set network.wan.proto="dhcp"
+        uci_set network.wan.device="$UPLINK"
+        uci_set network.wan.ifname="$UPLINK"
+        uci_set network.wan.peerdns="0"
+        uci_set network.wan.dns="$EM_UPLINK_DNS"
+        uci_commit network
     fi
-    uci_set network.wan=interface
-    uci_set network.wan.proto="dhcp"
-    uci_set network.wan.device="$WAN_DEVICE"
-    uci_set network.wan.ifname="$WAN_DEVICE"
-    uci_set network.wan.peerdns="0"
-    uci_set network.wan.dns="$EM_UPLINK_DNS"
-    uci_commit network
 fi
 
 if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then

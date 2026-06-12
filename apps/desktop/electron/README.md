@@ -6,8 +6,10 @@ preload API plus a Python JSON bridge. It does not depend on a hosted
 website or a localhost web server.
 
 The native shell can preview and execute the shared EasyMANET flash workflow.
-If the OS blocks direct block-device writes, the app returns a copyable sudo
-fallback command that reuses the bundled bridge.
+On macOS, Flash prompts through a temporary EasyMANET Flash Helper applet
+before running the narrow bridge flash command that writes the selected disk.
+If elevation is not available, the bridge still returns a copyable sudo
+fallback command.
 
 ## Run
 

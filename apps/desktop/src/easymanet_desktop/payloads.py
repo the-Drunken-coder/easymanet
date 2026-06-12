@@ -88,7 +88,18 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "errors": result.errors,
         "warnings": result.warnings,
         "nodes": manifest.node_names(),
+        "node_roles": node_roles(manifest),
     }
+
+
+def node_roles(manifest: Any) -> dict[str, str]:
+    default_role = str(manifest.defaults.get("role", "point"))
+    roles = {}
+    for name in manifest.node_names():
+        node = manifest.get_node(name)
+        role = node.get("role", default_role) if isinstance(node, dict) else default_role
+        roles[name] = str(role)
+    return roles
 
 
 def resolve_config_payload(*, config: str) -> dict[str, Any]:

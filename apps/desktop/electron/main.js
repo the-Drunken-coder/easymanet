@@ -260,11 +260,13 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
     try {
       bridge = elevatedBridgeCommand(args, options.stage);
     } catch (error) {
+      cleanupElevatedStage(options.stage);
       resolve({ ok: false, errors: [error.message] });
       return;
     }
 
     const timeoutMs = options.timeoutMs || flashBridgeTimeoutMs;
+    const effectiveTimeoutMs = timeoutMs + 60000;
     const sudo = sudoBridgeCommand(bridge);
     const child = spawn(sudo.command, sudo.args, {
       cwd: bridge.cwd || elevatedTempRoot(),
@@ -291,8 +293,8 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
 
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, errors: [`Administrator flash timed out after ${timeoutMs / 1000}s`] });
-    }, timeoutMs + 60000);
+      finish({ ok: false, errors: [`Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`] });
+    }, effectiveTimeoutMs);
 
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();

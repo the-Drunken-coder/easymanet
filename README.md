@@ -87,6 +87,12 @@ defaults:
     root_password_hash: ""
     ssh_authorized_keys:
       - "ssh-ed25519 AAAAC3..."
+  gateway:
+    wifi:
+      enabled: false
+      ssid: "operator-wifi"
+      password: "operator-wifi-password"
+      encryption: psk2
 
 nodes:
   gate01:
@@ -97,7 +103,9 @@ nodes:
       ssid: gate01-local
     gateway:
       enabled: true
-      uplink_interface: eth0
+      uplink_interface: wifi
+      wifi:
+        enabled: true
 
   point01:
     role: point
@@ -112,9 +120,10 @@ The checked-in starter fleet is
 See [docs/sample-fleet.md](docs/sample-fleet.md) for the copy command and a
 smaller two-node example. EasyMANET does not create a fleet file automatically.
 
-For a gate, `uplink_interface: eth0` keeps wired management on `br-lan`.
-EasyMANET does not run WAN DHCP on that management bridge; use Wi-Fi uplink or
-a different interface when the gate should route upstream traffic.
+For a gate, `uplink_interface: wifi` joins the configured operator LAN. With SSH
+enabled, the node opens SSH on that WAN zone so the desktop Mesh tab can find
+it locally. `uplink_interface: eth0` keeps wired management on `br-lan`;
+EasyMANET does not run WAN DHCP on that management bridge.
 
 ### 3. List available disks
 

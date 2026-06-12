@@ -59,7 +59,7 @@ const steps = {
 };
 
 const nativeApi = window.easymanet || null;
-const isMac = navigator.platform.toLowerCase().includes("mac");
+const isMac = detectMacPlatform();
 
 if (!nativeApi) {
   chooseConfig.hidden = true;
@@ -474,7 +474,14 @@ function updateFlashControls() {
 
 function setBusy(busy) {
   state.flashBusy = busy;
+  document.body.classList.toggle("flash-busy", busy);
   updateFlashControls();
+}
+
+function detectMacPlatform() {
+  const nav = window.navigator || {};
+  const platform = String(nav.userAgentData?.platform || nav.platform || nav.userAgent || "").toLowerCase();
+  return platform.includes("mac");
 }
 
 function setFlashStatus(tone, message) {

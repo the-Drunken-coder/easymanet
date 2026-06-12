@@ -3,6 +3,8 @@
 (function () {
   "use strict";
 
+  const ALLOWED_TONES = new Set(["ok", "warn", "bad", "subtle"]);
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -29,7 +31,11 @@
   }
 
   function chip(tone, text) {
-    return `<span class="chip ${tone}">${escapeHtml(text)}</span>`;
+    return `<span class="chip ${safeTone(tone)}">${escapeHtml(text)}</span>`;
+  }
+
+  function safeTone(tone) {
+    return ALLOWED_TONES.has(tone) ? tone : "subtle";
   }
 
   function imageItem(target, image) {
@@ -136,6 +142,7 @@
   window.EMRender = {
     escapeHtml,
     formatBytes,
+    safeTone,
     imageItem,
     diskCard,
     validationMarkup,

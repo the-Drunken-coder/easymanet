@@ -117,6 +117,11 @@ code {
   backdrop-filter: blur(10px);
 }
 
+body.flash-busy .appbar {
+  background: var(--bg);
+  backdrop-filter: none;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -1053,5 +1058,25 @@ select:disabled {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  .appbar,
+  .btn,
+  .console-actions,
+  .switch,
+  .segmented {
+    display: none !important;
+  }
+
+  .card {
+    break-inside: avoid;
+  }
+
+  .console,
+  .plan-details pre {
+    max-height: none;
+    overflow: visible;
   }
 }

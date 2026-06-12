@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import json
 from pathlib import Path
+import subprocess
 
 from easymanet_desktop import bridge
 from easymanet_desktop import payloads
@@ -310,6 +311,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     root = Path(__file__).resolve().parents[1]
     index = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "index.html"
     app_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "app.js"
+    render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
+    styles = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "styles.css"
 
     assert 'href="styles.css"' in index.read_text()
     assert 'src="app.js"' in index.read_text()
@@ -340,8 +343,50 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "node_roles" in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
+    assert "detectMacPlatform" in text
+    assert "classList.toggle" in text
+    assert "flash-busy" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
+    assert "safeTone" in render_js.read_text()
+    assert "ALLOWED_TONES" in render_js.read_text()
+    assert '["ok", "warn", "bad", "subtle"]' in render_js.read_text()
+    assert "body.flash-busy .appbar" in styles.read_text()
+    assert "@media print" in styles.read_text()
+
+
+def test_desktop_renderer_safe_tone_allows_only_expected_classes():
+    root = Path(__file__).resolve().parents[1]
+    render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
+    script = """
+const fs = require("node:fs");
+const vm = require("node:vm");
+const context = { window: {} };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const { safeTone } = context.window.EMRender;
+const valid = ["ok", "warn", "bad", "subtle"];
+const invalid = ["danger", "<script>", null, undefined, "ok bad"];
+process.stdout.write(JSON.stringify({
+  valid: Object.fromEntries(valid.map((tone) => [tone, safeTone(tone)])),
+  invalid: invalid.map((tone) => safeTone(tone)),
+}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(render_js)],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["valid"] == {
+        "ok": "ok",
+        "warn": "warn",
+        "bad": "bad",
+        "subtle": "subtle",
+    }
+    assert payload["invalid"] == ["subtle"] * 5
 
 
 def test_desktop_static_containment_rejects_sibling_prefix(tmp_path):

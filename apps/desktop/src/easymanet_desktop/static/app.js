@@ -3,6 +3,9 @@ const state = {
   nodeName: "",
   diskDevice: "",
   sudoCommand: "",
+  nodeLoadSeq: 0,
+  nodeRoles: {},
+  sshModeFromRoleDefault: false,
 };
 
 const workspacePath = document.getElementById("workspace-path");
@@ -12,6 +15,7 @@ const fleetEmptyPath = document.getElementById("fleet-empty-path");
 const fleetCount = document.getElementById("fleet-count");
 const fleetSelect = document.getElementById("fleet-select");
 const configInput = document.getElementById("config-path");
+const nodeSelect = document.getElementById("node-name");
 const imageCount = document.getElementById("image-count");
 const images = document.getElementById("images");
 const disks = document.getElementById("disks");
@@ -22,11 +26,16 @@ const selectedDisk = document.getElementById("selected-disk");
 const previewFlash = document.getElementById("preview-flash");
 const startFlash = document.getElementById("start-flash");
 const flashOutput = document.getElementById("flash-output");
+const roleDefaultSsh = document.getElementById("role-default-ssh");
+const adminPasswordRow = document.getElementById("admin-password-row");
+const adminPasswordInput = document.getElementById("admin-password");
+const copyFlashLog = document.getElementById("copy-flash-log");
 const copySudo = document.getElementById("copy-sudo");
 const showAllDisks = document.getElementById("show-all-disks");
 const chooseConfig = document.getElementById("choose-config");
 const openFleetsFolder = document.getElementById("open-fleets-folder");
 const nativeApi = window.easymanet || null;
+const isMac = navigator.platform.toLowerCase().includes("mac");
 
 if (!nativeApi) {
   chooseConfig.hidden = true;
@@ -35,6 +44,7 @@ if (!nativeApi) {
 } else if (nativeApi.onFlashEvent) {
   nativeApi.onFlashEvent(renderFlashEvent);
 }
+adminPasswordRow.hidden = !nativeApi || !isMac;
 
 document.getElementById("refresh").addEventListener("click", () => {
   refreshAll().catch(handleRefreshError);
@@ -42,11 +52,27 @@ document.getElementById("refresh").addEventListener("click", () => {
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
+    loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
   }
 });
-configInput.addEventListener("input", updateFlashControls);
-document.getElementById("node-name").addEventListener("input", updateFlashControls);
+configInput.addEventListener("input", () => {
+  state.nodeLoadSeq += 1;
+  resetNodeSelect("Update fleet path to load nodes");
+  updateFlashControls();
+});
+configInput.addEventListener("change", () => {
+  syncFleetSelect(configInput.value.trim());
+  loadNodesForSelectedFleet().catch(handleNodeLoadError);
+});
+nodeSelect.addEventListener("change", () => {
+  state.nodeName = nodeSelect.value.trim();
+  if (state.sshModeFromRoleDefault) {
+    applyRoleDefaultSsh();
+  }
+  updateFlashControls();
+});
+roleDefaultSsh.addEventListener("click", applyRoleDefaultSsh);
 chooseConfig.addEventListener("click", async () => {
   if (!nativeApi) {
     return;
@@ -55,6 +81,7 @@ chooseConfig.addEventListener("click", async () => {
   if (result.ok && result.path) {
     configInput.value = result.path;
     syncFleetSelect(result.path);
+    await loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
   }
 });
@@ -81,8 +108,12 @@ disks.addEventListener("click", event => {
   updateFlashControls();
 });
 document.querySelectorAll("input[name='ssh-mode']").forEach(input => {
-  input.addEventListener("change", updateFlashControls);
+  input.addEventListener("change", () => {
+    state.sshModeFromRoleDefault = false;
+    updateFlashControls();
+  });
 });
+adminPasswordInput.addEventListener("input", updateFlashControls);
 previewFlash.addEventListener("click", async () => {
   if (!nativeApi) {
     return;
@@ -96,9 +127,14 @@ startFlash.addEventListener("click", async () => {
     return;
   }
   renderFlashStatus("Flashing selected disk...");
-  const response = await nativeApi.flash(flashPayload());
-  renderFlash(response);
-  await loadDisks().catch(renderDiskError);
+  try {
+    const response = await nativeApi.flash(flashPayload({includeAdminPassword: true}));
+    renderFlash(response);
+    await loadDisks().catch(renderDiskError);
+  } finally {
+    adminPasswordInput.value = "";
+    updateFlashControls();
+  }
 });
 copySudo.addEventListener("click", async () => {
   if (!nativeApi || !state.sudoCommand) {
@@ -106,21 +142,29 @@ copySudo.addEventListener("click", async () => {
   }
   const result = await nativeApi.copyText(state.sudoCommand);
   if (result.ok) {
-    copySudo.textContent = "Copied";
-    setTimeout(() => {
-      copySudo.textContent = "Copy Sudo Command";
-    }, 1200);
+    showCopied(copySudo, "Copy Sudo Command");
+  }
+});
+copyFlashLog.addEventListener("click", async () => {
+  const logText = flashOutput.textContent.trim();
+  if (!nativeApi || !logText) {
+    return;
+  }
+  const result = await nativeApi.copyText(logText);
+  if (result.ok) {
+    showCopied(copyFlashLog, "Copy Logs");
   }
 });
 document.getElementById("validate-form").addEventListener("submit", async event => {
   event.preventDefault();
   state.configPath = configInput.value.trim();
-  state.nodeName = document.getElementById("node-name").value.trim();
+  state.nodeName = nodeSelect.value.trim();
   try {
     const response = await postJson("/api/validate", {
       config: state.configPath,
       node: state.nodeName,
     });
+    renderNodeOptions(response.nodes || [], state.nodeName, response.node_roles || {});
     renderValidation(response);
     updateFlashControls();
   } catch (error) {
@@ -145,7 +189,7 @@ async function loadState() {
     }
     const workspace = payload.workspace || {};
     workspacePath.textContent = workspace.root ? `Workspace: ${workspace.root}` : "";
-    renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
+    await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     const entries = Object.entries(payload.images || {});
     imageCount.textContent = `${entries.length}`;
     images.innerHTML = entries.map(([target, image]) => imageMarkup(target, image)).join("");
@@ -199,7 +243,7 @@ function renderValidation(payload) {
   validationOutput.className = payload.ok ? "status-ok" : "status-bad";
 }
 
-function renderFleets(records, folder) {
+async function renderFleets(records, folder) {
   fleetFolder.textContent = folder ? `Fleets: ${folder}` : "";
   fleetEmptyPath.textContent = folder || "";
   fleetCount.textContent = `${records.length}`;
@@ -210,6 +254,7 @@ function renderFleets(records, folder) {
     fleetSelect.add(new Option("No fleet files found", ""));
     fleetEmpty.hidden = false;
     configInput.value = "";
+    resetNodeSelect("No nodes available");
     updateFlashControls();
     return;
   }
@@ -224,6 +269,7 @@ function renderFleets(records, folder) {
   const selected = current || records[0].path;
   configInput.value = selected;
   syncFleetSelect(selected);
+  await loadNodesForSelectedFleet(state.nodeName).catch(handleNodeLoadError);
   updateFlashControls();
 }
 
@@ -240,6 +286,75 @@ function syncFleetSelect(path) {
   custom.dataset.custom = "true";
   fleetSelect.add(custom, 0);
   fleetSelect.value = path;
+}
+
+async function loadNodesForSelectedFleet(preferredNode = "") {
+  const config = configInput.value.trim();
+  const selectedNode = preferredNode || state.nodeName;
+  const seq = state.nodeLoadSeq + 1;
+  state.nodeLoadSeq = seq;
+  state.configPath = config;
+
+  if (!config) {
+    resetNodeSelect("Select a fleet first");
+    return;
+  }
+
+  resetNodeSelect("Loading nodes...");
+  const response = await postJson("/api/validate", { config, node: "" });
+  if (seq !== state.nodeLoadSeq) {
+    return;
+  }
+  renderNodeOptions(response.nodes || [], selectedNode, response.node_roles || {});
+  if (!response.ok) {
+    renderValidation(response);
+  }
+}
+
+function renderNodeOptions(nodes, preferredNode = "", nodeRoles = {}) {
+  const uniqueNodes = [...new Set((nodes || []).map(node => String(node).trim()).filter(Boolean))];
+  state.nodeRoles = {...nodeRoles};
+  nodeSelect.replaceChildren();
+
+  if (!uniqueNodes.length) {
+    nodeSelect.add(new Option("No nodes found", ""));
+    nodeSelect.disabled = true;
+    state.nodeName = "";
+    updateRoleDefaultSsh();
+    updateFlashControls();
+    return;
+  }
+
+  nodeSelect.add(new Option("Select a node", ""));
+  for (const node of uniqueNodes) {
+    nodeSelect.add(new Option(node, node));
+  }
+
+  if (preferredNode && uniqueNodes.includes(preferredNode)) {
+    nodeSelect.value = preferredNode;
+  } else if (uniqueNodes.length === 1) {
+    nodeSelect.value = uniqueNodes[0];
+  } else {
+    nodeSelect.value = "";
+  }
+
+  nodeSelect.disabled = false;
+  state.nodeName = nodeSelect.value.trim();
+  if (state.sshModeFromRoleDefault) {
+    applyRoleDefaultSsh();
+  }
+  updateRoleDefaultSsh();
+  updateFlashControls();
+}
+
+function resetNodeSelect(label) {
+  state.nodeName = "";
+  state.nodeRoles = {};
+  nodeSelect.replaceChildren();
+  nodeSelect.add(new Option(label, ""));
+  nodeSelect.disabled = true;
+  updateRoleDefaultSsh();
+  updateFlashControls();
 }
 
 function imageMarkup(target, image) {
@@ -274,31 +389,62 @@ function diskMarkup(disk) {
   `;
 }
 
-function flashPayload() {
+function flashPayload(options = {}) {
   state.configPath = configInput.value.trim();
-  state.nodeName = document.getElementById("node-name").value.trim();
-  return {
+  state.nodeName = nodeSelect.value.trim();
+  const payload = {
     config: state.configPath,
     node: state.nodeName,
     device: state.diskDevice,
     sshMode: selectedSshMode(),
   };
+  if (options.includeAdminPassword) {
+    payload.adminPassword = adminPasswordInput.value;
+  }
+  return payload;
 }
 
 function selectedSshMode() {
   return document.querySelector("input[name='ssh-mode']:checked")?.value || "default";
 }
 
+function applyRoleDefaultSsh() {
+  const role = selectedNodeRole();
+  if (!role) {
+    return;
+  }
+  setSshMode(role === "gate" ? "enable" : "disable");
+  state.sshModeFromRoleDefault = true;
+  updateFlashControls();
+}
+
+function selectedNodeRole() {
+  const node = nodeSelect.value.trim();
+  return node ? String(state.nodeRoles[node] || "").toLowerCase() : "";
+}
+
+function setSshMode(mode) {
+  document.querySelectorAll("input[name='ssh-mode']").forEach(input => {
+    input.checked = input.value === mode;
+  });
+}
+
+function updateRoleDefaultSsh() {
+  roleDefaultSsh.disabled = !selectedNodeRole();
+}
+
 function updateFlashControls() {
   if (!nativeApi) {
     return;
   }
+  updateRoleDefaultSsh();
   const config = configInput.value.trim();
-  const node = document.getElementById("node-name").value.trim();
+  const node = nodeSelect.value.trim();
   const ready = Boolean(config && node && state.diskDevice);
+  const needsPassword = ready && isMac && !adminPasswordInput.value;
   previewFlash.disabled = !ready;
-  startFlash.disabled = !ready;
-  flashReady.textContent = ready ? "ready" : "needs config, node, disk";
+  startFlash.disabled = !ready || needsPassword;
+  flashReady.textContent = ready ? (needsPassword ? "needs admin password" : "ready") : "needs config, node, disk";
 }
 
 function renderFlashStatus(message) {
@@ -307,6 +453,7 @@ function renderFlashStatus(message) {
   copySudo.textContent = "Copy Sudo Command";
   flashOutput.className = "";
   flashOutput.textContent = message;
+  updateCopyFlashLogVisibility();
 }
 
 function renderFlashEvent(event) {
@@ -322,6 +469,7 @@ function renderFlashEvent(event) {
   } else if (event.level === "error") {
     flashOutput.className = "status-bad";
   }
+  updateCopyFlashLogVisibility();
 }
 
 function renderFlash(payload) {
@@ -356,6 +504,7 @@ function renderFlash(payload) {
   }
   flashOutput.textContent = lines.join("\n") || "no result";
   flashOutput.className = payload.ok ? "status-ok" : "status-bad";
+  updateCopyFlashLogVisibility();
 }
 
 async function getJson(url) {
@@ -429,6 +578,7 @@ function renderStateError(error) {
   fleetSelect.replaceChildren();
   fleetSelect.disabled = true;
   fleetSelect.add(new Option("Workspace unavailable", ""));
+  resetNodeSelect("No nodes available");
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
   images.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
@@ -437,6 +587,25 @@ function renderStateError(error) {
 
 function renderDiskError(error) {
   disks.innerHTML = `<div class="status-bad">${escapeHtml(errorMessage(error))}</div>`;
+  updateFlashControls();
+}
+
+function updateCopyFlashLogVisibility() {
+  copyFlashLog.hidden = !flashOutput.textContent.trim();
+  copyFlashLog.textContent = "Copy Logs";
+}
+
+function showCopied(button, label) {
+  button.textContent = "Copied";
+  setTimeout(() => {
+    button.textContent = label;
+  }, 1200);
+}
+
+function handleNodeLoadError(error) {
+  console.error("Node refresh failed", error);
+  resetNodeSelect("Could not load nodes");
+  renderValidation({ ok: false, errors: [errorMessage(error)] });
   updateFlashControls();
 }
 

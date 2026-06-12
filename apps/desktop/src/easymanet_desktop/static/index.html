@@ -42,7 +42,9 @@
             </label>
             <label>
               Node
-              <input id="node-name" name="node" placeholder="point01" autocomplete="off">
+              <select id="node-name" name="node" disabled>
+                <option value="">Select a fleet first</option>
+              </select>
             </label>
             <button type="submit">Validate</button>
             <pre id="validation-output"></pre>
@@ -80,10 +82,7 @@
               <fieldset>
                 <legend>SSH</legend>
                 <div class="segmented">
-                  <label>
-                    <input type="radio" name="ssh-mode" value="default" checked>
-                    Role default
-                  </label>
+                  <button id="role-default-ssh" type="button" disabled>Role default</button>
                   <label>
                     <input type="radio" name="ssh-mode" value="enable">
                     Enable
@@ -95,11 +94,18 @@
                 </div>
               </fieldset>
             </div>
+            <label class="admin-password-row" id="admin-password-row" hidden>
+              Mac admin password
+              <input id="admin-password" type="password" autocomplete="current-password">
+            </label>
             <div class="actions">
               <button id="preview-flash" type="button">Preview</button>
               <button id="start-flash" type="button">Flash</button>
             </div>
-            <button id="copy-sudo" type="button" hidden>Copy Sudo Command</button>
+            <div class="copy-actions">
+              <button id="copy-flash-log" type="button" hidden>Copy Logs</button>
+              <button id="copy-sudo" type="button" hidden>Copy Sudo Command</button>
+            </div>
             <pre id="flash-output"></pre>
           </section>
         </section>

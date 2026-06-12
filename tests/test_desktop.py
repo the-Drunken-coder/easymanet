@@ -19,6 +19,8 @@ def test_desktop_validate_payload_returns_nodes():
 
     assert payload["ok"] is True
     assert "point01" in payload["nodes"]
+    assert payload["node_roles"]["gate01"] == "gate"
+    assert payload["node_roles"]["point01"] == "point"
 
 
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):
@@ -325,7 +327,20 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "flash-panel" in index.read_text()
     assert "preview-flash" in index.read_text()
     assert "start-flash" in index.read_text()
+    assert "copy-flash-log" in index.read_text()
+    assert "role-default-ssh" in index.read_text()
+    assert "admin-password" in index.read_text()
+    assert 'value="default"' not in index.read_text()
+    assert '<select id="node-name" name="node" disabled>' in index.read_text()
+    assert '<input id="node-name"' not in index.read_text()
     assert "renderFleets" in text
+    assert "loadNodesForSelectedFleet" in text
+    assert "renderNodeOptions" in text
+    assert "applyRoleDefaultSsh" in text
+    assert "node_roles" in text
+    assert "includeAdminPassword" in text
+    assert "adminPassword" in text
+    assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
 
 
@@ -366,6 +381,19 @@ def test_electron_shell_files_exist():
     assert "runBridgeStreaming" in (electron / "main.js").read_text()
     assert "fullStdout" in (electron / "main.js").read_text()
     assert "isDestroyed" in (electron / "main.js").read_text()
+    assert "runFlashWithAdministratorPrivileges" in (electron / "main.js").read_text()
+    assert '"sudo"' in (electron / "main.js").read_text()
+    assert '"-S"' in (electron / "main.js").read_text()
+    assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
+    assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
+    assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
+    assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
+    assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()
+    assert "EasyMANET Flash Helper.app" not in (electron / "main.js").read_text()
+    assert 'spawn(sudo.command, sudo.args' in (electron / "main.js").read_text()
+    assert "Mac administrator password is required for flashing" in (electron / "main.js").read_text()
+    assert "with administrator privileges" not in (electron / "main.js").read_text()
+    assert 'spawn("osascript"' not in (electron / "main.js").read_text()
     assert "streamEvents" not in (electron / "main.js").read_text()
     assert "copyText" in (electron / "preload.js").read_text()
     assert "onFlashEvent" in (electron / "preload.js").read_text()

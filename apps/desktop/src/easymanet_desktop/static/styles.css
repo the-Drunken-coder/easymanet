@@ -261,7 +261,8 @@ legend {
   background: #f9faf8;
 }
 
-.segmented label {
+.segmented label,
+.segmented button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -273,7 +274,21 @@ legend {
   text-align: center;
 }
 
-.segmented label:first-child {
+.segmented button {
+  border-radius: 0;
+  background: transparent;
+}
+
+.segmented button:hover {
+  background: #edf6f1;
+}
+
+.segmented button:disabled {
+  background: transparent;
+  color: var(--muted);
+}
+
+.segmented > :first-child {
   border-left: 0;
 }
 
@@ -289,8 +304,23 @@ legend {
   margin-top: 14px;
 }
 
+.admin-password-row {
+  margin-top: 12px;
+}
+
 #copy-sudo {
+  margin-top: 0;
+}
+
+.copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-top: 10px;
+}
+
+.copy-actions button {
+  margin-top: 0;
 }
 
 @media (max-width: 760px) {
@@ -321,12 +351,13 @@ legend {
     grid-template-columns: 1fr;
   }
 
-  .segmented label {
+  .segmented label,
+  .segmented button {
     border-left: 0;
     border-top: 1px solid var(--line);
   }
 
-  .segmented label:first-child {
+  .segmented > :first-child {
     border-top: 0;
   }
 }

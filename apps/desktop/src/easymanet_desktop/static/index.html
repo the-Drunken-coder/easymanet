@@ -3,114 +3,183 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
     <title>EasyMANET</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <main class="shell">
-      <section class="workspace">
-        <header class="topbar">
-          <div>
-            <h1>EasyMANET</h1>
-            <p id="workspace-path"></p>
-          </div>
-          <button id="refresh" title="Refresh state" aria-label="Refresh state">&#8635;</button>
-        </header>
+    <header class="appbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="5" r="2.2"></circle>
+            <circle cx="5" cy="17" r="2.2"></circle>
+            <circle cx="19" cy="17" r="2.2"></circle>
+            <path d="M10.6 6.8 6.3 15.1M13.4 6.8l4.3 8.3M7.2 17h9.6"></path>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1>EasyMANET</h1>
+          <span class="brand-tag">Operator Console</span>
+        </div>
+      </div>
+      <div class="appbar-side">
+        <span id="workspace-path" class="workspace-chip mono"></span>
+        <button id="refresh" class="btn icon" type="button" title="Refresh state" aria-label="Refresh state">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+            <path d="M21 3v6h-6"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
 
-        <section class="grid">
-          <form class="panel" id="validate-form">
-            <div class="panel-title">
-              <h2>Fleet</h2>
-              <span id="fleet-count"></span>
-            </div>
-            <div class="meta" id="fleet-folder"></div>
-            <label>
-              Saved fleet
+    <main class="layout">
+      <form class="rail" id="validate-form">
+        <section class="card">
+          <header class="card-head">
+            <span class="step" id="step-fleet">1</span>
+            <h2>Fleet</h2>
+            <span class="chip subtle" id="fleet-count"></span>
+          </header>
+          <div class="card-body">
+            <label class="field">
+              <span class="field-label">Saved fleet</span>
               <select id="fleet-select"></select>
             </label>
             <div class="empty-state" id="fleet-empty" hidden>
-              <div class="name">No fleet files yet.</div>
-              <div class="meta">Fleets folder: <span id="fleet-empty-path"></span></div>
-              <button id="open-fleets-folder" type="button">Open Fleets Folder</button>
+              <p class="empty-title">No fleet files yet</p>
+              <p class="empty-meta">Drop a <code>.yml</code> fleet config into<br><span class="mono" id="fleet-empty-path"></span></p>
+              <button id="open-fleets-folder" class="btn ghost" type="button">Open Fleets Folder</button>
             </div>
-            <label>
-              Config
+            <label class="field">
+              <span class="field-label">Config path</span>
               <span class="path-picker">
-                <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off">
-                <button id="choose-config" type="button">Browse</button>
+                <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off" spellcheck="false">
+                <button id="choose-config" class="btn ghost" type="button">Browse</button>
               </span>
             </label>
-            <label>
-              Node
+            <div class="meta-line mono" id="fleet-folder"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <header class="card-head">
+            <span class="step" id="step-node">2</span>
+            <h2>Node</h2>
+            <span class="chip subtle" id="node-role" hidden></span>
+          </header>
+          <div class="card-body">
+            <label class="field">
+              <span class="field-label">Node to provision</span>
               <select id="node-name" name="node" disabled>
                 <option value="">Select a fleet first</option>
               </select>
             </label>
-            <button type="submit">Validate</button>
-            <pre id="validation-output"></pre>
-          </form>
-
-          <section class="panel">
-            <div class="panel-title">
-              <h2>Images</h2>
-              <span id="image-count"></span>
-            </div>
-            <div id="images"></div>
-          </section>
-
-          <section class="panel wide">
-            <div class="panel-title">
-              <h2>Disks</h2>
-              <label class="toggle">
-                <input id="show-all-disks" type="checkbox">
-                All
-              </label>
-            </div>
-            <div id="disks"></div>
-          </section>
-
-          <section class="panel wide" id="flash-panel">
-            <div class="panel-title">
-              <h2>Flash</h2>
-              <span id="flash-ready"></span>
-            </div>
-            <div class="flash-summary">
-              <div>
-                <div class="meta">Selected disk</div>
-                <div class="name" id="selected-disk">None</div>
-              </div>
-              <fieldset>
-                <legend>SSH</legend>
-                <div class="segmented">
-                  <button id="role-default-ssh" type="button" disabled>Role default</button>
-                  <label>
-                    <input type="radio" name="ssh-mode" value="enable">
-                    Enable
-                  </label>
-                  <label>
-                    <input type="radio" name="ssh-mode" value="disable">
-                    Disable
-                  </label>
-                </div>
-              </fieldset>
-            </div>
-            <label class="admin-password-row" id="admin-password-row" hidden>
-              Mac admin password
-              <input id="admin-password" type="password" autocomplete="current-password">
-            </label>
-            <div class="actions">
-              <button id="preview-flash" type="button">Preview</button>
-              <button id="start-flash" type="button">Flash</button>
-            </div>
-            <div class="copy-actions">
-              <button id="copy-flash-log" type="button" hidden>Copy Logs</button>
-              <button id="copy-sudo" type="button" hidden>Copy Sudo Command</button>
-            </div>
-            <pre id="flash-output"></pre>
-          </section>
+            <button class="btn ghost block" type="submit">Validate Fleet</button>
+            <div id="validation-output" class="validation" hidden></div>
+          </div>
         </section>
-      </section>
+
+        <section class="card">
+          <header class="card-head">
+            <h2>Images</h2>
+            <span class="chip subtle" id="image-count"></span>
+          </header>
+          <div class="card-body">
+            <div id="images" class="stack"></div>
+          </div>
+        </section>
+      </form>
+
+      <div class="main-col">
+        <section class="card">
+          <header class="card-head">
+            <span class="step" id="step-disk">3</span>
+            <h2>Target Disk</h2>
+            <label class="switch">
+              <input id="show-all-disks" type="checkbox">
+              <span>Show all disks</span>
+            </label>
+          </header>
+          <div class="card-body">
+            <div id="disks" class="disk-grid"></div>
+          </div>
+        </section>
+
+        <section class="card" id="flash-panel">
+          <header class="card-head">
+            <span class="step" id="step-flash">4</span>
+            <h2>Flash</h2>
+            <span class="chip subtle" id="flash-ready"></span>
+          </header>
+          <div class="card-body">
+            <div class="flash-target">
+              <div class="flash-target-cell">
+                <span class="field-label">Node</span>
+                <span class="mono target-value" id="summary-node">&mdash;</span>
+              </div>
+              <span class="flash-arrow" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M13 6l6 6-6 6"></path>
+                </svg>
+              </span>
+              <div class="flash-target-cell">
+                <span class="field-label">Disk</span>
+                <span class="mono target-value" id="selected-disk">None</span>
+              </div>
+            </div>
+
+            <fieldset class="field">
+              <legend class="field-label">SSH access</legend>
+              <div class="segmented">
+                <input type="radio" name="ssh-mode" id="role-default-ssh" value="auto" checked>
+                <label for="role-default-ssh">Auto <small id="ssh-auto-hint">role default</small></label>
+                <input type="radio" name="ssh-mode" id="ssh-enable" value="enable">
+                <label for="ssh-enable">On</label>
+                <input type="radio" name="ssh-mode" id="ssh-disable" value="disable">
+                <label for="ssh-disable">Off</label>
+              </div>
+            </fieldset>
+
+            <label class="field" id="admin-password-row" hidden>
+              <span class="field-label">Mac admin password</span>
+              <input id="admin-password" type="password" autocomplete="current-password" placeholder="Required to write the disk">
+            </label>
+
+            <div class="actions">
+              <button id="preview-flash" class="btn ghost" type="button">Preview Plan</button>
+              <button id="start-flash" class="btn primary" type="button">Flash Disk</button>
+            </div>
+
+            <div id="flash-status" class="flash-status" hidden>
+              <span class="status-icon" aria-hidden="true"></span>
+              <span id="flash-status-text"></span>
+            </div>
+
+            <div id="flash-progress" class="progress" hidden>
+              <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+              <span class="progress-text mono" id="progress-text"></span>
+            </div>
+
+            <div id="flash-plan" class="plan" hidden></div>
+
+            <div class="console-wrap" id="console-wrap" hidden>
+              <header class="console-head">
+                <span class="field-label">Activity log</span>
+                <span class="console-actions">
+                  <button id="copy-sudo" class="btn ghost small" type="button" hidden>Copy Sudo Command</button>
+                  <button id="copy-flash-log" class="btn ghost small" type="button">Copy Log</button>
+                </span>
+              </header>
+              <div id="flash-output" class="console" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
+
+    <script src="render.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

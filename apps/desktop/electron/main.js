@@ -17,7 +17,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     title: "EasyMANET",
-    backgroundColor: "#f6f7f4",
+    backgroundColor: "#0b1014",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

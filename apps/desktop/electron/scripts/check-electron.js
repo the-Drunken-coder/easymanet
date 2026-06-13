@@ -60,7 +60,7 @@ if (!payload.ok) {
 const fleetPath = path.join(workspace, "Fleets", "field.yml");
 fs.mkdirSync(path.dirname(fleetPath), { recursive: true });
 fs.copyFileSync(path.join(repoRoot, "examples", "three-node-field-mesh.yml"), fleetPath);
-const expectedFleetPath = fs.realpathSync(fleetPath);
+const expectedFleetPath = path.resolve(fleetPath);
 
 if (!hasTraversalSegment("../field")) {
   cleanupWorkspace();
@@ -124,6 +124,9 @@ function cleanupWorkspace() {
 function samePath(left, right) {
   const normalize = (value) => {
     const resolved = path.resolve(String(value || ""));
+    if (process.platform === "win32") {
+      return resolved;
+    }
     try {
       return fs.realpathSync(resolved);
     } catch (_error) {

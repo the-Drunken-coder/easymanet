@@ -77,7 +77,12 @@ resolveConfigPath("../field", { runBridge: runBridgeJson, homeDir: () => os.home
   })
   .then((resolved) => {
     if (!resolved.ok || !samePath(resolved.config, expectedFleetPath)) {
-      throw new Error(`Relative fleet name did not resolve through bridge: ${JSON.stringify(resolved)}`);
+      throw new Error(
+        `Relative fleet name did not resolve through bridge: ${JSON.stringify({
+          resolved,
+          expected: expectedFleetPath,
+        })}`,
+      );
     }
     cleanupWorkspace();
     console.log("Electron desktop files and EasyMANET bridge are valid.");
@@ -117,7 +122,14 @@ function cleanupWorkspace() {
 }
 
 function samePath(left, right) {
-  const normalize = (value) => path.resolve(String(value || ""));
+  const normalize = (value) => {
+    const resolved = path.resolve(String(value || ""));
+    try {
+      return fs.realpathSync(resolved);
+    } catch (_error) {
+      return resolved;
+    }
+  };
   const leftPath = normalize(left);
   const rightPath = normalize(right);
   if (process.platform === "win32") {

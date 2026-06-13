@@ -136,9 +136,25 @@ function samePath(left, right) {
   const leftPath = normalize(left);
   const rightPath = normalize(right);
   if (process.platform === "win32") {
-    return leftPath.toLowerCase() === rightPath.toLowerCase();
+    return leftPath.toLowerCase() === rightPath.toLowerCase() || sameExistingFile(leftPath, rightPath);
   }
-  return leftPath === rightPath;
+  return leftPath === rightPath || sameExistingFile(leftPath, rightPath);
+}
+
+function sameExistingFile(left, right) {
+  try {
+    const leftStat = fs.statSync(left);
+    const rightStat = fs.statSync(right);
+    return (
+      leftStat.isFile() &&
+      rightStat.isFile() &&
+      leftStat.dev === rightStat.dev &&
+      leftStat.ino === rightStat.ino &&
+      leftStat.size === rightStat.size
+    );
+  } catch (_error) {
+    return false;
+  }
 }
 
 function venvPython(venvRoot) {

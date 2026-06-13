@@ -873,6 +873,48 @@ select:disabled {
   gap: 10px;
 }
 
+.topology-view {
+  display: block;
+}
+
+.topology-section {
+  display: grid;
+  gap: 10px;
+}
+
+.topology-section + .topology-section {
+  margin-top: 16px;
+}
+
+.section-title {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.topology-links {
+  display: grid;
+  gap: 8px;
+}
+
+.topology-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(90px, 1.2fr);
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-raised);
+}
+
+.topology-link > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .radio-card {
   display: grid;
   gap: 12px;

@@ -1,12 +1,12 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 
 const repoRoot = path.resolve(__dirname, "../../..");
+const appIconPngPath = path.join(__dirname, "assets", "easymanet-icon.png");
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
-const sshUserPattern = /^[A-Za-z0-9_.-]{1,64}$/;
 const bridgeTimeoutMs = 15000;
 const meshBridgeTimeoutMs = 45000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
@@ -19,6 +19,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     title: "EasyMANET",
+    icon: windowIconPath(),
     backgroundColor: "#0b1014",
     webPreferences: {
       contextIsolation: true,
@@ -72,6 +73,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerIpc();
+  setDockIcon();
   createWindow();
 
   app.on("activate", () => {
@@ -86,6 +88,20 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+function windowIconPath() {
+  return fs.existsSync(appIconPngPath) ? appIconPngPath : undefined;
+}
+
+function setDockIcon() {
+  if (process.platform !== "darwin" || !app.dock || !fs.existsSync(appIconPngPath)) {
+    return;
+  }
+  const icon = nativeImage.createFromPath(appIconPngPath);
+  if (!icon.isEmpty()) {
+    app.dock.setIcon(icon);
+  }
+}
 
 function registerIpc() {
   ipcMain.handle("easymanet:state", () => runBridge(["state"]));
@@ -119,7 +135,7 @@ function registerIpc() {
     if (!validated.ok) {
       return validated;
     }
-    const args = ["mesh-discover", "--user", validated.user];
+    const args = ["mesh-discover"];
     if (validated.config) {
       args.push("--config", validated.config);
     }
@@ -751,15 +767,9 @@ async function validateMeshPayload(payload) {
     config = resolved.config;
   }
 
-  const user = typeof payload.user === "string" && payload.user.trim() ? payload.user.trim() : "root";
-  if (!sshUserPattern.test(user)) {
-    return { ok: false, errors: ["SSH user contains unsupported characters"] };
-  }
-
   return {
     ok: true,
     config,
-    user,
     scanSubnet: Boolean(payload.scanSubnet || payload.scan_subnet),
   };
 }

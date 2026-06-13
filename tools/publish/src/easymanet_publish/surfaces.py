@@ -124,10 +124,19 @@ IMAGE_DATA_FILES = (
     (
         "share/easymanet/images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet",
         (
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/api.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+        ),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1",
+        (
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/identity",
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/neighbors",
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/topology",
         ),
     ),
 )

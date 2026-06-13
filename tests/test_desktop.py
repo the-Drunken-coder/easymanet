@@ -105,7 +105,7 @@ def test_desktop_resolve_config_rejects_non_yaml_file(tmp_path):
     assert payload["config_path"] == str(config)
 
 
-def test_desktop_disks_payload_serializes_disk_info(monkeypatch):
+def test_desktop_disks_payload_only_serializes_mounted_disks(monkeypatch):
     monkeypatch.setattr(payloads, "check_platform", lambda: None)
     monkeypatch.setattr(
         payloads,
@@ -116,24 +116,31 @@ def test_desktop_disks_payload_serializes_disk_info(monkeypatch):
                 model="USB",
                 size_human="8 GB",
                 removable=True,
+                mounted=["/Volumes/BOOT"],
+                warnings=[],
+            ),
+            SimpleNamespace(
+                device="/dev/disk5",
+                model="Unmounted USB",
+                size_human="16 GB",
+                removable=True,
                 mounted=[],
                 warnings=[],
-            )
+            ),
         ],
     )
 
     payload = payloads.disks_payload(include_all=False)
 
     assert payload["ok"] is True
-    assert payload["disks"][0]["device"] == "/dev/disk4"
+    assert [disk["device"] for disk in payload["disks"]] == ["/dev/disk4"]
 
 
-def test_desktop_mesh_discovery_uses_fleet_candidates(monkeypatch):
+def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
     monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
 
-    def fake_probe(candidate, user):
-        assert user == "root"
+    def fake_probe(candidate):
         if candidate.node == "gate01" and candidate.host == "gate01.local":
             return {
                 **candidate.to_dict(),
@@ -142,21 +149,52 @@ def test_desktop_mesh_discovery_uses_fleet_candidates(monkeypatch):
                 "hostname": "gate01",
                 "role": "gate",
                 "node_ip": "10.41.1.1",
-                "mesh_id": "field-deployment-alpha",
                 "summary": "gate01 / gate / 10.41.1.1",
             }
-        return {**candidate.to_dict(), "ok": False, "status": "ssh_closed"}
+        return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+    def fake_topology(gateway):
+        assert gateway["hostname"] == "gate01"
+        return {
+            "ok": True,
+            "generated_at": "2026-06-13T00:00:00Z",
+            "nodes": [
+                {"name": "gate01", "role": "gate", "ip": "10.41.1.1", "status": "online"},
+                {"name": "point01", "role": "point", "ip": "10.41.2.1", "status": "online"},
+            ],
+            "links": [
+                {"source": "gate01", "target": "point01", "status": "resolved"},
+            ],
+            "warnings": [],
+        }
 
     payload = mesh.mesh_discover_payload(
-        {"config": "examples/three-node-field-mesh.yml", "user": "root", "scanSubnet": False},
+        {"config": "examples/three-node-field-mesh.yml", "scanSubnet": False},
         probe=fake_probe,
+        topology_fetcher=fake_topology,
     )
 
     assert payload["ok"] is True
-    assert payload["candidates_checked"] >= 10
-    assert payload["radios"][0]["hostname"] == "gate01"
-    assert payload["radios"][0]["mesh_id"] == "field-deployment-alpha"
-    assert payload["seen"] == []
+    assert payload["candidates_checked"] >= 3
+    assert payload["gateway"]["hostname"] == "gate01"
+    assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
+    assert payload["links"][0]["target"] == "point01"
+    assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_discovery_reports_missing_gateway_api(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "examples/three-node-field-mesh.yml", "scanSubnet": False},
+        probe=lambda candidate: {**candidate.to_dict(), "ok": False, "status": "api_unreachable"},
+    )
+
+    assert payload["ok"] is False
+    assert payload["code"] == "gateway_api_not_found"
+    assert "topology API" in payload["errors"][0]
+    assert payload["nodes"] == []
 
 
 def test_desktop_bridge_validate_outputs_json(capsys):
@@ -188,8 +226,6 @@ def test_desktop_bridge_mesh_discover_outputs_json(monkeypatch, capsys):
             "mesh-discover",
             "--config",
             "examples/three-node-field-mesh.yml",
-            "--user",
-            "root",
             "--scan-subnet",
         ]
     )
@@ -197,7 +233,6 @@ def test_desktop_bridge_mesh_discover_outputs_json(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
-    assert payload["received"]["user"] == "root"
     assert payload["received"]["scan_subnet"] is True
 
 
@@ -462,6 +497,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert 'data-tab-panel' in index.read_text()
     assert "mesh-discover" in index.read_text()
     assert "mesh-radios" in index.read_text()
+    assert "mesh-ssh-user" not in index.read_text()
     assert "flash-panel" in index.read_text()
     assert "preview-flash" in index.read_text()
     assert "start-flash" in index.read_text()
@@ -496,11 +532,14 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
     assert "meshRadioCard" in render_js.read_text()
+    assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
     assert "ALLOWED_TONES" in render_js.read_text()
     assert '["ok", "warn", "bad", "subtle"]' in render_js.read_text()
     assert "body.flash-busy .appbar" in styles.read_text()
     assert "mesh-grid" in styles.read_text()
+    assert "topology-view" in styles.read_text()
+    assert "topology-link" in styles.read_text()
     assert "@media print" in styles.read_text()
 
 

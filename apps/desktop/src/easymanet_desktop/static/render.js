@@ -182,6 +182,66 @@
     `;
   }
 
+  function meshNodeCard(node) {
+    const title = node.name || node.hostname || node.ip || "unknown";
+    const status = node.status || "seen";
+    const rows = [
+      meshDetail("Hostname", node.hostname),
+      meshDetail("Role", node.role),
+      meshDetail("IP", node.ip || node.node_ip),
+      meshDetail("Target", node.target),
+      meshDetail("Mesh MAC", node.mesh_mac),
+      meshDetail("BAT0 MAC", node.bat0_mac),
+      meshDetail("Status", status),
+    ].filter(Boolean).join("");
+    return `
+      <article class="radio-card">
+        <div class="radio-top">
+          <div class="radio-title">
+            <span class="radio-name mono">${escapeHtml(title)}</span>
+            <span class="radio-sub mono">${escapeHtml(node.ip || node.node_ip || "")}</span>
+          </div>
+          ${chip(status === "online" || status === "connected" ? "ok" : "warn", status)}
+        </div>
+        <div class="radio-details">${rows}</div>
+      </article>
+    `;
+  }
+
+  function meshLinkRow(link) {
+    const source = link.source || link.source_node || "unknown";
+    const target = link.target || link.target_node || link.target_mac || "unresolved";
+    const status = link.status || (link.target ? "resolved" : "unresolved");
+    const meta = [link.iface, link.last_seen, link.throughput].filter(Boolean).join(" / ");
+    return `
+      <div class="topology-link">
+        <span class="mono">${escapeHtml(source)}</span>
+        <span aria-hidden="true">&rarr;</span>
+        <span class="mono">${escapeHtml(target)}</span>
+        ${chip(status === "resolved" ? "ok" : "warn", status)}
+        <span class="meta-line mono">${escapeHtml(meta)}</span>
+      </div>
+    `;
+  }
+
+  function meshTopologyView(payload) {
+    const nodes = payload.nodes || payload.radios || [];
+    const links = payload.links || [];
+    const nodeMarkup = nodes.map((node) => meshNodeCard(node)).join("");
+    const linkMarkup = links.length
+      ? `<div class="topology-links">${links.map((link) => meshLinkRow(link)).join("")}</div>`
+      : `<div class="empty-state slim"><p class="empty-title">No links reported</p><p class="empty-meta">The gateway API did not report active BATMAN neighbors.</p></div>`;
+    return `
+      <div class="topology-section">
+        <div class="mesh-grid">${nodeMarkup}</div>
+      </div>
+      <div class="topology-section">
+        <div class="section-title">Links</div>
+        ${linkMarkup}
+      </div>
+    `;
+  }
+
   function meshDetail(label, value) {
     if (!value) {
       return "";
@@ -192,9 +252,13 @@
   function meshDiscoveryMarkup(payload) {
     const rows = [];
     const checked = Number(payload.candidates_checked) || 0;
-    const radios = payload.radios || [];
+    const nodes = payload.nodes || payload.radios || [];
+    const links = payload.links || [];
     if (payload.ok) {
-      rows.push(statusRow(radios.length ? "ok" : "subtle", `${radios.length} radios found`));
+      rows.push(statusRow(nodes.length ? "ok" : "subtle", `${nodes.length} nodes found`));
+      if (nodes.length) {
+        rows.push(statusRow("subtle", `${links.length} links reported`));
+      }
       rows.push(statusRow("subtle", `${checked} candidates checked`));
     }
     for (const warning of payload.warnings || []) {
@@ -215,6 +279,8 @@
     validationMarkup,
     planMarkup,
     meshRadioCard,
+    meshNodeCard,
+    meshTopologyView,
     meshDiscoveryMarkup,
   };
 })();

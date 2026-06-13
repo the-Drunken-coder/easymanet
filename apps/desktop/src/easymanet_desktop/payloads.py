@@ -131,7 +131,7 @@ def _path_mtime(path: Path) -> float:
 def disks_payload(*, include_all: bool) -> dict[str, Any]:
     try:
         check_platform()
-        disks = list_disks(include_all=include_all)
+        disks = [disk for disk in list_disks(include_all=include_all) if disk.mounted]
     except Exception as exc:  # noqa: BLE001 - surfaced to the local UI as data.
         return {"ok": False, "errors": [str(exc)], "disks": []}
     return {

@@ -1,25 +1,28 @@
-"""Local SSH discovery for the desktop Mesh tab."""
+"""Local HTTP discovery for the desktop Mesh tab."""
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import ipaddress
+import json
 import re
-import shlex
-import shutil
-import socket
 import subprocess
 from typing import Any, Callable, Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from easymanet.manifest import ManifestError, load_manifest
+from easymanet.provision import resolve_node_model
 from easymanet.workspace import resolve_fleet_config
 
-DEFAULT_SSH_USER = "root"
+API_PORT = 10411
 MAX_CANDIDATES = 384
 MAX_WORKERS = 32
-PORT_TIMEOUT_SECONDS = 0.45
-SSH_TIMEOUT_SECONDS = 5
+HTTP_TIMEOUT_SECONDS = 2
+TOPOLOGY_TIMEOUT_SECONDS = 12
+MAX_RESPONSE_BYTES = 1_000_000
 COMMON_MANAGEMENT_HOSTS = (
     "10.41.254.1",
     "manet01.local",
@@ -34,6 +37,7 @@ class MeshCandidate:
     host: str
     source: str
     node: str = ""
+    role: str = ""
     expected_ip: str = ""
     expected_hostname: str = ""
     sources: set[str] = field(default_factory=set)
@@ -44,34 +48,85 @@ class MeshCandidate:
             "host": self.host,
             "source": ", ".join(sources),
             "node": self.node,
+            "role": self.role,
             "expected_ip": self.expected_ip,
             "expected_hostname": self.expected_hostname,
         }
 
 
-Probe = Callable[[MeshCandidate, str], dict[str, Any]]
+Probe = Callable[[MeshCandidate], dict[str, Any]]
+TopologyFetcher = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def mesh_discover_payload(payload: dict[str, Any] | None = None, *, probe: Probe | None = None) -> dict[str, Any]:
+def mesh_discover_payload(
+    payload: dict[str, Any] | None = None,
+    *,
+    probe: Probe | None = None,
+    topology_fetcher: TopologyFetcher | None = None,
+) -> dict[str, Any]:
     request = payload or {}
     config = str(request.get("config", "") or "").strip()
-    user = _safe_ssh_user(str(request.get("user", DEFAULT_SSH_USER) or DEFAULT_SSH_USER))
     scan_subnet = bool(request.get("scan_subnet") or request.get("scanSubnet"))
 
     candidates, warnings = mesh_candidates(config=config, scan_subnet=scan_subnet)
     probe_fn = probe or probe_mesh_candidate
-    results = _probe_candidates(candidates, user=user, probe=probe_fn)
-    radios = _dedupe_radios([result for result in results if result.get("ok")])
+    results = _probe_candidates(candidates, probe=probe_fn)
+    gateways = _dedupe_gateways([result for result in results if _is_connected_gateway(result)])
 
+    if not gateways:
+        return {
+            "ok": False,
+            "code": "gateway_api_not_found",
+            "config": config,
+            "scan_subnet": scan_subnet,
+            "candidates_checked": len(candidates),
+            "gateway": None,
+            "nodes": [],
+            "links": [],
+            "radios": [],
+            "seen": [],
+            "warnings": warnings,
+            "errors": [
+                "No EasyMANET gateway topology API answered. Reflash the gateway with a topology API image, then rescan."
+            ],
+            "generated_at": _now_iso(),
+        }
+
+    gateway = gateways[0]
+    fetcher = topology_fetcher or fetch_gateway_topology
+    topology = fetcher(gateway)
+    merged_warnings = [*warnings, *(topology.get("warnings") or [])]
+    if not topology.get("ok"):
+        return {
+            "ok": False,
+            "code": topology.get("code") or "topology_failed",
+            "config": config,
+            "scan_subnet": scan_subnet,
+            "candidates_checked": len(candidates),
+            "gateway": gateway,
+            "nodes": topology.get("nodes") or [],
+            "links": topology.get("links") or [],
+            "radios": topology.get("nodes") or [],
+            "seen": gateways,
+            "warnings": merged_warnings,
+            "errors": topology.get("errors") or ["Gateway topology request failed"],
+            "generated_at": topology.get("generated_at") or _now_iso(),
+        }
+
+    nodes = topology.get("nodes") or []
+    links = topology.get("links") or []
     return {
         "ok": True,
         "config": config,
-        "user": user,
         "scan_subnet": scan_subnet,
         "candidates_checked": len(candidates),
-        "radios": radios,
-        "seen": [],
-        "warnings": warnings,
+        "gateway": gateway,
+        "nodes": nodes,
+        "links": links,
+        "radios": nodes,
+        "seen": gateways,
+        "warnings": merged_warnings,
+        "generated_at": topology.get("generated_at") or _now_iso(),
     }
 
 
@@ -79,7 +134,15 @@ def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[lis
     warnings: list[str] = []
     records: dict[str, MeshCandidate] = {}
 
-    def add(host: str, source: str, *, node: str = "", expected_ip: str = "", expected_hostname: str = "") -> None:
+    def add(
+        host: str,
+        source: str,
+        *,
+        node: str = "",
+        role: str = "",
+        expected_ip: str = "",
+        expected_hostname: str = "",
+    ) -> None:
         host = str(host or "").strip()
         if not host:
             return
@@ -88,6 +151,7 @@ def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[lis
         if existing:
             existing.sources.add(source)
             existing.node = existing.node or node
+            existing.role = existing.role or role
             existing.expected_ip = existing.expected_ip or expected_ip
             existing.expected_hostname = existing.expected_hostname or expected_hostname
             return
@@ -95,17 +159,19 @@ def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[lis
             host=host,
             source=source,
             node=node,
+            role=role,
             expected_ip=expected_ip,
             expected_hostname=expected_hostname,
             sources={source},
         )
 
     if config:
-        for candidate in _fleet_candidates(config, warnings):
+        for candidate in _fleet_gateway_candidates(config, warnings):
             add(
                 candidate.host,
                 candidate.source,
                 node=candidate.node,
+                role=candidate.role,
                 expected_ip=candidate.expected_ip,
                 expected_hostname=candidate.expected_hostname,
             )
@@ -123,58 +189,94 @@ def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[lis
     return list(records.values())[:MAX_CANDIDATES], warnings
 
 
-def probe_mesh_candidate(candidate: MeshCandidate, user: str) -> dict[str, Any]:
+def probe_mesh_candidate(candidate: MeshCandidate) -> dict[str, Any]:
     base = candidate.to_dict()
-    reachable, address = _ssh_port_open(candidate.host)
-    if not reachable:
+    try:
+        identity = _fetch_api_json(candidate.host, "identity", timeout=HTTP_TIMEOUT_SECONDS)
+    except TopologyApiError as exc:
         return {
             **base,
             "ok": False,
-            "status": "ssh_closed",
-            "address": address,
-            "error": "SSH port 22 did not answer",
+            "status": exc.status,
+            "address": candidate.host,
+            "error": str(exc),
         }
 
-    ssh = shutil.which("ssh")
-    if not ssh:
-        return {
-            **base,
-            "ok": False,
-            "status": "ssh_unavailable",
-            "address": address,
-            "error": "ssh executable not found",
-        }
-
-    completed = _run_ssh_identity(ssh=ssh, host=candidate.host, user=user)
-    parsed = _parse_identity(completed.stdout)
+    node = identity.get("node") if isinstance(identity.get("node"), dict) else {}
+    interfaces = identity.get("interfaces") if isinstance(identity.get("interfaces"), dict) else {}
     result = {
         **base,
-        "address": address,
-        "ssh_exit_code": completed.returncode,
-        "stderr": completed.stderr.strip(),
-        **parsed,
+        "address": candidate.host,
+        "api_port": API_PORT,
+        "hostname": str(node.get("hostname") or ""),
+        "role": str(node.get("role") or base.get("role") or ""),
+        "node": str(node.get("name") or base.get("node") or ""),
+        "node_ip": str(node.get("ip") or ""),
+        "target": str(node.get("target") or ""),
+        "mesh_mac": str(interfaces.get("mesh_mac") or ""),
+        "bat0_mac": str(interfaces.get("bat0_mac") or ""),
     }
-    if completed.returncode != 0:
+    if not _looks_like_easymanet_api(identity):
         result["ok"] = False
-        result["status"] = _ssh_error_status(completed.stderr)
-        return result
-    if not _looks_like_easymanet_radio(parsed):
-        result["ok"] = False
-        result["status"] = "not_easymanet"
+        result["status"] = "not_easymanet_api"
         return result
     result["ok"] = True
     result["status"] = "connected"
-    result["summary"] = _radio_summary(result)
+    result["summary"] = _node_summary(result)
     return result
 
 
-def _probe_candidates(candidates: list[MeshCandidate], *, user: str, probe: Probe) -> list[dict[str, Any]]:
+def fetch_gateway_topology(gateway: dict[str, Any]) -> dict[str, Any]:
+    host = str(gateway.get("host") or gateway.get("address") or "").strip()
+    if not host:
+        return {"ok": False, "code": "gateway_host_missing", "errors": ["Gateway host is missing"]}
+    try:
+        topology = _fetch_api_json(host, "topology", timeout=TOPOLOGY_TIMEOUT_SECONDS)
+    except TopologyApiError as exc:
+        return {"ok": False, "code": exc.status, "errors": [str(exc)]}
+    if not isinstance(topology, dict):
+        return {"ok": False, "code": "invalid_topology", "errors": ["Gateway returned invalid topology JSON"]}
+    return topology
+
+
+class TopologyApiError(Exception):
+    def __init__(self, status: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _fetch_api_json(host: str, endpoint: str, *, timeout: int) -> dict[str, Any]:
+    url = f"http://{host}:{API_PORT}/v1/{endpoint}"
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": "EasyMANETDesktop/0.1"})
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - local operator LAN/mesh API.
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        raise TopologyApiError("http_error", f"{url} returned HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise TopologyApiError("api_unreachable", f"{url} did not answer: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise TopologyApiError("api_timeout", f"{url} timed out") from exc
+    except OSError as exc:
+        raise TopologyApiError("api_failed", f"{url} failed: {exc}") from exc
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise TopologyApiError("response_too_large", f"{url} returned too much data")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TopologyApiError("invalid_json", f"{url} returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise TopologyApiError("invalid_json", f"{url} returned a non-object JSON payload")
+    return payload
+
+
+def _probe_candidates(candidates: list[MeshCandidate], *, probe: Probe) -> list[dict[str, Any]]:
     if not candidates:
         return []
     workers = min(MAX_WORKERS, max(1, len(candidates)))
     results: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(probe, candidate, user): candidate for candidate in candidates}
+        futures = {executor.submit(probe, candidate): candidate for candidate in candidates}
         for future in as_completed(futures):
             candidate = futures[future]
             try:
@@ -184,25 +286,33 @@ def _probe_candidates(candidates: list[MeshCandidate], *, user: str, probe: Prob
     return sorted(results, key=lambda item: (not bool(item.get("ok")), str(item.get("host", ""))))
 
 
-def _fleet_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidate]:
+def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidate]:
     try:
         config_path = resolve_fleet_config(config)
         manifest = load_manifest(str(config_path))
     except (ManifestError, OSError, ValueError) as exc:
-        warnings.append(f"Fleet candidates skipped: {exc}")
+        warnings.append(f"Fleet gateway candidates skipped: {exc}")
         return []
 
     candidates: list[MeshCandidate] = []
     for name in manifest.node_names():
-        node = manifest.get_node(name)
-        hostname = str(node.get("hostname") or name).strip()
-        node_ip = str(node.get("ip") or "").strip()
+        try:
+            node = resolve_node_model(manifest, name)
+        except ManifestError as exc:
+            warnings.append(f"Fleet gateway candidate skipped for {name}: {exc}")
+            continue
+        role = str(node.role or "").strip()
+        if role != "gate":
+            continue
+        hostname = str(node.hostname or name).strip()
+        node_ip = str(node.ip or "").strip()
         if node_ip:
             candidates.append(
                 MeshCandidate(
                     host=node_ip,
-                    source="fleet ip",
+                    source="fleet gate ip",
                     node=name,
+                    role=role,
                     expected_ip=node_ip,
                     expected_hostname=hostname,
                 )
@@ -211,8 +321,9 @@ def _fleet_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidat
             candidates.append(
                 MeshCandidate(
                     host=hostname,
-                    source="fleet hostname",
+                    source="fleet gate hostname",
                     node=name,
+                    role=role,
                     expected_ip=node_ip,
                     expected_hostname=hostname,
                 )
@@ -221,8 +332,9 @@ def _fleet_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidat
                 candidates.append(
                     MeshCandidate(
                         host=f"{hostname}.local",
-                        source="fleet mDNS",
+                        source="fleet gate mDNS",
                         node=name,
+                        role=role,
                         expected_ip=node_ip,
                         expected_hostname=hostname,
                     )
@@ -230,113 +342,43 @@ def _fleet_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidat
     return candidates
 
 
-def _ssh_port_open(host: str) -> tuple[bool, str]:
-    try:
-        with socket.create_connection((host, 22), timeout=PORT_TIMEOUT_SECONDS) as sock:
-            address = str(sock.getpeername()[0])
-            return True, address
-    except OSError:
-        return False, ""
-
-
-def _run_ssh_identity(*, ssh: str, host: str, user: str) -> subprocess.CompletedProcess[str]:
-    target = f"{user}@{host}"
-    command = "sh -c " + shlex.quote(_IDENTITY_SCRIPT)
-    return subprocess.run(
-        [
-            ssh,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            f"ConnectTimeout={SSH_TIMEOUT_SECONDS}",
-            "-o",
-            "ConnectionAttempts=1",
-            "-o",
-            "PasswordAuthentication=no",
-            "-o",
-            "KbdInteractiveAuthentication=no",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "GlobalKnownHostsFile=/dev/null",
-            "-o",
-            "LogLevel=ERROR",
-            target,
-            command,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=SSH_TIMEOUT_SECONDS + 2,
-        check=False,
-    )
-
-
-def _parse_identity(stdout: str) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for raw in stdout.splitlines():
-        if "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if re.fullmatch(r"[a-z_]+", key):
-            parsed[key] = value.strip()
-    return parsed
-
-
-def _looks_like_easymanet_radio(fields: dict[str, str]) -> bool:
-    if fields.get("easymanet") == "yes" or fields.get("openmanet") == "yes":
+def _looks_like_easymanet_api(payload: dict[str, Any]) -> bool:
+    node = payload.get("node")
+    api = payload.get("api")
+    if payload.get("ok") is True and isinstance(node, dict):
         return True
-    if fields.get("provisioned") or fields.get("mesh_id"):
-        return True
-    node_ip = fields.get("node_ip", "")
-    return node_ip.startswith("10.41.")
+    return isinstance(api, dict) and str(api.get("version") or "")
 
 
-def _ssh_error_status(stderr: str) -> str:
-    text = stderr.lower()
-    if "permission denied" in text or "publickey" in text:
-        return "auth_failed"
-    if "host key verification failed" in text:
-        return "host_key_failed"
-    if "operation timed out" in text or "connection timed out" in text:
-        return "timeout"
-    return "ssh_failed"
+def _is_connected_gateway(result: dict[str, Any]) -> bool:
+    return bool(result.get("ok")) and str(result.get("role") or "").lower() == "gate"
 
 
-def _radio_summary(radio: dict[str, Any]) -> str:
+def _node_summary(node: dict[str, Any]) -> str:
     parts = [
-        str(radio.get("hostname") or radio.get("expected_hostname") or radio.get("host") or ""),
-        str(radio.get("role") or ""),
-        str(radio.get("node_ip") or radio.get("address") or ""),
+        str(node.get("hostname") or node.get("expected_hostname") or node.get("host") or ""),
+        str(node.get("role") or ""),
+        str(node.get("node_ip") or node.get("address") or ""),
     ]
     return " / ".join(part for part in parts if part)
 
 
-def _dedupe_radios(radios: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _dedupe_gateways(gateways: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[str, dict[str, Any]] = {}
-    for radio in radios:
+    for gateway in gateways:
         key = "|".join(
             [
-                str(radio.get("hostname") or radio.get("expected_hostname") or "").lower(),
-                str(radio.get("node_ip") or radio.get("address") or radio.get("host") or ""),
+                str(gateway.get("hostname") or gateway.get("expected_hostname") or "").lower(),
+                str(gateway.get("node_ip") or gateway.get("address") or gateway.get("host") or ""),
             ]
         )
         existing = deduped.get(key)
         if existing:
-            sources = sorted({*(str(existing.get("source") or "").split(", ")), *(str(radio.get("source") or "").split(", "))})
+            sources = sorted({*(str(existing.get("source") or "").split(", ")), *(str(gateway.get("source") or "").split(", "))})
             existing["source"] = ", ".join(source for source in sources if source)
             continue
-        deduped[key] = dict(radio)
+        deduped[key] = dict(gateway)
     return list(deduped.values())
-
-
-def _safe_ssh_user(value: str) -> str:
-    user = value.strip() or DEFAULT_SSH_USER
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", user):
-        return DEFAULT_SSH_USER
-    return user
 
 
 def _arp_hosts() -> list[str]:
@@ -446,30 +488,5 @@ def _ip_sort_key(value: str) -> tuple[int, int, int, int]:
         return (999, 999, 999, 999)
 
 
-_IDENTITY_SCRIPT = r"""
-hostname_value="$(cat /proc/sys/kernel/hostname 2>/dev/null || hostname 2>/dev/null || true)"
-provisioned_value="$(cat /etc/easymanet/provisioned 2>/dev/null || true)"
-node_ip_value="$(uci -q get network.meship.ipaddr 2>/dev/null || uci -q get network.lan.ipaddr 2>/dev/null || true)"
-mesh_id_value="$(uci -q get wireless.mesh0.mesh_id 2>/dev/null || true)"
-role_value=""
-target_value=""
-if command -v jsonfilter >/dev/null 2>&1 && [ -f /etc/easymanet/provision.json ]; then
-    role_value="$(jsonfilter -i /etc/easymanet/provision.json -e '@.node.role' 2>/dev/null || true)"
-    target_value="$(jsonfilter -i /etc/easymanet/provision.json -e '@.node.target' 2>/dev/null || true)"
-fi
-easymanet_value=""
-openmanet_value=""
-dropbear_value=""
-[ -f /etc/easymanet/provision.json ] && easymanet_value="yes"
-[ -f /etc/openmanetd/config.yml ] && openmanet_value="yes"
-pgrep -x dropbear >/dev/null 2>&1 && dropbear_value="yes"
-printf 'hostname=%s\n' "$hostname_value"
-printf 'provisioned=%s\n' "$provisioned_value"
-printf 'node_ip=%s\n' "$node_ip_value"
-printf 'mesh_id=%s\n' "$mesh_id_value"
-printf 'role=%s\n' "$role_value"
-printf 'target=%s\n' "$target_value"
-printf 'easymanet=%s\n' "$easymanet_value"
-printf 'openmanet=%s\n' "$openmanet_value"
-printf 'dropbear=%s\n' "$dropbear_value"
-"""
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

@@ -115,7 +115,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     mesh_discover = subparsers.add_parser("mesh-discover")
     mesh_discover.add_argument("--config", default="")
-    mesh_discover.add_argument("--user", default="root")
     mesh_discover.add_argument("--scan-subnet", action="store_true")
 
     flash_plan = subparsers.add_parser("flash-plan")
@@ -138,7 +137,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = mesh_discover_payload(
                 {
                     "config": args.config,
-                    "user": args.user,
                     "scan_subnet": args.scan_subnet,
                 }
             )

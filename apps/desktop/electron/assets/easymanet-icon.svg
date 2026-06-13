@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="EasyMANET icon">
+  <defs>
+    <linearGradient id="bg" x1="176" y1="104" x2="848" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14252e"/>
+      <stop offset="0.54" stop-color="#0c171e"/>
+      <stop offset="1" stop-color="#060b0f"/>
+    </linearGradient>
+    <linearGradient id="meshLine" x1="282" y1="276" x2="742" y2="748" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#56d8ff"/>
+      <stop offset="1" stop-color="#2ee6a6"/>
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 510) rotate(90) scale(404)">
+      <stop offset="0" stop-color="#2ee6a6" stop-opacity="0.44"/>
+      <stop offset="0.5" stop-color="#1f9fcb" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#1f9fcb" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+    <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="91" y="91" width="842" height="842" rx="196" fill="none" stroke="#263943" stroke-width="6" opacity="0.86"/>
+  <rect x="118" y="118" width="788" height="788" rx="178" fill="none" stroke="#0f222b" stroke-width="2"/>
+  <circle cx="512" cy="510" r="410" fill="url(#centerGlow)"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M346 370L512 518L676 362M346 370L340 672L512 518M676 362L686 682L512 518M340 672L686 682" fill="none" stroke="#10242b" stroke-width="92" stroke-linecap="round" stroke-linejoin="round" opacity="0.72"/>
+    <path d="M346 370L512 518L676 362M346 370L340 672L512 518M676 362L686 682L512 518M340 672L686 682" fill="none" stroke="url(#meshLine)" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M346 370L512 518L676 362M346 370L340 672L512 518M676 362L686 682L512 518M340 672L686 682" fill="none" stroke="#dcfff4" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"/>
+  </g>
+
+  <g filter="url(#nodeShadow)">
+    <circle cx="346" cy="370" r="78" fill="#0e1a20"/>
+    <circle cx="676" cy="362" r="78" fill="#0e1a20"/>
+    <circle cx="340" cy="672" r="78" fill="#0e1a20"/>
+    <circle cx="686" cy="682" r="78" fill="#0e1a20"/>
+    <circle cx="512" cy="518" r="98" fill="#0e1a20"/>
+
+    <circle cx="346" cy="370" r="54" fill="#2ee6a6"/>
+    <circle cx="676" cy="362" r="54" fill="#56d8ff"/>
+    <circle cx="340" cy="672" r="54" fill="#56d8ff"/>
+    <circle cx="686" cy="682" r="54" fill="#2ee6a6"/>
+    <circle cx="512" cy="518" r="68" fill="#f4c542"/>
+
+    <circle cx="346" cy="370" r="23" fill="#eafff8"/>
+    <circle cx="676" cy="362" r="23" fill="#eaffff"/>
+    <circle cx="340" cy="672" r="23" fill="#eaffff"/>
+    <circle cx="686" cy="682" r="23" fill="#eafff8"/>
+  </g>
+
+  <path d="M530 424L444 538H512L490 624L586 496H516L530 424Z" fill="#061016"/>
+  <path d="M530 424L444 538H512L490 624L586 496H516L530 424Z" fill="#102027" opacity="0.22"/>
+</svg>

@@ -7,8 +7,8 @@ const {
   diskCard,
   validationMarkup,
   planMarkup,
-  meshRadioCard,
   meshDiscoveryMarkup,
+  meshTopologyView,
 } = window.EMRender;
 
 const state = {
@@ -26,7 +26,8 @@ const state = {
   lastFlashOk: false,
   meshBusy: false,
   meshHasScanned: false,
-  meshRadios: [],
+  meshNodes: [],
+  meshLinks: [],
   flashSignature: "",
   planSignature: "",
   planImageSummary: "",
@@ -81,7 +82,6 @@ const copySudo = $("copy-sudo");
 const meshDiscoveryForm = $("mesh-discovery-form");
 const meshStatusChip = $("mesh-status-chip");
 const meshConfigSource = $("mesh-config-source");
-const meshSshUser = $("mesh-ssh-user");
 const meshScanSubnet = $("mesh-scan-subnet");
 const meshDiscover = $("mesh-discover");
 const meshSummary = $("mesh-summary");
@@ -492,32 +492,35 @@ async function discoverMesh() {
   try {
     const response = await postJson("/api/mesh/discover", {
       config: configInput.value.trim(),
-      user: meshSshUser.value.trim() || "root",
       scanSubnet: meshScanSubnet.checked,
     });
     renderMeshDiscovery(response);
   } catch (error) {
-    renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], radios: [], candidates_checked: 0 });
+    renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
   } finally {
     setMeshBusy(false);
   }
 }
 
 function renderMeshDiscovery(payload) {
-  const radios = payload.radios || [];
-  state.meshRadios = radios;
-  meshCount.textContent = `${radios.length}`;
+  const nodes = payload.nodes || payload.radios || [];
+  const links = payload.links || [];
+  state.meshNodes = nodes;
+  state.meshLinks = links;
+  meshCount.textContent = `${nodes.length}`;
   meshSummary.hidden = false;
   meshSummary.className = `validation ${payload.ok ? "ok" : "bad"}`;
   meshSummary.innerHTML = meshDiscoveryMarkup(payload);
-  if (radios.length) {
-    meshRadios.innerHTML = radios.map((radio) => meshRadioCard(radio)).join("");
-    setMeshStatus("ok", `${radios.length} found`);
+  if (nodes.length) {
+    meshRadios.className = "topology-view";
+    meshRadios.innerHTML = meshTopologyView(payload);
+    setMeshStatus("ok", `${nodes.length} nodes`);
   } else {
+    meshRadios.className = "mesh-grid";
     meshRadios.innerHTML = `
       <div class="empty-state slim">
-        <p class="empty-title">No radios found</p>
-        <p class="empty-meta">No EasyMANET SSH identity answered.</p>
+        <p class="empty-title">No topology found</p>
+        <p class="empty-meta">No EasyMANET gateway API answered.</p>
       </div>
     `;
     setMeshStatus(payload.ok ? "subtle" : "bad", payload.ok ? "none found" : "error");
@@ -527,7 +530,6 @@ function renderMeshDiscovery(payload) {
 function setMeshBusy(busy) {
   state.meshBusy = busy;
   meshDiscover.disabled = busy;
-  meshSshUser.disabled = busy;
   meshScanSubnet.disabled = busy;
   if (busy) {
     setMeshStatus("warn", "scanning");
@@ -767,7 +769,7 @@ function activateTab(tabId) {
   }
   if (tabId === "tab-mesh" && nativeApi && !state.meshHasScanned && !state.meshBusy) {
     discoverMesh().catch((error) => {
-      renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], radios: [], candidates_checked: 0 });
+      renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
     });
   }
 }

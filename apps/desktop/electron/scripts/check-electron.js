@@ -76,7 +76,7 @@ resolveConfigPath("../field", { runBridge: runBridgeJson, homeDir: () => os.home
     return resolveConfigPath("field", { runBridge: runBridgeJson, homeDir: () => os.homedir() });
   })
   .then((resolved) => {
-    if (!resolved.ok || resolved.config !== expectedFleetPath) {
+    if (!resolved.ok || !samePath(resolved.config, expectedFleetPath)) {
       throw new Error(`Relative fleet name did not resolve through bridge: ${JSON.stringify(resolved)}`);
     }
     cleanupWorkspace();
@@ -114,6 +114,16 @@ function cleanupWorkspace() {
     return;
   }
   fs.rmdirSync(workspace, { recursive: true });
+}
+
+function samePath(left, right) {
+  const normalize = (value) => path.resolve(String(value || ""));
+  const leftPath = normalize(left);
+  const rightPath = normalize(right);
+  if (process.platform === "win32") {
+    return leftPath.toLowerCase() === rightPath.toLowerCase();
+  }
+  return leftPath === rightPath;
 }
 
 function venvPython(venvRoot) {

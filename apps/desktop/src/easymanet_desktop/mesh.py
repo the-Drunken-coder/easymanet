@@ -318,17 +318,18 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
                 )
             )
         if hostname:
-            candidates.append(
-                MeshCandidate(
-                    host=hostname,
-                    source="fleet gate hostname",
-                    node=name,
-                    role=role,
-                    expected_ip=node_ip,
-                    expected_hostname=hostname,
+            if hostname.lower().endswith(".local"):
+                candidates.append(
+                    MeshCandidate(
+                        host=hostname,
+                        source="fleet gate hostname",
+                        node=name,
+                        role=role,
+                        expected_ip=node_ip,
+                        expected_hostname=hostname,
+                    )
                 )
-            )
-            if "." not in hostname:
+            elif "." not in hostname:
                 candidates.append(
                     MeshCandidate(
                         host=f"{hostname}.local",

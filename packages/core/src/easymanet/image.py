@@ -261,7 +261,7 @@ def _stream_dd_device_path(device: str) -> str:
 
 def _stream_dd_block_args() -> list[str]:
     if is_macos():
-        return ["ibs=16m", "obs=1m", "iflag=fullblock", "conv=osync"]
+        return ["ibs=16m", "obs=1m", "conv=osync"]
     return [_write_block_size_arg()]
 
 

@@ -808,11 +808,6 @@ function activateTab(tabId) {
     panel.hidden = !selected;
     panel.classList.toggle("active", selected);
   }
-  if (tabId === "tab-mesh" && nativeApi && !state.meshHasScanned && !state.meshBusy) {
-    discoverMesh().catch((error) => {
-      renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
-    });
-  }
 }
 
 function startDiskWatcher() {

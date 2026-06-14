@@ -164,7 +164,7 @@ configure_mesh_radio_device() {
 
 configure_easymanet_api() {
     api_home="$(_prefix_path /www/easymanet-api)"
-    if [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ]; then
+    if [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
         echo "WARNING: EasyMANET API endpoint wrappers are missing; skipping API setup" >> "$LOG_FILE"
         return 0
     fi
@@ -258,7 +258,7 @@ missing_fields=""
 [ -n "$HOSTNAME" ] || missing_fields="$missing_fields node.hostname"
 [ -n "$NODE_ROLE" ] || missing_fields="$missing_fields node.role"
 [ -n "$NODE_IP" ] || missing_fields="$missing_fields node.ip"
-[ -n "$NODE_TARGET" ] || NODE_TARGET="rpi4-mm6108-spi"
+[ -n "$NODE_TARGET" ] || missing_fields="$missing_fields node.target"
 if [ -n "$missing_fields" ]; then
     echo "FATAL: missing required provision.json fields:$missing_fields" | tee -a "$LOG_FILE"
     exit 1
@@ -271,6 +271,13 @@ case "$NODE_ROLE" in
     gate|point) ;;
     *)
         echo "FATAL: unsupported node.role in provision.json: $NODE_ROLE" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+case "$NODE_TARGET" in
+    rpi4-mm6108-spi) ;;
+    *)
+        echo "FATAL: unsupported node.target in provision.json: $NODE_TARGET" | tee -a "$LOG_FILE"
         exit 1
         ;;
 esac
@@ -289,7 +296,7 @@ case "$MESH_CHANNEL" in
 esac
 if [ "$NODE_TARGET" = "rpi4-mm6108-spi" ] && [ "$MESH_COUNTRY" = "US" ]; then
     case "${MESH_CHANNEL}:${MESH_BW}" in
-        0:2|42:2) ;;
+        42:2) ;;
         *)
             echo "FATAL: rpi4-mm6108-spi in US requires mesh.channel 42 and mesh.bandwidth_mhz 2; got channel $MESH_CHANNEL bandwidth $MESH_BW" | tee -a "$LOG_FILE"
             exit 1
@@ -570,15 +577,6 @@ if [ -x "$dropbear_init" ]; then
     fi
 fi
 
-uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
-if [ -x "$uhttpd_init" ]; then
-    echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
-    "$uhttpd_init" enable 2>/dev/null || true
-    "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
-else
-    echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
-fi
-
 openmanetd_config="$(_prefix_path /etc/openmanetd/config.yml)"
 if [ -f "$openmanetd_config" ]; then
     cat > "$openmanetd_config" <<EOF
@@ -601,6 +599,14 @@ network_init="$(_prefix_path /etc/init.d/network)"
 if [ -x "$network_init" ]; then
     "$network_init" enable 2>/dev/null || true
     "$network_init" restart 2>/dev/null || true
+fi
+uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
+if [ -x "$uhttpd_init" ]; then
+    echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
+    "$uhttpd_init" enable 2>/dev/null || true
+    "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
+else
+    echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
 fi
 echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
 configure_mesh_radio_device "$MESH_RADIO"

@@ -14,6 +14,14 @@ import venv
 import warnings
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:  # pragma: no cover - fallback handles minimal envs.
+        tomllib = None
+
 
 REMOVED_IMPORTS = (
     "easymanet.cli",
@@ -144,7 +152,17 @@ def wheel_glob_pattern(repo_root: Path) -> str:
 
 def project_name(repo_root: Path) -> str:
     pyproject = repo_root / "pyproject.toml"
-    match = re.search(r'^name = "([^"]+)"$', pyproject.read_text(), re.MULTILINE)
+    text = pyproject.read_text()
+    if tomllib is not None:
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            data = {}
+        project = data.get("project") if isinstance(data, dict) else None
+        name = project.get("name") if isinstance(project, dict) else None
+        if isinstance(name, str) and name:
+            return name
+    match = re.search(r"""(?m)^\s*name\s*=\s*["']([^"']+)["']\s*(?:#.*)?$""", text)
     if not match:
         raise SystemExit(f"Could not find project name in {pyproject}")
     return match.group(1)

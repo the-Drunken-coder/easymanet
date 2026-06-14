@@ -142,7 +142,7 @@ def test_release_smoke_wheel_glob_uses_normalized_project_name(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "pyproject.toml").write_text(
-        '[project]\nname = "easymanet-images"\nversion = "0.2.0"\n'
+        "[project]\n  name = 'easymanet-images' # package name\nversion = \"0.2.0\"\n"
     )
 
     assert release_smoke.wheel_glob_pattern(repo) == "easymanet_images-*.whl"

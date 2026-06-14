@@ -890,6 +890,7 @@ def test_provision_requires_node_ip(tmp_path):
         (("node", "hostname"), "node.hostname"),
         (("node", "role"), "node.role"),
         (("node", "ip"), "node.ip"),
+        (("node", "target"), "node.target"),
     ],
 )
 def test_provision_reports_missing_required_fields(tmp_path, field_path, expected):
@@ -911,9 +912,11 @@ def test_provision_reports_missing_required_fields(tmp_path, field_path, expecte
     [
         (("version",), 2, "unsupported provision.json version"),
         (("node", "role"), "relay", "unsupported node.role"),
+        (("node", "target"), "rpi5", "unsupported node.target"),
         (("mesh", "bandwidth_mhz"), 3, "unsupported mesh.bandwidth_mhz"),
         (("mesh", "bandwidth_mhz"), 4, "rpi4-mm6108-spi in US requires"),
         (("mesh", "channel"), 36, "rpi4-mm6108-spi in US requires"),
+        (("mesh", "channel"), 0, "rpi4-mm6108-spi in US requires"),
         (("mesh", "channel"), "abc", "mesh.channel must be numeric"),
     ],
 )

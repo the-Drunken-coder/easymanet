@@ -12,6 +12,14 @@ const meshBridgeTimeoutMs = 45000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
 const sshModes = new Set(["default", "enable", "disable"]);
 
+function booleanFlag(value) {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+  }
+  return value === true || value === 1;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1180,
@@ -801,7 +809,7 @@ async function validateMeshPayload(payload) {
   return {
     ok: true,
     config,
-    scanSubnet: Boolean(payload.scanSubnet || payload.scan_subnet),
+    scanSubnet: booleanFlag(payload.scanSubnet) || booleanFlag(payload.scan_subnet),
   };
 }
 

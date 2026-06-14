@@ -243,12 +243,13 @@ def test_valid_config_with_node():
     os.unlink(path)
 
 
-def test_mesh_channel_zero_is_valid():
+def test_mesh_channel_zero_is_rejected():
     config = VALID_CONFIG.replace("channel: 42", "channel: 0")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
-    assert result.valid
+    assert not result.valid
+    assert any("channel 42 with bandwidth_mhz 2" in e for e in result.errors)
     os.unlink(path)
 
 

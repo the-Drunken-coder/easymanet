@@ -92,7 +92,7 @@ set_led() {
 
 has_internet() {
     for target in $EASYMANET_LED_TARGETS; do
-        if ping -c 1 -W "$EASYMANET_LED_PING_TIMEOUT" "$target" >/dev/null 2>&1; then
+        if ping -c 1 -w "$EASYMANET_LED_PING_TIMEOUT" "$target" >/dev/null 2>&1; then
             return 0
         fi
     done

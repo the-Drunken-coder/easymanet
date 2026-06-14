@@ -2,7 +2,10 @@ from types import SimpleNamespace
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
 
 from easymanet_desktop import bridge
 from easymanet_desktop import mesh
@@ -146,7 +149,7 @@ def test_desktop_resolve_config_rejects_non_yaml_file(tmp_path):
     assert payload["config_path"] == str(config)
 
 
-def test_desktop_disks_payload_only_serializes_mounted_disks(monkeypatch):
+def test_desktop_disks_payload_serializes_unmounted_disks(monkeypatch):
     monkeypatch.setattr(payloads, "check_platform", lambda: None)
     monkeypatch.setattr(
         payloads,
@@ -174,7 +177,11 @@ def test_desktop_disks_payload_only_serializes_mounted_disks(monkeypatch):
     payload = payloads.disks_payload(include_all=False)
 
     assert payload["ok"] is True
-    assert [disk["device"] for disk in payload["disks"]] == ["/dev/disk4"]
+    assert [disk["device"] for disk in payload["disks"]] == ["/dev/disk4", "/dev/disk5"]
+    assert payload["disks"][0]["removable"] is True
+    assert payload["disks"][0]["mounted"] == ["/Volumes/BOOT"]
+    assert payload["disks"][0]["warnings"] == []
+    assert payload["disks"][1]["mounted"] == []
 
 
 def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
@@ -221,6 +228,21 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
     assert payload["links"][0]["target"] == "point01"
     assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_candidates_skip_bare_fleet_hostnames(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    candidates, warnings = mesh.mesh_candidates(
+        config="examples/three-node-field-mesh.yml",
+        scan_subnet=False,
+    )
+
+    assert warnings == []
+    hosts = {candidate.host for candidate in candidates}
+    assert "gate01" not in hosts
+    assert "gate01.local" in hosts
 
 
 def test_desktop_mesh_discovery_reports_missing_gateway_api(monkeypatch):
@@ -600,6 +622,9 @@ def test_desktop_static_supports_electron_and_http_modes():
 def test_desktop_renderer_safe_tone_allows_only_expected_classes():
     root = Path(__file__).resolve().parents[1]
     render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("node is required for renderer safety test")
     script = """
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -615,7 +640,7 @@ process.stdout.write(JSON.stringify({
 }));
 """
     result = subprocess.run(
-        ["node", "-e", script, str(render_js)],
+        [node_bin, "-e", script, str(render_js)],
         capture_output=True,
         check=True,
         text=True,

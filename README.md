@@ -120,10 +120,10 @@ The checked-in starter fleet is
 See [docs/sample-fleet.md](docs/sample-fleet.md) for the copy command and a
 smaller two-node example. EasyMANET does not create a fleet file automatically.
 
-For a gate, `uplink_interface: wifi` joins the configured operator LAN. With SSH
-enabled, the node opens SSH on that WAN zone so the desktop Mesh tab can find
-it locally. `uplink_interface: eth0` keeps wired management on `br-lan`;
-EasyMANET does not run WAN DHCP on that management bridge.
+For a gate, `uplink_interface: wifi` joins the configured operator LAN.
+`uplink_interface: eth0` keeps wired management on `br-lan`; EasyMANET does not
+run WAN DHCP on that management bridge. Mesh discovery uses the local topology
+API, so treat any WAN-reachable management/API service as trusted-LAN only.
 
 ### 3. List available disks
 
@@ -292,6 +292,7 @@ Generated public product repositories are produced with
 - `gateway.uplink_interface: eth0` is reserved for wired management on
   `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
 - Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
+- Gate topology API exposure on WAN (port 10411) is sensitive on untrusted uplinks.
 - When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
   into that file in plaintext (OpenMANET daemon requirement; verify on hardware).
 

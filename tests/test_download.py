@@ -270,6 +270,18 @@ def test_download_image_records_metadata_when_reusing_existing_cache(tmp_path, m
     }
 
 
+def test_save_version_recovers_from_non_object_version_file(tmp_path, monkeypatch):
+    version_file = tmp_path / "version.json"
+    version_file.write_text("[]")
+    monkeypatch.setattr(download, "version_file_path", lambda: version_file)
+
+    download._save_version("rpi4-mm6108-spi", "test-version")
+
+    assert json.loads(version_file.read_text()) == {
+        "rpi4-mm6108-spi": {"version": "test-version"}
+    }
+
+
 def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
     payload = b"firmware-bytes"
     compressed = io.BytesIO()

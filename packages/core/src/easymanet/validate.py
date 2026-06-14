@@ -15,7 +15,7 @@ VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
 VALID_BANDWIDTHS = {1, 2, 4, 8}
 MM6108_TARGET = "rpi4-mm6108-spi"
-MM6108_US_VALID_MESH = {(0, 2), (42, 2)}
+MM6108_US_VALID_MESH = {(42, 2)}
 VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 

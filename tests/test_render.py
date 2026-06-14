@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 import tempfile
 
 import pytest
@@ -227,7 +228,8 @@ nodes:
 
 
 def test_render_starter_gate_uses_wifi_uplink_shape():
-    m = load_manifest("examples/three-node-field-mesh.yml")
+    root = Path(__file__).resolve().parents[1]
+    m = load_manifest(str(root / "examples" / "three-node-field-mesh.yml"))
     gate = render_dict(m, "gate01", ssh_enabled=True)
 
     assert gate["node"]["gateway"]["enabled"] is True

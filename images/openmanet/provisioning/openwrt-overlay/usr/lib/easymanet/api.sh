@@ -63,6 +63,11 @@ mesh_iface() {
 
 iface_mac() {
     iface="$1"
+    case "$iface" in
+        ""|*[!a-zA-Z0-9_-]*)
+            return 1
+            ;;
+    esac
     cat "/sys/class/net/$iface/address" 2>/dev/null | head -n 1 || true
 }
 

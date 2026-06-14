@@ -42,6 +42,8 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 : "${EM_MESH11SD_MBCA_TBTT_ADJ_INTERVAL_SEC:=60}"
 : "${EM_EASYMANET_API_PORT:=10411}"
 
+EASYMANET_API_CONFIGURED=0
+
 LOG_FILE="$(_prefix_path /var/log/easymanet.log)"
 PROVISIONED_FLAG="$(_prefix_path /etc/easymanet/provisioned)"
 PROVISION_DIR="$(_prefix_path /etc/easymanet)"
@@ -164,13 +166,15 @@ configure_mesh_radio_device() {
 
 configure_easymanet_api() {
     api_home="$(_prefix_path /www/easymanet-api)"
-    if [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
+    api_script="$(_prefix_path /usr/lib/easymanet/api.sh)"
+    EASYMANET_API_CONFIGURED=0
+    uci -q delete uhttpd.easymanet_api 2>/dev/null || true
+    if [ ! -x "$api_script" ] || [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
         echo "WARNING: EasyMANET API endpoint wrappers are missing; skipping API setup" >> "$LOG_FILE"
         return 0
     fi
 
     echo "Configuring EasyMANET topology API on port $EM_EASYMANET_API_PORT..." >> "$LOG_FILE"
-    uci -q delete uhttpd.easymanet_api 2>/dev/null || true
     uci_set uhttpd.easymanet_api=uhttpd
     uci_set uhttpd.easymanet_api.home="$api_home"
     uci_set uhttpd.easymanet_api.cgi_prefix="/v1"
@@ -185,6 +189,7 @@ configure_easymanet_api() {
         uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
     fi
     uci_commit uhttpd
+    EASYMANET_API_CONFIGURED=1
 }
 
 find_boot_json() {
@@ -594,13 +599,15 @@ if [ -x "$network_init" ]; then
     "$network_init" enable 2>/dev/null || true
     "$network_init" restart 2>/dev/null || true
 fi
-uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
-if [ -x "$uhttpd_init" ]; then
-    echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
-    "$uhttpd_init" enable 2>/dev/null || true
-    "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
-else
-    echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
+if [ "$EASYMANET_API_CONFIGURED" = "1" ]; then
+    uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
+    if [ -x "$uhttpd_init" ]; then
+        echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
+        "$uhttpd_init" enable 2>/dev/null || true
+        "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
+    else
+        echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
+    fi
 fi
 echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
 configure_mesh_radio_device "$MESH_RADIO"

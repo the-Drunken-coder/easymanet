@@ -172,6 +172,7 @@ def _point_provision_json() -> dict:
 
 def _copy_api_overlay(prefix: Path) -> None:
     for relative in (
+        "usr/lib/easymanet/api.sh",
         "www/easymanet-api/v1/identity",
         "www/easymanet-api/v1/neighbors",
         "www/easymanet-api/v1/topology",
@@ -427,6 +428,28 @@ def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):
         == "10.41.2.1:10411"
     )
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+
+
+def test_provision_clears_stale_topology_api_when_assets_missing(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("uhttpd.easymanet_api=uhttpd\n")
+        state.write("uhttpd.easymanet_api.home='/old/easymanet-api'\n")
+        state.write("uhttpd.easymanet_api.listen_http='0.0.0.0:10411'\n")
+    _write_uhttpd_stub(prefix)
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "uhttpd.easymanet_api.home", env) == ""
+    assert _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env) == ""
+    assert not (prefix / "var" / "uhttpd-state").exists()
+    assert "EasyMANET API endpoint wrappers are missing" in (
+        prefix / "var" / "log" / "easymanet.log"
+    ).read_text()
 
 
 def test_topology_api_parses_batctl_neighbors_fixture():

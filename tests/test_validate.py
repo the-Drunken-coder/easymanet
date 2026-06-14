@@ -123,6 +123,16 @@ def test_mesh_channel_must_be_numeric():
     os.unlink(path)
 
 
+def test_mesh_bandwidth_must_be_numeric():
+    config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: true")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("mesh.bandwidth_mhz must be numeric" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_duplicate_hostname():
     config = VALID_CONFIG.replace("hostname: node02", "hostname: node01")
     path = _write_config(config)

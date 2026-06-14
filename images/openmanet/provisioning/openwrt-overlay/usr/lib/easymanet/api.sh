@@ -320,8 +320,7 @@ append_neighbor_records() {
 resolve_node_by_mac() {
     nodes_file="$1"
     mac="$(lower "$2")"
-    sep="$(record_sep)"
-    awk -F "$sep" -v mac="$mac" '
+    awk -F '[|]' -v mac="$mac" '
         tolower($6) == mac || tolower($7) == mac { print $1; exit }
     ' "$nodes_file"
 }

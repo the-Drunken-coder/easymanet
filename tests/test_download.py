@@ -231,6 +231,43 @@ def test_download_image_verifies_sha256(tmp_path, monkeypatch):
     assert events[2]["downloaded_bytes"] == len(body)
     assert events[2]["total_bytes"] == len(body)
     assert events[2]["percent"] == 100
+    version_data = json.loads((tmp_path / "version.json").read_text())
+    assert version_data["rpi4-mm6108-spi"] == {
+        "version": "test",
+        "sha256": expected,
+        "url": "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
+    }
+
+
+def test_download_image_records_metadata_when_reusing_existing_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+    _write_gzip(image)
+    expected = _sha256(image)
+
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
+
+    def fail_urlopen(*_args, **_kwargs):
+        raise AssertionError("cached image should avoid network")
+
+    monkeypatch.setattr(download.urllib.request, "urlopen", fail_urlopen)
+
+    path = download.download_image(
+        "rpi4-mm6108-spi",
+        "test-cache",
+        "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
+        expected,
+    )
+
+    assert path == image
+    version_data = json.loads((tmp_path / "version.json").read_text())
+    assert version_data["rpi4-mm6108-spi"] == {
+        "version": "test-cache",
+        "sha256": expected,
+        "url": "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
+    }
 
 
 def test_download_image_removes_file_on_sha256_mismatch(tmp_path, monkeypatch):
@@ -379,6 +416,34 @@ def test_pick_release_asset_uses_github_asset_digest():
     assert result.version == "1.6.5"
     assert result.url == "https://example.com/image.img.gz"
     assert result.sha256 == "a" * 64
+
+
+def test_image_ref_from_release_manifest_uses_release_tag_as_version():
+    manifest = {
+        "target": "rpi4-mm6108-spi",
+        "openmanet_version": "1.6.5",
+        "artifact": {
+            "filename": "openmanet.img.gz",
+            "sha256": "b" * 64,
+        },
+    }
+    assets = [
+        {
+            "name": "openmanet.img.gz",
+            "browser_download_url": "https://example.com/openmanet.img.gz",
+        }
+    ]
+
+    result = download._image_ref_from_release_manifest(
+        manifest,
+        assets,
+        "rpi4-mm6108-spi",
+        release_version="images-v0.2.0",
+    )
+
+    assert result is not None
+    assert result.version == "images-v0.2.0"
+    assert result.sha256 == "b" * 64
 
 
 def test_fetch_github_release_retries_transient_urlopen_error(monkeypatch):

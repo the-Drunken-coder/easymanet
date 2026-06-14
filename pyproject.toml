@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easymanet"
-version = "0.2.0"
+version = "0.2.1"
 description = "Zero-touch OpenMANET provisioning and imaging"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -76,21 +76,30 @@ include = [
 ]
 "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/init.d" = [
     "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-boot-report",
+    "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-led-status",
     "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-management-lan",
 ]
 "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/sysctl.d" = [
     "images/openmanet/provisioning/openwrt-overlay/etc/sysctl.d/99-easymanet.conf",
 ]
 "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults" = [
+    "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/96-easymanet-led-status",
     "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/97-easymanet-management-lan",
     "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/98-easymanet-boot-report",
     "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/99-easymanet",
 ]
 "share/easymanet/images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet" = [
+    "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/api.sh",
     "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
+    "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/led-status.sh",
     "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
     "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
     "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+]
+"share/easymanet/images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1" = [
+    "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/identity",
+    "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/neighbors",
+    "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/topology",
 ]
 
 [tool.pytest.ini_options]

@@ -1,14 +1,24 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 
 const repoRoot = path.resolve(__dirname, "../../..");
+const appIconPngPath = path.join(__dirname, "assets", "easymanet-icon.png");
 const nodeNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const bridgeTimeoutMs = 15000;
+const meshBridgeTimeoutMs = 45000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
 const sshModes = new Set(["default", "enable", "disable"]);
+
+function booleanFlag(value) {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+  }
+  return value === true || value === 1;
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -17,7 +27,8 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     title: "EasyMANET",
-    backgroundColor: "#f6f7f4",
+    icon: windowIconPath(),
+    backgroundColor: "#0b1014",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -70,6 +81,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerIpc();
+  setDockIcon();
   createWindow();
 
   app.on("activate", () => {
@@ -84,6 +96,20 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+function windowIconPath() {
+  return fs.existsSync(appIconPngPath) ? appIconPngPath : undefined;
+}
+
+function setDockIcon() {
+  if (process.platform !== "darwin" || !app.dock || !fs.existsSync(appIconPngPath)) {
+    return;
+  }
+  const icon = nativeImage.createFromPath(appIconPngPath);
+  if (!icon.isEmpty()) {
+    app.dock.setIcon(icon);
+  }
+}
 
 function registerIpc() {
   ipcMain.handle("easymanet:state", () => runBridge(["state"]));
@@ -112,6 +138,20 @@ function registerIpc() {
     }
     return runBridge(["flash-plan", ...flashArgs(validated)], { timeoutMs: flashBridgeTimeoutMs });
   });
+  ipcMain.handle("easymanet:mesh-discover", async (_event, payload = {}) => {
+    const validated = await validateMeshPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const args = ["mesh-discover"];
+    if (validated.config) {
+      args.push("--config", validated.config);
+    }
+    if (validated.scanSubnet) {
+      args.push("--scan-subnet");
+    }
+    return runBridge(args, { timeoutMs: meshBridgeTimeoutMs });
+  });
   ipcMain.handle("easymanet:flash", async (event, payload = {}) => {
     const validated = await validateFlashPayload(payload);
     if (!validated.ok) {
@@ -129,6 +169,16 @@ function registerIpc() {
     });
     if (confirmed.response !== 0) {
       return { ok: false, canceled: true, errors: ["Flash canceled"] };
+    }
+    if (process.platform === "darwin") {
+      if (!validated.adminPassword) {
+        return { ok: false, errors: ["Mac administrator password is required for flashing"] };
+      }
+      return runFlashWithAdministratorPrivileges(validated, {
+        timeoutMs: flashBridgeTimeoutMs,
+        webContents: event.sender,
+        adminPassword: validated.adminPassword,
+      });
     }
     return runBridgeStreaming(["flash", ...flashArgs(validated), "--yes"], {
       timeoutMs: flashBridgeTimeoutMs,
@@ -218,6 +268,137 @@ function runBridgeStreaming(args, options = {}) {
   });
 }
 
+async function runFlashWithAdministratorPrivileges(validated, options = {}) {
+  let plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
+    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+  });
+  if (!plan.ok) {
+    return plan;
+  }
+  const ensured = await ensureCachedImageForElevatedFlash(validated, plan, options);
+  if (ensured.ok === false) {
+    return ensured;
+  }
+  plan = ensured;
+  sendBridgeFlashEvent(options.webContents, {
+    type: "event",
+    event_type: "auth_required",
+    level: "info",
+    message: "Administrator authentication is required to write the selected disk.",
+  });
+  let stage = null;
+  try {
+    stage = stageElevatedFlashInputs(validated, plan);
+    const stagedPayload = {...validated, config: stage.configPath};
+    const stagedImage = stage.imagePath ? {...plan.image, cached_path: stage.imagePath} : plan.image || {};
+    const args = ["flash", ...flashArgs(stagedPayload), "--yes", ...baseImageArgs(stagedImage)];
+    return await runBridgeWithAdministratorPrivileges(args, {...options, stage});
+  } catch (error) {
+    cleanupElevatedStage(stage);
+    return {ok: false, errors: [error.message]};
+  }
+}
+
+async function ensureCachedImageForElevatedFlash(validated, plan, options = {}) {
+  const image = plan.image || {};
+  const imagePath = String(image.cached_path || image.path || "");
+  if (imagePath && !imagePath.startsWith("<")) {
+    return plan;
+  }
+  if (!image.url || !image.sha256) {
+    return plan;
+  }
+
+  const result = await runBridgeStreaming(["ensure-image", "--config", validated.config, "--node", validated.node], {
+    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+    webContents: options.webContents,
+  });
+  if (!result.ok) {
+    return result;
+  }
+  return {
+    ...plan,
+    image: {
+      ...image,
+      ...(result.image || {}),
+    },
+  };
+}
+
+function runBridgeWithAdministratorPrivileges(args, options = {}) {
+  return new Promise((resolve) => {
+    let bridge;
+    try {
+      bridge = elevatedBridgeCommand(args, options.stage);
+    } catch (error) {
+      cleanupElevatedStage(options.stage);
+      resolve({ ok: false, errors: [error.message] });
+      return;
+    }
+
+    const timeoutMs = options.timeoutMs || flashBridgeTimeoutMs;
+    const effectiveTimeoutMs = timeoutMs + 60000;
+    const sudo = sudoBridgeCommand(bridge);
+    const child = spawn(sudo.command, sudo.args, {
+      cwd: bridge.cwd || elevatedTempRoot(),
+      env: elevatedBridgeEnv(bridge.env || {}),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const state = {
+      stdout: "",
+      fullStdout: "",
+      stderr: "",
+      finalPayload: null,
+    };
+    let settled = false;
+
+    const finish = (payload) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      cleanupElevatedStage(options.stage);
+      resolve(payload);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill();
+      finish({ ok: false, errors: [`Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`] });
+    }, effectiveTimeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      state.fullStdout += text;
+      state.stdout += text;
+      state.stdout = processBridgeStreamBuffer(state.stdout, options.webContents, (payload) => {
+        state.finalPayload = payload;
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      state.stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      finish({ ok: false, errors: [error.message] });
+    });
+    child.on("close", () => {
+      const remaining = state.stdout.trim();
+      if (remaining) {
+        processBridgeStreamLine(remaining, options.webContents, (payload) => {
+          state.finalPayload = payload;
+        });
+      }
+      if (state.finalPayload) {
+        finish(state.finalPayload);
+        return;
+      }
+      finish(parseElevatedBridgeOutput(state.fullStdout, state.stderr, options.webContents));
+    });
+    child.stdin.write(`${options.adminPassword || ""}\n`);
+    child.stdin.end();
+  });
+}
+
 function runBridgeProcess(args, handlers) {
   return new Promise((resolve) => {
     let bridge;
@@ -272,6 +453,55 @@ function runBridgeProcess(args, handlers) {
   });
 }
 
+function parseElevatedBridgeOutput(stdout, stderr, webContents) {
+  const text = stdout.trim();
+  const errorText = stderr.trim();
+  if (!text) {
+    if (errorText.includes("Sorry, try again") || errorText.includes("incorrect password")) {
+      return { ok: false, errors: ["Administrator authentication failed"] };
+    }
+    if (errorText.includes("a password is required")) {
+      return { ok: false, errors: ["Mac administrator password is required for flashing"] };
+    }
+    return { ok: false, errors: [errorText || "Administrator flash returned no output"] };
+  }
+
+  let finalPayload = null;
+  const outputLines = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      const payload = JSON.parse(trimmed);
+      if (payload.type === "result") {
+        finalPayload = payload;
+      } else if (payload.type === "event") {
+        sendBridgeFlashEvent(webContents, payload);
+        outputLines.push(bridgeEventOutputLine(payload));
+      } else if (Object.prototype.hasOwnProperty.call(payload, "ok")) {
+        finalPayload = payload;
+      }
+    } catch (_error) {
+      sendBridgeFlashEvent(webContents, {
+        type: "event",
+        event_type: "bridge_output",
+        level: "info",
+        message: trimmed,
+      });
+      outputLines.push(trimmed);
+    }
+  }
+  if (finalPayload) {
+    if (outputLines.length && !finalPayload.output) {
+      finalPayload.output = outputLines.join("\n");
+    }
+    return finalPayload;
+  }
+  return parseBridgeJsonOutput(text, errorText);
+}
+
 function parseBridgeJsonOutput(stdout, stderr) {
   const text = stdout.trim();
   if (!text) {
@@ -282,6 +512,201 @@ function parseBridgeJsonOutput(stdout, stderr) {
   } catch (error) {
     return { ok: false, errors: [error.message], raw: text, stderr: stderr.trim() };
   }
+}
+
+function stageElevatedFlashInputs(validated, plan) {
+  const root = fs.mkdtempSync(path.join(elevatedTempRoot(), "easymanet-flash-"));
+  const inputDir = path.join(root, "input");
+  const sourceDir = path.join(root, "src");
+  const workspaceDir = path.join(root, "workspace");
+  fs.mkdirSync(inputDir, {recursive: true});
+  fs.mkdirSync(sourceDir, {recursive: true});
+  fs.mkdirSync(workspaceDir, {recursive: true});
+
+  const configPath = path.join(inputDir, path.basename(validated.config) || "fleet.yml");
+  fs.copyFileSync(validated.config, configPath);
+  fs.chmodSync(configPath, 0o600);
+
+  const sourceImagePath = String((plan.image || {}).cached_path || (plan.image || {}).path || "");
+  let imagePath = "";
+  if (sourceImagePath && !sourceImagePath.startsWith("<")) {
+    imagePath = path.join(inputDir, path.basename(sourceImagePath));
+    fs.copyFileSync(sourceImagePath, imagePath);
+    fs.chmodSync(imagePath, 0o644);
+  }
+
+  copyPythonPackage(path.join(repoRoot, "packages", "core", "src", "easymanet"), path.join(sourceDir, "easymanet"));
+  copyPythonPackage(path.join(repoRoot, "apps", "cli", "src", "easymanet_cli"), path.join(sourceDir, "easymanet_cli"));
+  copyPythonPackage(
+    path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop"),
+    path.join(sourceDir, "easymanet_desktop")
+  );
+
+  return {
+    root,
+    configPath,
+    imagePath,
+    sourceRoots: [sourceDir],
+    workspaceDir,
+  };
+}
+
+function copyPythonPackage(from, to) {
+  if (!fs.existsSync(from)) {
+    return;
+  }
+  fs.cpSync(from, to, {
+    recursive: true,
+    filter: (src) => !src.includes(`${path.sep}__pycache__${path.sep}`),
+  });
+}
+
+function cleanupElevatedStage(stage) {
+  if (!stage || !stage.root) {
+    return;
+  }
+  const root = path.resolve(stage.root);
+  if (!root.startsWith(path.resolve(elevatedTempRoot()) + path.sep)) {
+    return;
+  }
+  try {
+    fs.rmSync(root, {recursive: true, force: true});
+  } catch (_error) {
+    // Root-owned files should not block the desktop result.
+  }
+}
+
+function baseImageArgs(image) {
+  const imagePath = String(image.cached_path || image.path || "");
+  if (!imagePath || imagePath.startsWith("<")) {
+    return [];
+  }
+  const args = ["--base-image", imagePath];
+  const sha256 = String(image.sha256 || "");
+  if (sha256) {
+    args.push("--image-sha256", sha256);
+  }
+  return args;
+}
+
+function elevatedBridgeCommand(args, stage) {
+  const bundledBridge = packagedBridgeBinary();
+  if (bundledBridge) {
+    return {
+      command: bundledBridge,
+      args,
+      cwd: stage?.root || elevatedTempRoot(),
+      env: stage ? {EASYMANET_WORKSPACE: stage.workspaceDir} : {},
+    };
+  }
+  if (stage) {
+    return {
+      command: elevatedPythonPath(),
+      args: ["-m", "easymanet_desktop.bridge", ...args],
+      cwd: stage.root,
+      env: {
+        PYTHONPATH: stage.sourceRoots.join(path.delimiter),
+        EASYMANET_WORKSPACE: stage.workspaceDir,
+      },
+    };
+  }
+  return bridgeCommand(args);
+}
+
+function sudoBridgeCommand(bridge) {
+  const envParts = Object.entries(elevatedBridgeEnv(bridge.env || {}))
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=${value}`);
+  return {
+    command: "sudo",
+    args: [
+      "-S",
+      "-p",
+      "",
+      "--",
+    "env",
+    ...envParts,
+      bridge.command,
+      ...bridge.args,
+    ],
+  };
+}
+
+function elevatedBridgeEnv(extraEnv = {}) {
+  const env = bridgeEnv();
+  const result = {
+    HOME: app.getPath("home"),
+    PATH: env.PATH || process.env.PATH || "/usr/bin:/bin:/usr/sbin:/sbin",
+    EASYMANET_SKIP_UPDATE_CHECK: env.EASYMANET_SKIP_UPDATE_CHECK || "1",
+    PYTHONDONTWRITEBYTECODE: "1",
+    ...extraEnv,
+  };
+  for (const key of [
+    "EASYMANET_WORKSPACE",
+    "EASYMANET_PYTHON",
+    "VIRTUAL_ENV",
+    "EASYMANET_BRIDGE_BIN",
+    "EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE",
+    "EASYMANET_ELECTRON_NO_SOURCE_PATHS",
+  ]) {
+    if (env[key] && !(key in result)) {
+      result[key] = env[key];
+    }
+  }
+  return result;
+}
+
+function elevatedPythonPath() {
+  const configured = configuredPythonPath();
+  if (configured && usablePythonCandidate(configured)) {
+    return configured;
+  }
+  for (const candidate of [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/opt/homebrew/bin/python3.14",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.14",
+    "/usr/local/bin/python3",
+  ]) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  const current = pythonPath();
+  if (!isInsideDocuments(current)) {
+    return current;
+  }
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+function configuredPythonPath() {
+  if (process.env.EASYMANET_PYTHON) {
+    return process.env.EASYMANET_PYTHON;
+  }
+  if (process.env.VIRTUAL_ENV) {
+    return venvPython(process.env.VIRTUAL_ENV);
+  }
+  return "";
+}
+
+function usablePythonCandidate(candidate) {
+  return path.isAbsolute(candidate) ? fs.existsSync(candidate) : true;
+}
+
+function isInsideDocuments(value) {
+  const documents = path.resolve(app.getPath("home"), "Documents");
+  const candidate = path.resolve(value);
+  return candidate === documents || candidate.startsWith(documents + path.sep);
+}
+
+function elevatedTempRoot() {
+  return "/tmp";
+}
+
+function bridgeEventOutputLine(payload) {
+  const message = String(payload.message || payload.event_type || "").trim();
+  const prefix = payload.level === "warning" ? "warning: " : payload.level === "error" ? "error: " : "";
+  return `${prefix}${message}`.trim();
 }
 
 function processBridgeStreamBuffer(buffer, webContents, setFinalPayload) {
@@ -373,7 +798,37 @@ async function validateFlashPayload(payload) {
     return { ok: false, errors: ["Unsupported SSH mode"] };
   }
 
-  return { ...validated, device, sshMode };
+  const adminPassword = typeof payload.adminPassword === "string" ? payload.adminPassword : "";
+
+  return { ...validated, device, sshMode, adminPassword };
+}
+
+async function validateMeshPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Mesh discovery payload must be an object"] };
+  }
+
+  const rawConfig = typeof payload.config === "string" ? payload.config.trim() : "";
+  let config = "";
+  if (rawConfig) {
+    if (hasTraversalSegment(rawConfig)) {
+      return { ok: false, errors: ["Fleet config path must not contain traversal segments"] };
+    }
+    const resolved = await resolveConfigPath(rawConfig, {
+      runBridge,
+      homeDir: () => app.getPath("home"),
+    });
+    if (!resolved.ok) {
+      return resolved;
+    }
+    config = resolved.config;
+  }
+
+  return {
+    ok: true,
+    config,
+    scanSubnet: booleanFlag(payload.scanSubnet) || booleanFlag(payload.scan_subnet),
+  };
 }
 
 function flashArgs(payload) {

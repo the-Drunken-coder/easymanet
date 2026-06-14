@@ -222,7 +222,12 @@ def _pick_manifest_release_asset(release: dict, target: str) -> Optional[ImageRe
         manifest = _fetch_release_manifest(manifest_url)
         if not manifest:
             continue
-        ref = _image_ref_from_release_manifest(manifest, assets, target)
+        ref = _image_ref_from_release_manifest(
+            manifest,
+            assets,
+            target,
+            release_version=str(release.get("tag_name", "") or ""),
+        )
         if ref:
             return ref
     return None
@@ -242,6 +247,7 @@ def _image_ref_from_release_manifest(
     manifest: dict,
     assets: list[dict],
     target: str,
+    release_version: str = "",
 ) -> Optional[ImageRef]:
     if manifest.get("target") != target:
         return None
@@ -257,7 +263,12 @@ def _image_ref_from_release_manifest(
 
     for asset in assets:
         if asset.get("name") == filename and asset.get("browser_download_url"):
-            version = manifest.get("openmanet_version") or manifest.get("channel") or "latest"
+            version = (
+                release_version
+                or manifest.get("openmanet_version")
+                or manifest.get("channel")
+                or "latest"
+            )
             return ImageRef(version, asset["browser_download_url"], sha256)
     return None
 
@@ -428,6 +439,7 @@ def download_image(
 
     if dest.exists() and not force:
         if _valid_cached_image(dest) and _cached_image_matches_sha256(dest, expected_sha256):
+            _save_version(target, version, sha256=expected_sha256, url=url)
             return dest
         dest.unlink()
 
@@ -492,7 +504,7 @@ def download_image(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
-    _save_version(target, version)
+    _save_version(target, version, sha256=expected_sha256, url=url)
     _emit_event(emit, "download_completed", f"  Saved: {dest}", path=str(dest))
     return dest
 
@@ -568,16 +580,29 @@ def _valid_image_payload(path: Path, filename: str) -> bool:
     return decompressor.eof and total > 0
 
 
-def _save_version(target: str, version: str) -> None:
+def _save_version(
+    target: str,
+    version: str,
+    *,
+    sha256: Optional[str] = None,
+    url: str = "",
+) -> None:
     path = version_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {}
+    data: dict[str, Any] = {}
     if path.exists():
         try:
-            data = json.loads(path.read_text())
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, dict):
+                data = loaded
         except (json.JSONDecodeError, OSError):
             pass
-    data[target] = version
+    entry: dict[str, str] = {"version": version}
+    if sha256:
+        entry["sha256"] = normalize_sha256(sha256)
+    if url:
+        entry["url"] = url
+    data[target] = entry
     path.write_text(json.dumps(data, indent=2))
 
 

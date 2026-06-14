@@ -118,6 +118,12 @@ if [ -z "$LED_PATH" ]; then
     else
         log "no green/ACT LED candidate found under $LED_ROOT"
     fi
+    if [ "$MODE" = "once" ]; then
+        exit 0
+    fi
+    while true; do
+        sleep "$EASYMANET_LED_INTERVAL"
+    done
     exit 0
 fi
 

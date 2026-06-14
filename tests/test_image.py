@@ -414,6 +414,9 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
             self.returncode = returncode
             self.stdout = stdout
 
+        def communicate(self):
+            return ("", "")
+
         def wait(self):
             return self.returncode
 
@@ -455,6 +458,9 @@ def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
             self.returncode = returncode
             self.stdout = stdout
 
+        def communicate(self):
+            return ("", "")
+
         def wait(self):
             return self.returncode
 
@@ -477,9 +483,7 @@ def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
     assert [
         "dd",
         "of=/dev/rdisk4",
-        "ibs=16m",
-        "obs=1m",
-        "conv=osync",
+        "bs=1m",
         "status=progress",
     ] in popen_calls
 
@@ -496,6 +500,10 @@ def test_write_gz_via_dd_reports_dd_failure_before_gzip_sigpipe(monkeypatch, tmp
             self.returncode = returncode
             self.stdout = stdout
             self.stderr = stderr
+
+        def communicate(self):
+            stderr = self.stderr.getvalue() if self.stderr else ""
+            return ("", stderr)
 
         def wait(self):
             return self.returncode
@@ -520,7 +528,8 @@ def test_write_gz_via_dd_reports_dd_failure_before_gzip_sigpipe(monkeypatch, tmp
 
     assert exc_info.value.cmd[0] == "dd"
     assert "iflag=fullblock" not in exc_info.value.cmd
-    assert "conv=osync" in exc_info.value.cmd
+    assert "conv=osync" not in exc_info.value.cmd
+    assert "bs=1m" in exc_info.value.cmd
     assert "Invalid argument" in exc_info.value.stderr
 
 

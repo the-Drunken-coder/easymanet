@@ -123,13 +123,16 @@ def ensure_image_payload(
             "image": details,
         }
 
-    path = download_image(
-        target,
-        version,
-        url,
-        sha256,
-        emit=lambda event: _emit_download_event(event, emit),
-    )
+    try:
+        path = download_image(
+            target,
+            version,
+            url,
+            sha256,
+            emit=lambda event: _emit_download_event(event, emit),
+        )
+    except Exception as exc:  # noqa: BLE001 - surfaced to the desktop as a typed result.
+        return {"ok": False, "errors": [f"Image download failed: {exc}"], "image": details}
     return {"ok": True, "image": {**details, "path": str(path), "cached_path": str(path)}}
 
 

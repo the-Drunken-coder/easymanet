@@ -179,7 +179,8 @@ configure_easymanet_api() {
     uci_set uhttpd.easymanet_api.http_keepalive="0"
     uci_set uhttpd.easymanet_api.tcp_keepalive="1"
     if [ "$NODE_ROLE" = "gate" ]; then
-        uci_add_list uhttpd.easymanet_api.listen_http="0.0.0.0:$EM_EASYMANET_API_PORT"
+        uci_add_list uhttpd.easymanet_api.listen_http="$EM_LAN_FALLBACK_IP:$EM_EASYMANET_API_PORT"
+        uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
     else
         uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
     fi
@@ -485,13 +486,6 @@ if [ "$NODE_ROLE" = "gate" ]; then
     uci_set firewall.mesh_wan_forwarding=forwarding
     uci_set firewall.mesh_wan_forwarding.src="mesh"
     uci_set firewall.mesh_wan_forwarding.dest="wan"
-
-    uci_set firewall.allow_easymanet_api_wan=rule
-    uci_set firewall.allow_easymanet_api_wan.name="Allow-EasyMANET-API-WAN"
-    uci_set firewall.allow_easymanet_api_wan.src="wan"
-    uci_set firewall.allow_easymanet_api_wan.proto="tcp"
-    uci_set firewall.allow_easymanet_api_wan.dest_port="$EM_EASYMANET_API_PORT"
-    uci_set firewall.allow_easymanet_api_wan.target="ACCEPT"
 fi
 uci_commit firewall
 

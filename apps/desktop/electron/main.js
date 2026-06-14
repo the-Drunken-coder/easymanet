@@ -525,7 +525,7 @@ function stageElevatedFlashInputs(validated, plan) {
 
   const configPath = path.join(inputDir, path.basename(validated.config) || "fleet.yml");
   fs.copyFileSync(validated.config, configPath);
-  fs.chmodSync(configPath, 0o644);
+  fs.chmodSync(configPath, 0o600);
 
   const sourceImagePath = String((plan.image || {}).cached_path || (plan.image || {}).path || "");
   let imagePath = "";
@@ -657,6 +657,10 @@ function elevatedBridgeEnv(extraEnv = {}) {
 }
 
 function elevatedPythonPath() {
+  const configured = configuredPythonPath();
+  if (configured && usablePythonCandidate(configured)) {
+    return configured;
+  }
   for (const candidate of [
     "/opt/homebrew/opt/python@3.14/bin/python3.14",
     "/opt/homebrew/bin/python3.14",
@@ -673,6 +677,20 @@ function elevatedPythonPath() {
     return current;
   }
   return process.platform === "win32" ? "python" : "python3";
+}
+
+function configuredPythonPath() {
+  if (process.env.EASYMANET_PYTHON) {
+    return process.env.EASYMANET_PYTHON;
+  }
+  if (process.env.VIRTUAL_ENV) {
+    return venvPython(process.env.VIRTUAL_ENV);
+  }
+  return "";
+}
+
+function usablePythonCandidate(candidate) {
+  return path.isAbsolute(candidate) ? fs.existsSync(candidate) : true;
 }
 
 function isInsideDocuments(value) {

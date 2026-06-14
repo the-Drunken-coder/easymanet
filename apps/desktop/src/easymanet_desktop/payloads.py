@@ -12,6 +12,7 @@ from easymanet.download import (
     get_cached_image,
     image_sha256,
     images_manifest_path,
+    normalize_sha256,
     version_file_path,
 )
 from easymanet.manifest import ManifestError, load_manifest
@@ -21,6 +22,7 @@ from easymanet.validate import validate
 from easymanet.workspace import FLEET_SUFFIXES, resolve_fleet_config, workspace_payload
 
 MANAGEMENT_LAN_IP = "10.41.254.1"
+DISPLAY_CACHE_HASH_LIMIT_BYTES = 64 * 1024 * 1024
 
 
 def state_payload() -> dict[str, Any]:
@@ -36,7 +38,11 @@ def state_payload() -> dict[str, Any]:
         if cached_version.get("version") and not entry.get("version"):
             entry["version"] = cached_version["version"]
         if cached:
-            add_cached_image_details(entry, cached)
+            add_cached_image_details(
+                entry,
+                cached,
+                known_sha256=cached_version.get("sha256") or entry.get("sha256"),
+            )
     return {
         "ok": True,
         "workspace": workspace,
@@ -99,11 +105,26 @@ def display_cached_image(target: str, entry: dict[str, Any]) -> Path | None:
     return None
 
 
-def add_cached_image_details(entry: dict[str, Any], cached: Path) -> None:
+def add_cached_image_details(
+    entry: dict[str, Any],
+    cached: Path,
+    *,
+    known_sha256: str = "",
+) -> None:
     try:
-        entry["cached_size_bytes"] = cached.stat().st_size
+        size = cached.stat().st_size
     except OSError:
-        entry["cached_size_bytes"] = 0
+        size = 0
+    entry["cached_size_bytes"] = size
+    if known_sha256:
+        try:
+            entry["cached_sha256"] = normalize_sha256(known_sha256)
+            return
+        except ValueError:
+            pass
+    if size > DISPLAY_CACHE_HASH_LIMIT_BYTES:
+        entry["cached_sha256"] = ""
+        return
     try:
         entry["cached_sha256"] = image_sha256(cached)
     except OSError:

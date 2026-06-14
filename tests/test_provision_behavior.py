@@ -387,7 +387,7 @@ def test_provision_missing_led_status_service_is_nonfatal(tmp_path):
     ).read_text()
 
 
-def test_provision_gate_exposes_topology_api_on_lan_and_mesh(tmp_path):
+def test_provision_gate_exposes_topology_api_on_management_and_mesh_only(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
     _seed_wireless_radios(uci_state)
@@ -404,13 +404,10 @@ def test_provision_gate_exposes_topology_api_on_lan_and_mesh(tmp_path):
     assert _uci_get(uci_state, "uhttpd.easymanet_api.cgi_prefix", env) == "/v1"
     assert (
         _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env)
-        == "0.0.0.0:10411"
+        == "10.41.254.1:10411 10.41.1.1:10411"
     )
-    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == "wan"
-    assert (
-        _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env)
-        == "10411"
-    )
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env) == ""
     assert "restarted" in (prefix / "var" / "uhttpd-state").read_text()
 
 

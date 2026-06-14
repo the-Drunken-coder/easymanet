@@ -66,7 +66,7 @@ def mesh_discover_payload(
 ) -> dict[str, Any]:
     request = payload or {}
     config = str(request.get("config", "") or "").strip()
-    scan_subnet = bool(request.get("scan_subnet") or request.get("scanSubnet"))
+    scan_subnet = _request_bool(request.get("scan_subnet", request.get("scanSubnet")))
 
     candidates, warnings = mesh_candidates(config=config, scan_subnet=scan_subnet)
     probe_fn = probe or probe_mesh_candidate
@@ -128,6 +128,12 @@ def mesh_discover_payload(
         "warnings": merged_warnings,
         "generated_at": topology.get("generated_at") or _now_iso(),
     }
+
+
+def _request_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return value is True or value == 1
 
 
 def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[list[MeshCandidate], list[str]]:

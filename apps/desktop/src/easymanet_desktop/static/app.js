@@ -121,6 +121,7 @@ $("refresh").addEventListener("click", () => {
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
+    resetMeshDiscovery();
     updateMeshFleetSource();
     loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
@@ -129,11 +130,13 @@ fleetSelect.addEventListener("change", () => {
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
   resetNodeSelect("Update fleet path to load nodes");
+  resetMeshDiscovery();
   updateMeshFleetSource();
   updateFlashControls();
 });
 configInput.addEventListener("change", () => {
   syncFleetSelect(configInput.value.trim());
+  resetMeshDiscovery();
   updateMeshFleetSource();
   loadNodesForSelectedFleet().catch(handleNodeLoadError);
 });
@@ -549,7 +552,7 @@ function renderMeshDiscovery(payload) {
   if (nodes.length) {
     meshRadios.className = "topology-view";
     meshRadios.innerHTML = meshTopologyView(payload);
-    setMeshStatus("ok", `${nodes.length} nodes`);
+    setMeshStatus(payload.ok ? "ok" : "warn", payload.ok ? `${nodes.length} nodes` : "partial results");
   } else {
     meshRadios.className = "mesh-grid";
     meshRadios.innerHTML = `
@@ -560,6 +563,23 @@ function renderMeshDiscovery(payload) {
     `;
     setMeshStatus(payload.ok ? "subtle" : "bad", payload.ok ? "none found" : "error");
   }
+}
+
+function resetMeshDiscovery() {
+  state.meshHasScanned = false;
+  state.meshNodes = [];
+  state.meshLinks = [];
+  meshCount.textContent = "0";
+  meshSummary.hidden = true;
+  meshSummary.innerHTML = "";
+  meshRadios.className = "mesh-grid";
+  meshRadios.innerHTML = `
+    <div class="empty-state slim">
+      <p class="empty-title">No topology found</p>
+      <p class="empty-meta">Run Scan Mesh to refresh this view.</p>
+    </div>
+  `;
+  setMeshStatus("subtle", "idle");
 }
 
 function setMeshBusy(busy) {

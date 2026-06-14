@@ -83,6 +83,62 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
+def test_desktop_state_uses_cached_metadata_hash_for_large_images(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with image.open("wb") as handle:
+        handle.truncate(payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1)
+    version_file = tmp_path / "version.json"
+    version_file.write_text(
+        json.dumps({"rpi4-mm6108-spi": {"version": "1.6.5", "sha256": "b" * 64}})
+    )
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+    monkeypatch.setattr(
+        payloads,
+        "image_sha256",
+        lambda _path: (_ for _ in ()).throw(AssertionError("large cache should not be hashed")),
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
+    assert entry["cached_sha256"] == "b" * 64
+
+
+def test_desktop_state_skips_hashing_large_unversioned_cache(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with image.open("wb") as handle:
+        handle.truncate(payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1)
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+    monkeypatch.setattr(
+        payloads,
+        "image_sha256",
+        lambda _path: (_ for _ in ()).throw(AssertionError("large cache should not be hashed")),
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
+    assert entry["cached_sha256"] == ""
+
+
 def test_desktop_bridge_ensure_image_downloads_to_operator_cache(tmp_path, monkeypatch):
     image_path = tmp_path / "Images" / "openmanet.img.gz"
     events = []
@@ -122,6 +178,31 @@ def test_desktop_bridge_ensure_image_downloads_to_operator_cache(tmp_path, monke
     assert payload["image"]["cached_path"] == str(image_path)
     assert events[0].event_type == "download_completed"
     assert events[0].data["path"] == str(image_path)
+
+
+def test_desktop_bridge_ensure_image_returns_typed_download_failure(monkeypatch):
+    monkeypatch.setattr(
+        bridge,
+        "flash_image_details",
+        lambda **_kwargs: {
+            "target": "rpi4-mm6108-spi",
+            "version": "images-v0.2.4",
+            "url": "https://example.com/openmanet.img.gz",
+            "sha256": "a" * 64,
+            "cached_path": "",
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "download_image",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")),
+    )
+
+    payload = bridge.ensure_image_payload(config="field.yml", node="gate01")
+
+    assert payload["ok"] is False
+    assert payload["errors"] == ["Image download failed: offline"]
+    assert payload["image"]["target"] == "rpi4-mm6108-spi"
 
 
 def test_desktop_validate_resolves_workspace_fleet_name(tmp_path, monkeypatch):
@@ -228,6 +309,23 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
     assert payload["links"][0]["target"] == "point01"
     assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_discovery_string_false_does_not_scan_subnet(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(
+        mesh,
+        "_local_subnet_hosts",
+        lambda: (_ for _ in ()).throw(AssertionError("subnet scan should stay disabled")),
+    )
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "", "scanSubnet": "false"},
+        probe=lambda candidate: {**candidate.to_dict(), "ok": False, "status": "api_unreachable"},
+    )
+
+    assert payload["ok"] is False
+    assert payload["scan_subnet"] is False
 
 
 def test_desktop_mesh_candidates_skip_bare_fleet_hostnames(monkeypatch):
@@ -578,6 +676,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderNodeOptions" in text
     assert "discoverMesh" in text
     assert "renderMeshDiscovery" in text
+    assert "resetMeshDiscovery" in text
+    assert "partial results" in text
     assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
     assert "meshScanning.hidden = !busy" in text
     assert 'meshRadios.setAttribute("aria-busy", "true")' in text
@@ -698,9 +798,11 @@ def test_electron_shell_files_exist():
     assert '"sudo"' in (electron / "main.js").read_text()
     assert '"-S"' in (electron / "main.js").read_text()
     assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
+    assert "fs.chmodSync(configPath, 0o600)" in (electron / "main.js").read_text()
     assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
     assert "ensureCachedImageForElevatedFlash" in (electron / "main.js").read_text()
     assert '"ensure-image"' in (electron / "main.js").read_text()
+    assert "configuredPythonPath()" in (electron / "main.js").read_text()
     assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
     assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
     assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()

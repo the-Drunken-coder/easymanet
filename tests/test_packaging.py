@@ -146,3 +146,19 @@ def test_release_smoke_wheel_glob_uses_normalized_project_name(tmp_path):
     )
 
     assert release_smoke.wheel_glob_pattern(repo) == "easymanet_images-*.whl"
+
+
+def test_release_smoke_fallback_project_name_is_scoped_to_project_section(tmp_path, monkeypatch):
+    release_smoke = _load_release_smoke_module()
+    monkeypatch.setattr(release_smoke, "tomllib", None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text(
+        "[build-system]\n"
+        "name = \"wrong-build-name\"\n"
+        "[project]\n"
+        "authors = [{name = \"Wrong Author\"}]\n"
+        "name = \"easymanet-images\"\n"
+    )
+
+    assert release_smoke.wheel_glob_pattern(repo) == "easymanet_images-*.whl"

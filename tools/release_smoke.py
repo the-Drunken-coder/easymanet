@@ -162,7 +162,13 @@ def project_name(repo_root: Path) -> str:
         name = project.get("name") if isinstance(project, dict) else None
         if isinstance(name, str) and name:
             return name
-    match = re.search(r"""(?m)^\s*name\s*=\s*["']([^"']+)["']\s*(?:#.*)?$""", text)
+    project_block = re.search(r"(?ms)^\s*\[project\]\s*(.*?)(?=^\s*\[|\Z)", text)
+    match = None
+    if project_block:
+        match = re.search(
+            r"""(?m)^\s*name\s*=\s*["']([^"']+)["']\s*(?:#.*)?$""",
+            project_block.group(1),
+        )
     if not match:
         raise SystemExit(f"Could not find project name in {pyproject}")
     return match.group(1)

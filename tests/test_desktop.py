@@ -80,6 +80,47 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
+def test_desktop_bridge_ensure_image_downloads_to_operator_cache(tmp_path, monkeypatch):
+    image_path = tmp_path / "Images" / "openmanet.img.gz"
+    events = []
+
+    monkeypatch.setattr(
+        bridge,
+        "flash_image_details",
+        lambda **_kwargs: {
+            "target": "rpi4-mm6108-spi",
+            "version": "images-v0.2.4",
+            "url": "https://example.com/openmanet.img.gz",
+            "sha256": "a" * 64,
+            "cached_path": "",
+        },
+    )
+
+    def fake_download_image(target, version, url, sha256, emit=None, **_kwargs):
+        assert target == "rpi4-mm6108-spi"
+        assert version == "images-v0.2.4"
+        assert url == "https://example.com/openmanet.img.gz"
+        assert sha256 == "a" * 64
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(b"firmware")
+        if emit:
+            emit({"type": "download_completed", "message": f"Saved: {image_path}", "path": str(image_path)})
+        return image_path
+
+    monkeypatch.setattr(bridge, "download_image", fake_download_image)
+
+    payload = bridge.ensure_image_payload(
+        config="field.yml",
+        node="gate01",
+        emit=events.append,
+    )
+
+    assert payload["ok"] is True
+    assert payload["image"]["cached_path"] == str(image_path)
+    assert events[0].event_type == "download_completed"
+    assert events[0].data["path"] == str(image_path)
+
+
 def test_desktop_validate_resolves_workspace_fleet_name(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -496,6 +537,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert 'data-tab-target="tab-mesh"' in index.read_text()
     assert 'data-tab-panel' in index.read_text()
     assert "mesh-discover" in index.read_text()
+    assert "mesh-scanning" in index.read_text()
     assert "mesh-radios" in index.read_text()
     assert "mesh-ssh-user" not in index.read_text()
     assert "flash-panel" in index.read_text()
@@ -514,10 +556,19 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderNodeOptions" in text
     assert "discoverMesh" in text
     assert "renderMeshDiscovery" in text
+    assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
+    assert "meshScanning.hidden = !busy" in text
+    assert 'meshRadios.setAttribute("aria-busy", "true")' in text
     assert "applyRoleDefaultSsh" in text
     assert "node_roles" in text
     assert "node_access" in text
     assert "flashAccessHint" in text
+    assert "Join ${ssid}" not in text
+    assert "local_ap_ssid ? access.local_ap_ssid" not in text
+    assert "payload.plan" in text
+    assert 'sshNote.startsWith("yes")' in text
+    assert "Connect Ethernet, then SSH to root@" in text
+    assert "Connect Ethernet to the node management port." in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
     assert "detectMacPlatform" in text
@@ -528,6 +579,9 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "diskInventorySignature" in text
     assert "visibilitychange" in text
     assert "setInterval(refreshDisksIfChanged" in text
+    assert "renderImageState" in text
+    assert "refreshImageSidebar" in text
+    assert 'type === "download_completed"' in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
@@ -620,6 +674,8 @@ def test_electron_shell_files_exist():
     assert '"-S"' in (electron / "main.js").read_text()
     assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
     assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
+    assert "ensureCachedImageForElevatedFlash" in (electron / "main.js").read_text()
+    assert '"ensure-image"' in (electron / "main.js").read_text()
     assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
     assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
     assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()

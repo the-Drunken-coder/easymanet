@@ -261,12 +261,17 @@ function runBridgeStreaming(args, options = {}) {
 }
 
 async function runFlashWithAdministratorPrivileges(validated, options = {}) {
-  const plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
+  let plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
     timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
   });
   if (!plan.ok) {
     return plan;
   }
+  const ensured = await ensureCachedImageForElevatedFlash(validated, plan, options);
+  if (ensured.ok === false) {
+    return ensured;
+  }
+  plan = ensured;
   sendBridgeFlashEvent(options.webContents, {
     type: "event",
     event_type: "auth_required",
@@ -284,6 +289,32 @@ async function runFlashWithAdministratorPrivileges(validated, options = {}) {
     cleanupElevatedStage(stage);
     return {ok: false, errors: [error.message]};
   }
+}
+
+async function ensureCachedImageForElevatedFlash(validated, plan, options = {}) {
+  const image = plan.image || {};
+  const imagePath = String(image.cached_path || image.path || "");
+  if (imagePath && !imagePath.startsWith("<")) {
+    return plan;
+  }
+  if (!image.url || !image.sha256) {
+    return plan;
+  }
+
+  const result = await runBridgeStreaming(["ensure-image", "--config", validated.config, "--node", validated.node], {
+    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+    webContents: options.webContents,
+  });
+  if (!result.ok) {
+    return result;
+  }
+  return {
+    ...plan,
+    image: {
+      ...image,
+      ...(result.image || {}),
+    },
+  };
 }
 
 function runBridgeWithAdministratorPrivileges(args, options = {}) {

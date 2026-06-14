@@ -31,7 +31,7 @@ def test_github_release_prefers_image_release_manifest(monkeypatch):
     ref = download._check_github_release("owner/repo", "rpi4-mm6108-spi")
 
     assert ref is not None
-    assert ref.version == "v1"
+    assert ref.version == "1.6.5"
     assert ref.url == f"https://example.invalid/{image_name}"
     assert ref.sha256 == "a" * 64
 

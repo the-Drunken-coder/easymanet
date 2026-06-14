@@ -189,48 +189,11 @@ class ResolvedNode:
 
 
 @dataclass(frozen=True)
-class FleetNode:
-    name: str
-    hostname: object
-    role: object
-    target: object
-    ip: object
-
-    @classmethod
-    def from_resolved_node(cls, node: ResolvedNode) -> "FleetNode":
-        return cls(
-            name=node.name,
-            hostname=node.hostname,
-            role=node.role,
-            target=node.target,
-            ip=node.ip,
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "name": self.name,
-            "hostname": self.hostname,
-            "role": self.role,
-            "target": self.target,
-            "ip": self.ip,
-        }
-
-
-@dataclass(frozen=True)
-class FleetConfig:
-    nodes: tuple[FleetNode, ...]
-
-    def to_dict(self) -> dict[str, object]:
-        return {"nodes": [node.to_dict() for node in self.nodes]}
-
-
-@dataclass(frozen=True)
 class ProvisionPayload:
     version: int
     mesh: MeshConfig
     node: ResolvedNode
     management: ManagementConfig
-    fleet: FleetConfig
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -238,7 +201,6 @@ class ProvisionPayload:
             "mesh": self.mesh.to_dict(),
             "node": self.node.to_dict(),
             "management": self.management.to_dict(),
-            "fleet": self.fleet.to_dict(),
         }
 
     def to_json(self, *, indent: int = 2) -> str:
@@ -285,16 +247,6 @@ def resolve_provision(
         mesh=MeshConfig.from_mapping(mesh),
         node=resolve_node_model(manifest, node_name),
         management=ManagementConfig.from_mapping(management, ssh_enabled=ssh_enabled),
-        fleet=resolve_fleet_model(manifest),
-    )
-
-
-def resolve_fleet_model(manifest: Manifest) -> FleetConfig:
-    return FleetConfig(
-        nodes=tuple(
-            FleetNode.from_resolved_node(resolve_node_model(manifest, name))
-            for name in manifest.node_names()
-        )
     )
 
 
@@ -362,19 +314,10 @@ def _resolved_gateway(
     *,
     role: object,
 ) -> dict[str, object]:
-    default_gateway = _mapping_or_empty(defaults.get("gateway", {}))
-    node_gateway = _mapping_or_empty(node.get("gateway", {}))
     resolved = {
-        **default_gateway,
-        **node_gateway,
+        **_mapping_or_empty(defaults.get("gateway", {})),
+        **_mapping_or_empty(node.get("gateway", {})),
     }
-    default_wifi = default_gateway.get("wifi")
-    node_wifi = node_gateway.get("wifi")
-    if isinstance(default_wifi, dict):
-        if "wifi" not in node_gateway:
-            resolved["wifi"] = dict(default_wifi)
-        elif isinstance(node_wifi, dict):
-            resolved["wifi"] = {**default_wifi, **node_wifi}
     if role == "gate":
         resolved.setdefault("enabled", True)
     else:

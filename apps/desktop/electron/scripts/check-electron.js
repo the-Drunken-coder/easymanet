@@ -60,7 +60,7 @@ if (!payload.ok) {
 const fleetPath = path.join(workspace, "Fleets", "field.yml");
 fs.mkdirSync(path.dirname(fleetPath), { recursive: true });
 fs.copyFileSync(path.join(repoRoot, "examples", "three-node-field-mesh.yml"), fleetPath);
-const expectedFleetPath = path.resolve(fleetPath);
+const expectedFleetPath = fs.realpathSync(fleetPath);
 
 if (!hasTraversalSegment("../field")) {
   cleanupWorkspace();
@@ -76,13 +76,8 @@ resolveConfigPath("../field", { runBridge: runBridgeJson, homeDir: () => os.home
     return resolveConfigPath("field", { runBridge: runBridgeJson, homeDir: () => os.homedir() });
   })
   .then((resolved) => {
-    if (!resolved.ok || !samePath(resolved.config, expectedFleetPath)) {
-      throw new Error(
-        `Relative fleet name did not resolve through bridge: ${JSON.stringify({
-          resolved,
-          expected: expectedFleetPath,
-        })}`,
-      );
+    if (!resolved.ok || resolved.config !== expectedFleetPath) {
+      throw new Error(`Relative fleet name did not resolve through bridge: ${JSON.stringify(resolved)}`);
     }
     cleanupWorkspace();
     console.log("Electron desktop files and EasyMANET bridge are valid.");
@@ -119,42 +114,6 @@ function cleanupWorkspace() {
     return;
   }
   fs.rmdirSync(workspace, { recursive: true });
-}
-
-function samePath(left, right) {
-  const normalize = (value) => {
-    const resolved = path.resolve(String(value || ""));
-    if (process.platform === "win32") {
-      return resolved;
-    }
-    try {
-      return fs.realpathSync(resolved);
-    } catch (_error) {
-      return resolved;
-    }
-  };
-  const leftPath = normalize(left);
-  const rightPath = normalize(right);
-  if (process.platform === "win32") {
-    return leftPath.toLowerCase() === rightPath.toLowerCase() || sameExistingFile(leftPath, rightPath);
-  }
-  return leftPath === rightPath || sameExistingFile(leftPath, rightPath);
-}
-
-function sameExistingFile(left, right) {
-  try {
-    const leftStat = fs.statSync(left);
-    const rightStat = fs.statSync(right);
-    return (
-      leftStat.isFile() &&
-      rightStat.isFile() &&
-      leftStat.dev === rightStat.dev &&
-      leftStat.ino === rightStat.ino &&
-      leftStat.size === rightStat.size
-    );
-  } catch (_error) {
-    return false;
-  }
 }
 
 function venvPython(venvRoot) {

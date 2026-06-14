@@ -4,5 +4,3 @@
 # runs `make defconfig` so dependencies resolve.
 
 iperf3
-uhttpd
-uclient-fetch

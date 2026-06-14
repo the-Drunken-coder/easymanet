@@ -23,8 +23,8 @@ version: 1
 mesh:
   id: field
   password: test-password
-  channel: 42
-  bandwidth_mhz: 2
+  channel: 36
+  bandwidth_mhz: 4
   country: US
 
 defaults:

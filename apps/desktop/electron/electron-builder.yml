@@ -5,7 +5,6 @@ directories:
 files:
   - main.js
   - preload.js
-  - assets/**
 extraResources:
   - from: ../src/easymanet_desktop/static
     to: desktop-static
@@ -16,7 +15,6 @@ asarUnpack:
   - backend/easymanet-bridge/**
 mac:
   category: public.app-category.developer-tools
-  icon: assets/easymanet-icon.icns
   target:
     - dmg
     - zip

@@ -9,10 +9,28 @@ SCRIPT_DIR="${EASYMANET_LIB_DIR:-/usr/lib/easymanet}"
 
 PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
 API_PORT="${EASYMANET_API_PORT:-10411}"
-FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-2}"
+FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-1}"
+MAX_TOPOLOGY_PEER_PROBES="${EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES:-8}"
+
+case "$MAX_TOPOLOGY_PEER_PROBES" in
+    ""|*[!0-9]*)
+        MAX_TOPOLOGY_PEER_PROBES=8
+        ;;
+esac
 
 json_escape() {
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+    printf '%s' "$1" | awk 'BEGIN { ORS = "" }
+    {
+        if (NR > 1) {
+            printf "\\n"
+        }
+        value = $0
+        gsub(/\\/, "\\\\", value)
+        gsub(/"/, "\\\"", value)
+        gsub(/\t/, "\\t", value)
+        gsub(/\r/, "\\r", value)
+        printf "%s", value
+    }'
 }
 
 json_string() {
@@ -386,6 +404,7 @@ topology_json_body() {
 
     self_name="$(node_name)"
     self_ip="$(node_ip)"
+    peer_probes=0
     i=0
     while :; do
         peer_name="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].name" 2>/dev/null || true)"
@@ -402,12 +421,18 @@ topology_json_body() {
             identity="$(identity_json_body)"
             neighbors="$(neighbors_json_body)"
         elif [ -n "$peer_ip" ]; then
-            identity="$(fetch_peer "$peer_ip" identity || true)"
-            if [ "$(json_get "$identity" '@.ok')" = "true" ]; then
-                neighbors="$(fetch_peer "$peer_ip" neighbors || true)"
-            else
+            if [ "$peer_probes" -ge "$MAX_TOPOLOGY_PEER_PROBES" ]; then
                 status="offline"
-                echo "$peer_name did not answer topology API at $peer_ip" >> "$warnings_file"
+                echo "$peer_name skipped after topology probe limit ($MAX_TOPOLOGY_PEER_PROBES)" >> "$warnings_file"
+            else
+                peer_probes=$((peer_probes + 1))
+                identity="$(fetch_peer "$peer_ip" identity || true)"
+                if [ "$(json_get "$identity" '@.ok')" = "true" ]; then
+                    neighbors="$(fetch_peer "$peer_ip" neighbors || true)"
+                else
+                    status="offline"
+                    echo "$peer_name did not answer topology API at $peer_ip" >> "$warnings_file"
+                fi
             fi
         else
             status="offline"
@@ -463,6 +488,11 @@ case "${EASYMANET_API_TEST_MODE:-}" in
         ;;
     parse-originators)
         parse_batctl_originators
+        exit 0
+        ;;
+    json-escape)
+        json_string "$(cat)"
+        printf '\n'
         exit 0
         ;;
 esac

@@ -92,41 +92,45 @@ def mesh_discover_payload(
             "generated_at": _now_iso(),
         }
 
-    gateway = gateways[0]
     fetcher = topology_fetcher or fetch_gateway_topology
-    topology = fetcher(gateway)
-    merged_warnings = [*warnings, *(topology.get("warnings") or [])]
-    if not topology.get("ok"):
-        return {
-            "ok": False,
-            "code": topology.get("code") or "topology_failed",
-            "config": config,
-            "scan_subnet": scan_subnet,
-            "candidates_checked": len(candidates),
-            "gateway": gateway,
-            "nodes": topology.get("nodes") or [],
-            "links": topology.get("links") or [],
-            "radios": topology.get("nodes") or [],
-            "seen": gateways,
-            "warnings": merged_warnings,
-            "errors": topology.get("errors") or ["Gateway topology request failed"],
-            "generated_at": topology.get("generated_at") or _now_iso(),
-        }
+    last_gateway = gateways[0]
+    last_topology: dict[str, Any] = {"ok": False, "errors": ["Gateway topology request failed"]}
+    for gateway in gateways:
+        topology = fetcher(gateway)
+        merged_warnings = [*warnings, *(topology.get("warnings") or [])]
+        if topology.get("ok"):
+            nodes = topology.get("nodes") or []
+            links = topology.get("links") or []
+            return {
+                "ok": True,
+                "config": config,
+                "scan_subnet": scan_subnet,
+                "candidates_checked": len(candidates),
+                "gateway": gateway,
+                "nodes": nodes,
+                "links": links,
+                "radios": nodes,
+                "seen": gateways,
+                "warnings": merged_warnings,
+                "generated_at": topology.get("generated_at") or _now_iso(),
+            }
+        last_gateway = gateway
+        last_topology = topology
 
-    nodes = topology.get("nodes") or []
-    links = topology.get("links") or []
     return {
-        "ok": True,
+        "ok": False,
+        "code": last_topology.get("code") or "topology_failed",
         "config": config,
         "scan_subnet": scan_subnet,
         "candidates_checked": len(candidates),
-        "gateway": gateway,
-        "nodes": nodes,
-        "links": links,
-        "radios": nodes,
+        "gateway": last_gateway,
+        "nodes": last_topology.get("nodes") or [],
+        "links": last_topology.get("links") or [],
+        "radios": last_topology.get("nodes") or [],
         "seen": gateways,
-        "warnings": merged_warnings,
-        "generated_at": topology.get("generated_at") or _now_iso(),
+        "warnings": [*warnings, *(last_topology.get("warnings") or [])],
+        "errors": last_topology.get("errors") or ["Gateway topology request failed"],
+        "generated_at": last_topology.get("generated_at") or _now_iso(),
     }
 
 

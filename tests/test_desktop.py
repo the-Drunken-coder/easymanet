@@ -113,6 +113,27 @@ def test_desktop_state_uses_cached_metadata_hash_for_large_images(tmp_path, monk
     assert entry["cached_sha256"] == "b" * 64
 
 
+def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    image.write_bytes(b"firmware")
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({"rpi4-mm6108-spi": {"sha256": 123}}))
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: image)
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+
+
 def test_desktop_state_skips_hashing_large_unversioned_cache(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -309,6 +330,53 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
     assert payload["links"][0]["target"] == "point01"
     assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_discovery_tries_next_gateway_after_topology_failure(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    gateways = {
+        "10.41.254.1": "gate01",
+        "manet01.local": "gate02",
+    }
+
+    def fake_probe(candidate):
+        hostname = gateways.get(candidate.host)
+        if hostname:
+            return {
+                **candidate.to_dict(),
+                "ok": True,
+                "status": "connected",
+                "hostname": hostname,
+                "role": "gate",
+                "host": candidate.host,
+            }
+        return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+    attempts: list[str] = []
+
+    def fake_topology(gateway):
+        attempts.append(gateway["host"])
+        if gateway["host"] == "10.41.254.1":
+            return {"ok": False, "code": "api_error", "errors": ["topology failed"]}
+        return {
+            "ok": True,
+            "generated_at": "2026-06-13T00:00:00Z",
+            "nodes": [{"name": "gate02", "role": "gate", "status": "online"}],
+            "links": [],
+            "warnings": [],
+        }
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "", "scanSubnet": False},
+        probe=fake_probe,
+        topology_fetcher=fake_topology,
+    )
+
+    assert payload["ok"] is True
+    assert payload["gateway"]["hostname"] == "gate02"
+    assert attempts == ["10.41.254.1", "manet01.local"]
 
 
 def test_desktop_mesh_discovery_string_false_does_not_scan_subnet(monkeypatch):

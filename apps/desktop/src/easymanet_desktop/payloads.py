@@ -120,7 +120,7 @@ def add_cached_image_details(
         try:
             entry["cached_sha256"] = normalize_sha256(known_sha256)
             return
-        except ValueError:
+        except (AttributeError, TypeError, ValueError):
             pass
     if size > DISPLAY_CACHE_HASH_LIMIT_BYTES:
         entry["cached_sha256"] = ""

@@ -4,7 +4,6 @@ contextBridge.exposeInMainWorld("easymanet", {
   getState: () => ipcRenderer.invoke("easymanet:state"),
   getDisks: (includeAll = false) => ipcRenderer.invoke("easymanet:disks", { includeAll }),
   validate: (payload) => ipcRenderer.invoke("easymanet:validate", payload),
-  discoverMesh: (payload) => ipcRenderer.invoke("easymanet:mesh-discover", payload),
   flashPlan: (payload) => ipcRenderer.invoke("easymanet:flash-plan", payload),
   flash: (payload) => ipcRenderer.invoke("easymanet:flash", payload),
   onFlashEvent: (callback) => {

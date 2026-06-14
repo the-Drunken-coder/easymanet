@@ -87,12 +87,6 @@ defaults:
     root_password_hash: ""
     ssh_authorized_keys:
       - "ssh-ed25519 AAAAC3..."
-  gateway:
-    wifi:
-      enabled: false
-      ssid: "operator-wifi"
-      password: "operator-wifi-password"
-      encryption: psk2
 
 nodes:
   gate01:
@@ -103,9 +97,7 @@ nodes:
       ssid: gate01-local
     gateway:
       enabled: true
-      uplink_interface: wifi
-      wifi:
-        enabled: true
+      uplink_interface: eth0
 
   point01:
     role: point
@@ -120,10 +112,9 @@ The checked-in starter fleet is
 See [docs/sample-fleet.md](docs/sample-fleet.md) for the copy command and a
 smaller two-node example. EasyMANET does not create a fleet file automatically.
 
-For a gate, `uplink_interface: wifi` joins the configured operator LAN. With SSH
-enabled, the node opens SSH on that WAN zone so the desktop Mesh tab can find
-it locally. `uplink_interface: eth0` keeps wired management on `br-lan`;
-EasyMANET does not run WAN DHCP on that management bridge.
+For a gate, `uplink_interface: eth0` keeps wired management on `br-lan` and
+also runs the WAN DHCP client on that same bridge. That means the upstream
+Ethernet network and the EasyMANET management LAN share one L2 segment.
 
 ### 3. List available disks
 
@@ -289,8 +280,9 @@ Generated public product repositories are produced with
 ## Security Notes
 
 - An empty `root_password_hash` leaves the root password unchanged on the node.
-- `gateway.uplink_interface: eth0` is reserved for wired management on
-  `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
+- `gateway.uplink_interface: eth0` shares wired management and WAN DHCP on
+  `br-lan`; avoid connecting it to an upstream network where the management DHCP
+  service would be inappropriate.
 - Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
 - When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
   into that file in plaintext (OpenMANET daemon requirement; verify on hardware).

@@ -22,8 +22,8 @@ version: 1
 mesh:
   id: field-deployment-alpha
   password: "replace-with-a-strong-mesh-password"
-  channel: 42
-  bandwidth_mhz: 2
+  channel: 36
+  bandwidth_mhz: 4
   country: US
 
 defaults:
@@ -35,12 +35,6 @@ defaults:
     root_password_hash: "replace-with-hashed-password"
     ssh_authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... operator"
-  gateway:
-    wifi:
-      enabled: false
-      ssid: "replace-with-operator-wifi"
-      password: "replace-with-operator-wifi-password"
-      encryption: psk2
 
 nodes:
   gate01:
@@ -51,9 +45,7 @@ nodes:
       ssid: gate01-local
     gateway:
       enabled: true
-      uplink_interface: wifi
-      wifi:
-        enabled: true
+      uplink_interface: eth0
 
   point01:
     role: point

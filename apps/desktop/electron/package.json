@@ -1,13 +1,12 @@
 {
   "name": "@easymanet/desktop-electron",
-  "version": "0.2.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Local Electron shell for the EasyMANET operator console",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "check": "node --check main.js && node --check preload.js && node scripts/check-electron.js",
-    "build:icon": "scripts/build-icon.sh",
     "build:backend": "node scripts/run-build-bridge.js",
     "dist": "npm run build:backend && electron-builder --publish never"
   },

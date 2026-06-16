@@ -14,6 +14,8 @@ from .provision import GatewayConfig, LocalApConfig, resolve_node_model
 VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
 VALID_BANDWIDTHS = {1, 2, 4, 8}
+MM6108_TARGET = "rpi4-mm6108-spi"
+MM6108_US_VALID_MESH = {(42, 2)}
 VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 
@@ -58,6 +60,16 @@ def validate_ssh_key(key: str) -> Optional[str]:
     return None
 
 
+def _as_int(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
 def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationResult:
     result = ValidationResult()
 
@@ -78,11 +90,17 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             result.add_error("mesh.channel is required")
         if mesh.get("bandwidth_mhz") is None:
             result.add_error("mesh.bandwidth_mhz is required")
-        elif mesh["bandwidth_mhz"] not in VALID_BANDWIDTHS:
-            result.add_error(
-                f"mesh.bandwidth_mhz must be one of {sorted(VALID_BANDWIDTHS)}, "
-                f"got {mesh['bandwidth_mhz']}"
-            )
+        else:
+            bandwidth = _as_int(mesh["bandwidth_mhz"])
+            if bandwidth is None:
+                result.add_error(
+                    f"mesh.bandwidth_mhz must be numeric, got '{mesh['bandwidth_mhz']}'"
+                )
+            elif bandwidth not in VALID_BANDWIDTHS:
+                result.add_error(
+                    f"mesh.bandwidth_mhz must be one of {sorted(VALID_BANDWIDTHS)}, "
+                    f"got {mesh['bandwidth_mhz']}"
+                )
         country = mesh.get("country", "")
         if not country:
             result.add_error("mesh.country is required")
@@ -128,6 +146,8 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             f"defaults.management must be a mapping, got {type(management).__name__}"
         )
         management = {}
+
+    _validate_target_mesh_settings(result, mesh, defaults, nodes, node_name)
 
     for name in nodes:
         if not isinstance(name, str):
@@ -233,6 +253,57 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
             pass
 
     return result
+
+
+def _validate_target_mesh_settings(
+    result: ValidationResult,
+    mesh: object,
+    defaults: dict,
+    nodes: dict,
+    node_name: Optional[str],
+) -> None:
+    if not isinstance(mesh, dict):
+        return
+    channel = _as_int(mesh.get("channel"))
+    bandwidth = _as_int(mesh.get("bandwidth_mhz"))
+    country = str(mesh.get("country", ""))
+    if mesh.get("channel") is not None and channel is None:
+        result.add_error(f"mesh.channel must be numeric, got '{mesh.get('channel')}'")
+        return
+    if mesh.get("bandwidth_mhz") is not None and bandwidth is None:
+        message = f"mesh.bandwidth_mhz must be numeric, got '{mesh.get('bandwidth_mhz')}'"
+        if message not in result.errors:
+            result.add_error(message)
+        return
+    if channel is None or bandwidth is None or bandwidth not in VALID_BANDWIDTHS:
+        return
+    if not COUNTRY_PATTERN.match(country):
+        return
+
+    target_names = _targets_for_mesh_validation(defaults, nodes, node_name)
+    if MM6108_TARGET not in target_names:
+        return
+    if country == "US" and (channel, bandwidth) not in MM6108_US_VALID_MESH:
+        result.add_error(
+            "mesh.channel/bandwidth_mhz for rpi4-mm6108-spi in US must be "
+            "channel 42 with bandwidth_mhz 2; "
+            f"got channel {channel} with bandwidth_mhz {bandwidth}"
+        )
+
+
+def _targets_for_mesh_validation(
+    defaults: dict,
+    nodes: dict,
+    node_name: Optional[str],
+) -> set[str]:
+    names = [node_name] if node_name in nodes else list(nodes)
+    targets: set[str] = set()
+    for name in names:
+        node = nodes.get(name)
+        if not isinstance(node, dict):
+            continue
+        targets.add(str(node.get("target", defaults.get("target", ""))))
+    return targets
 
 
 def _validate_local_ap(

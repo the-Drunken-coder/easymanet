@@ -63,6 +63,7 @@ PRODUCT_TEST_PATHS = (
     "tests/test_firstboot.py",
     "tests/test_image.py",
     "tests/test_inject.py",
+    "tests/test_led_status.py",
     "tests/test_manifest.py",
     "tests/test_packaging.py",
     "tests/test_privileges.py",
@@ -106,6 +107,7 @@ IMAGE_DATA_FILES = (
         "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/init.d",
         (
             "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-boot-report",
+            "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-led-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-management-lan",
         ),
     ),
@@ -116,6 +118,7 @@ IMAGE_DATA_FILES = (
     (
         "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults",
         (
+            "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/96-easymanet-led-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/97-easymanet-management-lan",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/98-easymanet-boot-report",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/99-easymanet",
@@ -124,10 +127,20 @@ IMAGE_DATA_FILES = (
     (
         "share/easymanet/images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet",
         (
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/api.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/boot-report.sh",
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/led-status.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/network.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+        ),
+    ),
+    (
+        "share/easymanet/images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1",
+        (
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/identity",
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/neighbors",
+            "images/openmanet/provisioning/openwrt-overlay/www/easymanet-api/v1/topology",
         ),
     ),
 )

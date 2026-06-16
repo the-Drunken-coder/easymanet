@@ -100,6 +100,39 @@ def test_invalid_bandwidth_5():
     os.unlink(path)
 
 
+def test_mm6108_us_rejects_untested_channel_bandwidth_pair():
+    config = VALID_CONFIG.replace("channel: 42", "channel: 36").replace(
+        "bandwidth_mhz: 2",
+        "bandwidth_mhz: 4",
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("rpi4-mm6108-spi in US" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_mesh_channel_must_be_numeric():
+    config = VALID_CONFIG.replace("channel: 42", "channel: abc")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("mesh.channel must be numeric" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_mesh_bandwidth_must_be_numeric():
+    config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: true")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("mesh.bandwidth_mhz must be numeric" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_duplicate_hostname():
     config = VALID_CONFIG.replace("hostname: node02", "hostname: node01")
     path = _write_config(config)
@@ -220,12 +253,13 @@ def test_valid_config_with_node():
     os.unlink(path)
 
 
-def test_mesh_channel_zero_is_valid():
+def test_mesh_channel_zero_is_rejected():
     config = VALID_CONFIG.replace("channel: 42", "channel: 0")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
-    assert result.valid
+    assert not result.valid
+    assert any("channel 42 with bandwidth_mhz 2" in e for e in result.errors)
     os.unlink(path)
 
 
@@ -418,7 +452,7 @@ def test_gateway_wifi_requires_ssid_and_password():
     os.unlink(path)
 
 
-def test_gateway_wifi_validation_uses_preserved_shallow_merge():
+def test_gateway_wifi_validation_uses_deep_merge_defaults():
     config = VALID_CONFIG.replace(
         "defaults:\n  target: rpi4-mm6108-spi",
         """
@@ -442,7 +476,6 @@ defaults:
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m, node_name="node03")
-    assert not result.valid
-    assert any("gateway.wifi.ssid" in e for e in result.errors)
-    assert any("gateway.wifi.password" in e for e in result.errors)
+    assert result.valid
+    assert result.errors == []
     os.unlink(path)

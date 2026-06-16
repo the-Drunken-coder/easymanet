@@ -40,6 +40,9 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 : "${EM_MESH11SD_MBSS_START_SCAN_MS:=2048}"
 : "${EM_MESH11SD_MBCA_MIN_BEACON_GAP_MS:=25}"
 : "${EM_MESH11SD_MBCA_TBTT_ADJ_INTERVAL_SEC:=60}"
+: "${EM_EASYMANET_API_PORT:=10411}"
+
+EASYMANET_API_CONFIGURED=0
 
 LOG_FILE="$(_prefix_path /var/log/easymanet.log)"
 PROVISIONED_FLAG="$(_prefix_path /etc/easymanet/provisioned)"
@@ -147,6 +150,10 @@ uci_commit() {
     uci commit "$1" >> "$LOG_FILE" 2>&1
 }
 
+uci_add_list() {
+    uci add_list "$@" >> "$LOG_FILE" 2>&1
+}
+
 configure_mesh_radio_device() {
     radio="$1"
     uci_set wireless."$radio".channel="$MESH_CHANNEL"
@@ -155,6 +162,35 @@ configure_mesh_radio_device() {
     uci_set wireless."$radio".country="$MESH_COUNTRY"
     uci_set wireless."$radio".bcf="$EM_MESH_BCF"
     uci_set wireless."$radio".disabled="0"
+}
+
+configure_easymanet_api() {
+    api_home="$(_prefix_path /www/easymanet-api)"
+    api_script="$(_prefix_path /usr/lib/easymanet/api.sh)"
+    EASYMANET_API_CONFIGURED=0
+    uci -q delete uhttpd.easymanet_api 2>/dev/null || true
+    if [ ! -x "$api_script" ] || [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
+        echo "WARNING: EasyMANET API endpoint wrappers are missing; skipping API setup" >> "$LOG_FILE"
+        uci_commit uhttpd
+        return 0
+    fi
+
+    echo "Configuring EasyMANET topology API on port $EM_EASYMANET_API_PORT..." >> "$LOG_FILE"
+    uci_set uhttpd.easymanet_api=uhttpd
+    uci_set uhttpd.easymanet_api.home="$api_home"
+    uci_set uhttpd.easymanet_api.cgi_prefix="/v1"
+    uci_set uhttpd.easymanet_api.script_timeout="10"
+    uci_set uhttpd.easymanet_api.network_timeout="10"
+    uci_set uhttpd.easymanet_api.http_keepalive="0"
+    uci_set uhttpd.easymanet_api.tcp_keepalive="1"
+    if [ "$NODE_ROLE" = "gate" ]; then
+        uci_add_list uhttpd.easymanet_api.listen_http="$EM_LAN_FALLBACK_IP:$EM_EASYMANET_API_PORT"
+        uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
+    else
+        uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
+    fi
+    uci_commit uhttpd
+    EASYMANET_API_CONFIGURED=1
 }
 
 find_boot_json() {
@@ -214,6 +250,7 @@ MESH_PASSWORD="$(json_val mesh password)"
 HOSTNAME="$(json_val node hostname)"
 NODE_ROLE="$(json_val node role)"
 NODE_IP="$(json_val node ip)"
+NODE_TARGET="$(json_val node target)"
 MESH_CHANNEL="$(json_val mesh channel)"
 MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
@@ -228,6 +265,7 @@ missing_fields=""
 [ -n "$HOSTNAME" ] || missing_fields="$missing_fields node.hostname"
 [ -n "$NODE_ROLE" ] || missing_fields="$missing_fields node.role"
 [ -n "$NODE_IP" ] || missing_fields="$missing_fields node.ip"
+[ -n "$NODE_TARGET" ] || missing_fields="$missing_fields node.target"
 if [ -n "$missing_fields" ]; then
     echo "FATAL: missing required provision.json fields:$missing_fields" | tee -a "$LOG_FILE"
     exit 1
@@ -240,6 +278,13 @@ case "$NODE_ROLE" in
     gate|point) ;;
     *)
         echo "FATAL: unsupported node.role in provision.json: $NODE_ROLE" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+case "$NODE_TARGET" in
+    rpi4-mm6108-spi) ;;
+    *)
+        echo "FATAL: unsupported node.target in provision.json: $NODE_TARGET" | tee -a "$LOG_FILE"
         exit 1
         ;;
 esac
@@ -256,6 +301,15 @@ case "$MESH_CHANNEL" in
         exit 1
         ;;
 esac
+if [ "$NODE_TARGET" = "rpi4-mm6108-spi" ] && [ "$MESH_COUNTRY" = "US" ]; then
+    case "${MESH_CHANNEL}:${MESH_BW}" in
+        42:2) ;;
+        *)
+            echo "FATAL: rpi4-mm6108-spi in US requires mesh.channel 42 and mesh.bandwidth_mhz 2; got channel $MESH_CHANNEL bandwidth $MESH_BW" | tee -a "$LOG_FILE"
+            exit 1
+            ;;
+    esac
+fi
 
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"
@@ -432,7 +486,16 @@ uci_set firewall.mesh_zone.network="meship"
 uci_set firewall.mesh_zone.input="ACCEPT"
 uci_set firewall.mesh_zone.output="ACCEPT"
 uci_set firewall.mesh_zone.forward="ACCEPT"
+uci -q delete firewall.mesh_wan_forwarding 2>/dev/null || true
+uci -q delete firewall.allow_easymanet_api_wan 2>/dev/null || true
+if [ "$NODE_ROLE" = "gate" ]; then
+    uci_set firewall.mesh_wan_forwarding=forwarding
+    uci_set firewall.mesh_wan_forwarding.src="mesh"
+    uci_set firewall.mesh_wan_forwarding.dest="wan"
+fi
 uci_commit firewall
+
+configure_easymanet_api
 
 uci_set mesh11sd.setup=mesh11sd
 uci_set mesh11sd.setup.enabled="1"
@@ -464,17 +527,19 @@ fi
 if [ "$NODE_ROLE" = "gate" ] && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
     UPLINK="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$UPLINK" ] || UPLINK="eth0"
-    WAN_DEVICE="$UPLINK"
     if [ "$UPLINK" = "eth0" ]; then
-        WAN_DEVICE="br-lan"
+        uci -q delete network.wan 2>/dev/null || true
+        uci -q delete network.wan6 2>/dev/null || true
+        uci_commit network
+    else
+        uci_set network.wan=interface
+        uci_set network.wan.proto="dhcp"
+        uci_set network.wan.device="$UPLINK"
+        uci_set network.wan.ifname="$UPLINK"
+        uci_set network.wan.peerdns="0"
+        uci_set network.wan.dns="$EM_UPLINK_DNS"
+        uci_commit network
     fi
-    uci_set network.wan=interface
-    uci_set network.wan.proto="dhcp"
-    uci_set network.wan.device="$WAN_DEVICE"
-    uci_set network.wan.ifname="$WAN_DEVICE"
-    uci_set network.wan.peerdns="0"
-    uci_set network.wan.dns="$EM_UPLINK_DNS"
-    uci_commit network
 fi
 
 if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
@@ -535,6 +600,16 @@ if [ -x "$network_init" ]; then
     "$network_init" enable 2>/dev/null || true
     "$network_init" restart 2>/dev/null || true
 fi
+if [ "$EASYMANET_API_CONFIGURED" = "1" ]; then
+    uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
+    if [ -x "$uhttpd_init" ]; then
+        echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
+        "$uhttpd_init" enable 2>/dev/null || true
+        "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
+    else
+        echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
+    fi
+fi
 echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
 configure_mesh_radio_device "$MESH_RADIO"
 uci_commit wireless
@@ -548,6 +623,15 @@ fi
 openmanetd_init="$(_prefix_path /etc/init.d/openmanetd)"
 if [ -x "$openmanetd_init" ]; then
     "$openmanetd_init" enable 2>/dev/null || true
+fi
+
+led_status_init="$(_prefix_path /etc/init.d/easymanet-led-status)"
+if [ -x "$led_status_init" ]; then
+    echo "Enabling EasyMANET LED status..." >> "$LOG_FILE"
+    "$led_status_init" enable 2>/dev/null || true
+    "$led_status_init" restart 2>/dev/null || "$led_status_init" start 2>/dev/null || true
+else
+    echo "WARNING: EasyMANET LED status init script not found; LED status will not start" >> "$LOG_FILE"
 fi
 
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" > "$PROVISIONED_FLAG"

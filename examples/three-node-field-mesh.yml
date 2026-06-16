@@ -3,8 +3,8 @@ version: 1
 mesh:
   id: field-deployment-alpha
   password: "strong-mesh-password-here"
-  channel: 36
-  bandwidth_mhz: 4
+  channel: 42
+  bandwidth_mhz: 2
   country: US
 
 defaults:
@@ -19,6 +19,14 @@ defaults:
     ssh_authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"
 
+  gateway:
+    wifi:
+      enabled: false
+      # Replace these placeholder credentials before enabling WiFi uplink.
+      ssid: "replace-with-operator-wifi"
+      password: "replace-with-operator-wifi-password"
+      encryption: psk2
+
 nodes:
   gate01:
     role: gate
@@ -30,8 +38,9 @@ nodes:
 
     gateway:
       enabled: true
-      # eth0 is shared: wired management stays on br-lan, WAN DHCP also uses br-lan.
-      uplink_interface: eth0
+      uplink_interface: wifi
+      wifi:
+        enabled: true
 
   point01:
     role: point

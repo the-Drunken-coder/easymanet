@@ -191,7 +191,7 @@ def flash_image(
             _clear_stale_overlay(device, written_bytes, emit=emit)
 
     except subprocess.CalledProcessError as e:
-        raise FlashError(f"Flash failed: {e}") from e
+        raise FlashError(f"Flash failed: {_command_error_message(e)}") from e
     except FlashError:
         raise
     except (OSError, subprocess.SubprocessError) as e:
@@ -205,11 +205,11 @@ def _write_gz_via_dd(
     emit: FlashEventCallback | None = None,
 ) -> None:
     gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
-    output_device = _dd_device_path(device)
+    output_device = _stream_dd_device_path(device)
     dd_cmd = [
         _tool_path("dd"),
         f"of={output_device}",
-        _write_block_size_arg(),
+        *_stream_dd_block_args(),
         "status=progress",
     ]
     gzip_proc = subprocess.Popen(
@@ -217,22 +217,35 @@ def _write_gz_via_dd(
         stdout=subprocess.PIPE,
     )
     assert gzip_proc.stdout is not None
-    dd_kwargs: dict[str, Any] = {"stdin": gzip_proc.stdout}
-    if emit is not None:
-        dd_kwargs.update({"stderr": subprocess.PIPE, "text": True})
+    dd_kwargs: dict[str, Any] = {"stdin": gzip_proc.stdout, "stderr": subprocess.PIPE, "text": True}
     dd_proc = subprocess.Popen(dd_cmd, **dd_kwargs)
     gzip_proc.stdout.close()
 
-    dd_stderr = _drain_dd_progress(dd_proc, emit) if emit is not None else ""
+    if emit is None:
+        _dd_stdout, dd_stderr = dd_proc.communicate()
+    else:
+        dd_stderr = _drain_dd_progress(dd_proc, emit)
     dd_return = dd_proc.wait()
     gzip_return = gzip_proc.wait()
+
+    if dd_return != 0:
+        raise subprocess.CalledProcessError(dd_return, dd_cmd, stderr=dd_stderr)
 
     # OpenWrt/OpenMANET sysupgrade metadata after the gzip stream can yield exit 2
     # ("trailing garbage ignored"); payload integrity is validated by _check_gzip_payload.
     if gzip_return not in (0, 2):
         raise subprocess.CalledProcessError(gzip_return, gzip_cmd)
-    if dd_return != 0:
-        raise subprocess.CalledProcessError(dd_return, dd_cmd, stderr=dd_stderr)
+
+
+def _command_error_message(error: subprocess.CalledProcessError) -> str:
+    stderr = error.stderr
+    stdout = error.stdout
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode(errors="replace")
+    detail = str(stderr or stdout or "").strip()
+    return f"{error}: {detail}" if detail else str(error)
 
 
 _OVERLAY_WIPE_SECTOR_BYTES = 512
@@ -243,6 +256,16 @@ def _dd_device_path(device: str) -> str:
     if is_macos() and device.startswith("/dev/disk"):
         return device.replace("/dev/disk", "/dev/rdisk", 1)
     return device
+
+
+def _stream_dd_device_path(device: str) -> str:
+    return _dd_device_path(device) if is_macos() else device
+
+
+def _stream_dd_block_args() -> list[str]:
+    if is_macos():
+        return ["bs=1m"]
+    return [_write_block_size_arg()]
 
 
 def _write_block_size_arg() -> str:

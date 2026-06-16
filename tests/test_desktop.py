@@ -31,6 +31,29 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
 
 
+def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
+    manifest = payloads.load_manifest("examples/three-node-field-mesh.yml")
+    original_resolve = payloads.resolve_node_model
+
+    def fake_resolve_node_model(current_manifest, node_name):
+        if node_name == "point01":
+            raise ValueError("broken node")
+        return original_resolve(current_manifest, node_name)
+
+    monkeypatch.setattr(payloads, "resolve_node_model", fake_resolve_node_model)
+
+    access = payloads.node_access(manifest)
+
+    assert set(access) == set(manifest.node_names())
+    assert access["point01"] == {
+        "role": "",
+        "local_ap_enabled": False,
+        "local_ap_ssid": "",
+        "management_ip": "10.41.254.1",
+    }
+    assert access["gate01"]["role"] == "gate"
+
+
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -131,6 +154,28 @@ def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeyp
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
+    assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+
+
+def test_desktop_state_discovers_cache_for_malformed_manifest_hash(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    image.write_bytes(b"firmware")
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({"rpi4-mm6108-spi": {"sha256": "not-a-sha"}}))
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_path"] == str(image)
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
@@ -876,6 +921,10 @@ def test_electron_shell_files_exist():
     assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()
     assert "EasyMANET Flash Helper.app" not in (electron / "main.js").read_text()
     assert 'spawn(sudo.command, sudo.args' in (electron / "main.js").read_text()
+    assert 'detached: process.platform !== "win32"' in (electron / "main.js").read_text()
+    assert "terminateElevatedBridge(child)" in (electron / "main.js").read_text()
+    assert 'process.kill(-child.pid, "SIGTERM")' in (electron / "main.js").read_text()
+    assert 'child.kill("SIGTERM")' in (electron / "main.js").read_text()
     assert "Mac administrator password is required for flashing" in (electron / "main.js").read_text()
     assert "with administrator privileges" not in (electron / "main.js").read_text()
     assert 'spawn("osascript"' not in (electron / "main.js").read_text()

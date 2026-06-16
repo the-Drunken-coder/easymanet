@@ -343,6 +343,7 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
       cwd: bridge.cwd || elevatedTempRoot(),
       env: elevatedBridgeEnv(bridge.env || {}),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
     const state = {
       stdout: "",
@@ -363,7 +364,7 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
     };
 
     const timer = setTimeout(() => {
-      child.kill();
+      terminateElevatedBridge(child);
       finish({ ok: false, errors: [`Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`] });
     }, effectiveTimeoutMs);
 
@@ -397,6 +398,28 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
     child.stdin.write(`${options.adminPassword || ""}\n`);
     child.stdin.end();
   });
+}
+
+function terminateElevatedBridge(child) {
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+      const killTimer = setTimeout(() => {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (_error) {
+          // Process already exited.
+        }
+      }, 5000);
+      if (typeof killTimer.unref === "function") {
+        killTimer.unref();
+      }
+      return;
+    } catch (_error) {
+      // Fall through to killing the wrapper process.
+    }
+  }
+  child.kill("SIGTERM");
 }
 
 function runBridgeProcess(args, handlers) {

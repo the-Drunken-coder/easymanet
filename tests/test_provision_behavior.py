@@ -433,6 +433,7 @@ def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):
 def test_provision_clears_stale_topology_api_when_assets_missing(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
+    commit_log = tmp_path / "uci-commits.log"
     _seed_wireless_radios(uci_state)
     with uci_state.open("a") as state:
         state.write("uhttpd.easymanet_api=uhttpd\n")
@@ -440,12 +441,18 @@ def test_provision_clears_stale_topology_api_when_assets_missing(tmp_path):
         state.write("uhttpd.easymanet_api.listen_http='0.0.0.0:10411'\n")
     _write_uhttpd_stub(prefix)
 
-    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    result = _run_provision(
+        prefix,
+        _gate_provision_json(),
+        uci_state,
+        extra_env={"UCI_COMMIT_LOG": str(commit_log)},
+    )
     assert result.returncode == 0, result.stderr + result.stdout
 
     env = _harness_env(uci_state)
     assert _uci_get(uci_state, "uhttpd.easymanet_api.home", env) == ""
     assert _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env) == ""
+    assert "uhttpd" in commit_log.read_text().splitlines()
     assert not (prefix / "var" / "uhttpd-state").exists()
     assert "EasyMANET API endpoint wrappers are missing" in (
         prefix / "var" / "log" / "easymanet.log"
@@ -570,6 +577,39 @@ def test_topology_api_escapes_control_characters_in_json_string():
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == 'gate"\n\t\r01'
+
+
+def test_topology_api_reports_scratch_dir_creation_failure(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_gate_provision_json()))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "mktemp").write_text(
+        """#!/bin/sh
+exit 1
+"""
+    )
+    (bin_dir / "mktemp").chmod(0o755)
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
+            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "UCI_STATE_FILE": str(tmp_path / "uci-state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["code"] == "scratch_init_failed"
+    assert "scratch directory" in payload["errors"][0]
 
 
 def test_topology_api_bounds_offline_peer_probes(tmp_path):

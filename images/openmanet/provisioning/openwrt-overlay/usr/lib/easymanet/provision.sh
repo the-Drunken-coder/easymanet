@@ -171,6 +171,7 @@ configure_easymanet_api() {
     uci -q delete uhttpd.easymanet_api 2>/dev/null || true
     if [ ! -x "$api_script" ] || [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
         echo "WARNING: EasyMANET API endpoint wrappers are missing; skipping API setup" >> "$LOG_FILE"
+        uci_commit uhttpd
         return 0
     fi
 

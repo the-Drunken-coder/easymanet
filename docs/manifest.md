@@ -229,5 +229,7 @@ Priority (highest to lowest):
 - `gateway.uplink_interface: eth0` is reserved for wired management on
   `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
 - `gateway.wifi.enabled` with SSH enabled opens SSH on the WAN firewall zone.
+- Gate topology API exposure on WAN (port 10411) is sensitive on untrusted
+  uplinks.
 - Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext
   when that file exists on the image.

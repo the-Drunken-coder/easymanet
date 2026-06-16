@@ -92,8 +92,13 @@ def cached_versions() -> dict[str, dict[str, str]]:
 
 
 def display_cached_image(target: str, entry: dict[str, Any]) -> Path | None:
-    if entry.get("sha256"):
-        return None
+    manifest_sha = entry.get("sha256")
+    if isinstance(manifest_sha, str):
+        try:
+            normalize_sha256(manifest_sha)
+            return None
+        except ValueError:
+            pass
     candidates = sorted(
         cache_dir().glob(f"*{target}*"),
         key=_path_mtime,
@@ -209,6 +214,12 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
         try:
             resolved = resolve_node_model(manifest, name)
         except Exception:  # noqa: BLE001 - invalid fleets already surface validation errors.
+            access[name] = {
+                "role": "",
+                "local_ap_enabled": False,
+                "local_ap_ssid": "",
+                "management_ip": MANAGEMENT_LAN_IP,
+            }
             continue
         local_ap = resolved.local_ap
         access[name] = {

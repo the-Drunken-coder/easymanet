@@ -393,14 +393,21 @@ topology_json_body() {
         return 0
     fi
 
-    tmp_dir="/tmp/easymanet-topology.$$"
+    tmp_dir="$(mktemp -d /tmp/easymanet-topology.XXXXXX 2>/dev/null || true)"
+    if [ -z "$tmp_dir" ]; then
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to allocate topology scratch directory"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        return 0
+    fi
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
     nodes_file="$tmp_dir/nodes.tsv"
     links_file="$tmp_dir/links.tsv"
     warnings_file="$tmp_dir/warnings.txt"
-    mkdir -p "$tmp_dir"
-    : > "$nodes_file"
-    : > "$links_file"
-    : > "$warnings_file"
+    if ! : > "$nodes_file" || ! : > "$links_file" || ! : > "$warnings_file"; then
+        trap - EXIT INT TERM
+        rm -rf "$tmp_dir"
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to initialize topology scratch files"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        return 0
+    fi
 
     self_name="$(node_name)"
     self_ip="$(node_ip)"
@@ -460,6 +467,7 @@ topology_json_body() {
     links_json="$(links_json_from_file "$links_file" "$nodes_file")"
     warnings_json="$(json_warnings_array "$warnings_file")"
     gateway_json="$(identity_json_body)"
+    trap - EXIT INT TERM
     rm -rf "$tmp_dir"
 
     printf '{"ok":true,"generated_at":%s,"gateway":%s,"nodes":[%s],"links":[%s],"warnings":[%s]}\n' \

@@ -811,6 +811,12 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "diskInventorySignature" in text
     assert "visibilitychange" in text
     assert "setInterval(refreshDisksIfChanged" in text
+    disk_error_body = text.split("function renderDiskError(error)", 1)[1].split(
+        "function showCopied",
+        1,
+    )[0]
+    assert 'state.diskDevice = "";' in disk_error_body
+    assert 'selectedDisk.textContent = "None";' in disk_error_body
     assert "renderImageState" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text

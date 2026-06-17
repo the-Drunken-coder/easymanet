@@ -1099,6 +1099,8 @@ function renderStateError(error) {
 
 function renderDiskError(error) {
   disks.innerHTML = `<div class="inline-error">${escapeHtml(errorMessage(error))}</div>`;
+  state.diskDevice = "";
+  selectedDisk.textContent = "None";
   updateFlashControls();
 }
 

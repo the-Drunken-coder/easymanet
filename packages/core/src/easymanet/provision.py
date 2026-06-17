@@ -379,6 +379,6 @@ def _resolved_gateway(
         resolved.setdefault("enabled", True)
     else:
         resolved.setdefault("enabled", False)
-        if resolved.get("enabled") is False and "wifi" not in node_gateway:
-            resolved.pop("wifi", None)
+    if resolved.get("enabled") is False and "wifi" not in node_gateway:
+        resolved.pop("wifi", None)
     return resolved

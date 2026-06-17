@@ -68,15 +68,6 @@ fi
 
 log "Detected EasyMANET candidate: $(basename "$detected")"
 
-case "${1:-}" in
-    ""|--blink)
-        ;;
-    *)
-        echo "usage: $0 [--blink]" >&2
-        exit 2
-        ;;
-esac
-
 if [ "${1:-}" = "--blink" ]; then
     log "Blinking $(basename "$detected") three times..."
     i=0

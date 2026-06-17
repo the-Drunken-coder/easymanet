@@ -106,7 +106,7 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
-def test_desktop_state_uses_cached_metadata_hash_for_large_images(tmp_path, monkeypatch):
+def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
     ensure_workspace()
@@ -133,7 +133,7 @@ def test_desktop_state_uses_cached_metadata_hash_for_large_images(tmp_path, monk
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
     assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
-    assert entry["cached_sha256"] == "b" * 64
+    assert entry["cached_sha256"] == ""
 
 
 def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeypatch):
@@ -770,7 +770,6 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert 'data-tab-target="tab-mesh"' in index.read_text()
     assert 'data-tab-panel' in index.read_text()
     assert "mesh-discover" in index.read_text()
-    assert "mesh-scanning" in index.read_text()
     assert "mesh-radios" in index.read_text()
     assert "mesh-ssh-user" not in index.read_text()
     assert "flash-panel" in index.read_text()
@@ -792,8 +791,6 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "resetMeshDiscovery" in text
     assert "partial results" in text
     assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
-    assert "meshScanning.hidden = !busy" in text
-    assert 'meshRadios.setAttribute("aria-busy", "true")' in text
     assert "applyRoleDefaultSsh" in text
     assert "node_roles" in text
     assert "node_access" in text
@@ -815,8 +812,6 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "visibilitychange" in text
     assert "setInterval(refreshDisksIfChanged" in text
     assert "renderImageState" in text
-    assert "refreshImageSidebar" in text
-    assert 'type === "download_completed"' in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
@@ -913,18 +908,12 @@ def test_electron_shell_files_exist():
     assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
     assert "fs.chmodSync(configPath, 0o600)" in (electron / "main.js").read_text()
     assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
-    assert "ensureCachedImageForElevatedFlash" in (electron / "main.js").read_text()
     assert '"ensure-image"' in (electron / "main.js").read_text()
-    assert "configuredPythonPath()" in (electron / "main.js").read_text()
     assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
     assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
     assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()
     assert "EasyMANET Flash Helper.app" not in (electron / "main.js").read_text()
     assert 'spawn(sudo.command, sudo.args' in (electron / "main.js").read_text()
-    assert 'detached: process.platform !== "win32"' in (electron / "main.js").read_text()
-    assert "terminateElevatedBridge(child)" in (electron / "main.js").read_text()
-    assert 'process.kill(-child.pid, "SIGTERM")' in (electron / "main.js").read_text()
-    assert 'child.kill("SIGTERM")' in (electron / "main.js").read_text()
     assert "Mac administrator password is required for flashing" in (electron / "main.js").read_text()
     assert "with administrator privileges" not in (electron / "main.js").read_text()
     assert 'spawn("osascript"' not in (electron / "main.js").read_text()

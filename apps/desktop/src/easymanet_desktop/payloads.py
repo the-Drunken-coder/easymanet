@@ -31,17 +31,19 @@ def state_payload() -> dict[str, Any]:
     versions = cached_versions()
     for target, entry in images.items():
         cached = get_cached_image(target)
+        cached_version = versions.get(target, {})
+        known_sha256 = cached_version.get("sha256") or entry.get("sha256")
         if not cached:
             cached = display_cached_image(target, entry)
+            known_sha256 = entry.get("sha256") if isinstance(entry.get("sha256"), str) else ""
         entry["cached_path"] = str(cached) if cached else ""
-        cached_version = versions.get(target, {})
         if cached_version.get("version") and not entry.get("version"):
             entry["version"] = cached_version["version"]
         if cached:
             add_cached_image_details(
                 entry,
                 cached,
-                known_sha256=cached_version.get("sha256") or entry.get("sha256"),
+                known_sha256=known_sha256,
             )
     return {
         "ok": True,

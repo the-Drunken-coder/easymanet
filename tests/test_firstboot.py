@@ -197,4 +197,4 @@ def test_topology_api_overlay_is_packaged():
         assert path.stat().st_mode & 0o111
     assert "configure_easymanet_api" in provision_text
     assert "uhttpd.easymanet_api" in provision_text
-    assert "allow_easymanet_api_wan" in provision_text
+    assert "allow_easymanet_api_wan=rule" not in provision_text

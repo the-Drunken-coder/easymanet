@@ -172,6 +172,7 @@ def _point_provision_json() -> dict:
 
 def _copy_api_overlay(prefix: Path) -> None:
     for relative in (
+        "usr/lib/easymanet/api.sh",
         "www/easymanet-api/v1/identity",
         "www/easymanet-api/v1/neighbors",
         "www/easymanet-api/v1/topology",
@@ -387,7 +388,7 @@ def test_provision_missing_led_status_service_is_nonfatal(tmp_path):
     ).read_text()
 
 
-def test_provision_gate_exposes_topology_api_on_lan_and_mesh(tmp_path):
+def test_provision_gate_exposes_topology_api_on_management_and_mesh_only(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
     _seed_wireless_radios(uci_state)
@@ -404,13 +405,10 @@ def test_provision_gate_exposes_topology_api_on_lan_and_mesh(tmp_path):
     assert _uci_get(uci_state, "uhttpd.easymanet_api.cgi_prefix", env) == "/v1"
     assert (
         _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env)
-        == "0.0.0.0:10411"
+        == "10.41.254.1:10411 10.41.1.1:10411"
     )
-    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == "wan"
-    assert (
-        _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env)
-        == "10411"
-    )
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env) == ""
     assert "restarted" in (prefix / "var" / "uhttpd-state").read_text()
 
 
@@ -430,6 +428,35 @@ def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):
         == "10.41.2.1:10411"
     )
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+
+
+def test_provision_clears_stale_topology_api_when_assets_missing(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    commit_log = tmp_path / "uci-commits.log"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("uhttpd.easymanet_api=uhttpd\n")
+        state.write("uhttpd.easymanet_api.home='/old/easymanet-api'\n")
+        state.write("uhttpd.easymanet_api.listen_http='0.0.0.0:10411'\n")
+    _write_uhttpd_stub(prefix)
+
+    result = _run_provision(
+        prefix,
+        _gate_provision_json(),
+        uci_state,
+        extra_env={"UCI_COMMIT_LOG": str(commit_log)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "uhttpd.easymanet_api.home", env) == ""
+    assert _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env) == ""
+    assert "uhttpd" in commit_log.read_text().splitlines()
+    assert not (prefix / "var" / "uhttpd-state").exists()
+    assert "EasyMANET API endpoint wrappers are missing" in (
+        prefix / "var" / "log" / "easymanet.log"
+    ).read_text()
 
 
 def test_topology_api_parses_batctl_neighbors_fixture():
@@ -532,6 +559,119 @@ def test_topology_api_parses_current_batctl_originators_fixture():
         result.stdout.strip()
         == "bc:2a:33:96:af:68\t0.700s\tbc:2a:33:96:af:68\twlan0"
     )
+
+
+def test_topology_api_escapes_control_characters_in_json_string():
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh")],
+        input='gate"\n\t\r01',
+        env={
+            **os.environ,
+            "EASYMANET_API_TEST_MODE": "json-escape",
+            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == 'gate"\n\t\r01'
+
+
+def test_topology_api_reports_scratch_dir_creation_failure(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_gate_provision_json()))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "mktemp").write_text(
+        """#!/bin/sh
+exit 1
+"""
+    )
+    (bin_dir / "mktemp").chmod(0o755)
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
+            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "UCI_STATE_FILE": str(tmp_path / "uci-state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["code"] == "scratch_init_failed"
+    assert "scratch directory" in payload["errors"][0]
+
+
+def test_topology_api_bounds_offline_peer_probes(tmp_path):
+    provision_data = _gate_provision_json()
+    provision_data["fleet"] = {
+        "nodes": [
+            {
+                "name": "gate01",
+                "hostname": "gate01",
+                "role": "gate",
+                "target": "rpi4-mm6108-spi",
+                "ip": "10.41.1.1",
+            },
+            {
+                "name": "point01",
+                "hostname": "point01",
+                "role": "point",
+                "target": "rpi4-mm6108-spi",
+                "ip": "10.41.2.1",
+            },
+            {
+                "name": "point02",
+                "hostname": "point02",
+                "role": "point",
+                "target": "rpi4-mm6108-spi",
+                "ip": "10.41.3.1",
+            },
+        ]
+    }
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(provision_data))
+    request_log = tmp_path / "requests.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "uclient-fetch").write_text(
+        f"""#!/bin/sh
+echo "$*" >> "{request_log}"
+exit 1
+"""
+    )
+    (bin_dir / "uclient-fetch").chmod(0o755)
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
+            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES": "1",
+            "UCI_STATE_FILE": str(tmp_path / "uci-state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert request_log.read_text().count("/v1/identity") == 1
+    assert "point01 did not answer topology API at 10.41.2.1" in payload["warnings"]
+    assert "point02 skipped after topology probe limit (1)" in payload["warnings"]
 
 
 def test_topology_api_does_not_skip_peer_after_self_neighbors(tmp_path):
@@ -890,6 +1030,7 @@ def test_provision_requires_node_ip(tmp_path):
         (("node", "hostname"), "node.hostname"),
         (("node", "role"), "node.role"),
         (("node", "ip"), "node.ip"),
+        (("node", "target"), "node.target"),
     ],
 )
 def test_provision_reports_missing_required_fields(tmp_path, field_path, expected):
@@ -911,9 +1052,11 @@ def test_provision_reports_missing_required_fields(tmp_path, field_path, expecte
     [
         (("version",), 2, "unsupported provision.json version"),
         (("node", "role"), "relay", "unsupported node.role"),
+        (("node", "target"), "rpi5", "unsupported node.target"),
         (("mesh", "bandwidth_mhz"), 3, "unsupported mesh.bandwidth_mhz"),
         (("mesh", "bandwidth_mhz"), 4, "rpi4-mm6108-spi in US requires"),
         (("mesh", "channel"), 36, "rpi4-mm6108-spi in US requires"),
+        (("mesh", "channel"), 0, "rpi4-mm6108-spi in US requires"),
         (("mesh", "channel"), "abc", "mesh.channel must be numeric"),
     ],
 )

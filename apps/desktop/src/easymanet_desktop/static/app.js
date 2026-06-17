@@ -117,6 +117,7 @@ $("refresh").addEventListener("click", () => {
 fleetSelect.addEventListener("change", () => {
   if (fleetSelect.value) {
     configInput.value = fleetSelect.value;
+    resetMeshDiscovery();
     updateMeshFleetSource();
     loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
@@ -125,11 +126,13 @@ fleetSelect.addEventListener("change", () => {
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
   resetNodeSelect("Update fleet path to load nodes");
+  resetMeshDiscovery();
   updateMeshFleetSource();
   updateFlashControls();
 });
 configInput.addEventListener("change", () => {
   syncFleetSelect(configInput.value.trim());
+  resetMeshDiscovery();
   updateMeshFleetSource();
   loadNodesForSelectedFleet().catch(handleNodeLoadError);
 });
@@ -283,16 +286,20 @@ async function loadState() {
     workspacePath.textContent = workspace.root || "";
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
-    const entries = Object.entries(payload.images || {});
-    state.images = payload.images || {};
-    imageCount.textContent = `${entries.length}`;
-    images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
+    renderImageState(payload.images || {});
     updateMeshFleetSource();
     updateFlashControls();
   } catch (error) {
     console.error("State refresh failed", error);
     renderStateError(error);
   }
+}
+
+function renderImageState(imagePayload) {
+  const entries = Object.entries(imagePayload || {});
+  state.images = imagePayload || {};
+  imageCount.textContent = `${entries.length}`;
+  images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
 }
 
 async function loadDisks() {
@@ -310,6 +317,8 @@ async function refreshDisks({ renderIfUnchanged, reportErrors }) {
       if (reportErrors) {
         disks.innerHTML = `<div class="inline-error">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
       }
+      state.diskDevice = "";
+      updateFlashControls();
       return;
     }
     const signature = diskInventorySignature(payload.disks || []);
@@ -514,7 +523,7 @@ function renderMeshDiscovery(payload) {
   if (nodes.length) {
     meshRadios.className = "topology-view";
     meshRadios.innerHTML = meshTopologyView(payload);
-    setMeshStatus("ok", `${nodes.length} nodes`);
+    setMeshStatus(payload.ok ? "ok" : "warn", payload.ok ? `${nodes.length} nodes` : "partial results");
   } else {
     meshRadios.className = "mesh-grid";
     meshRadios.innerHTML = `
@@ -527,9 +536,28 @@ function renderMeshDiscovery(payload) {
   }
 }
 
+function resetMeshDiscovery() {
+  state.meshHasScanned = false;
+  state.meshNodes = [];
+  state.meshLinks = [];
+  meshCount.textContent = "0";
+  meshSummary.hidden = true;
+  meshSummary.innerHTML = "";
+  meshRadios.className = "mesh-grid";
+  meshRadios.innerHTML = `
+    <div class="empty-state slim">
+      <p class="empty-title">No topology found</p>
+      <p class="empty-meta">Run Scan Mesh to refresh this view.</p>
+    </div>
+  `;
+  setMeshStatus("subtle", "idle");
+}
+
 function setMeshBusy(busy) {
   state.meshBusy = busy;
   meshDiscover.disabled = busy;
+  meshDiscover.textContent = busy ? "Scanning..." : "Scan Mesh";
+  meshDiscover.setAttribute("aria-busy", busy ? "true" : "false");
   meshScanSubnet.disabled = busy;
   if (busy) {
     setMeshStatus("warn", "scanning");
@@ -594,14 +622,14 @@ function selectedNodeAccess(node = nodeSelect.value.trim()) {
   return node ? state.nodeAccess[node] || {} : {};
 }
 
-function flashAccessHint(node) {
+function flashAccessHint(node, payload = {}) {
   const access = selectedNodeAccess(node);
   const address = access.management_ip || "10.41.254.1";
-  const ssid = access.local_ap_enabled && access.local_ap_ssid ? access.local_ap_ssid : "";
-  if (ssid) {
-    return `Join ${ssid} or connect Ethernet, then SSH to root@${address}.`;
+  const sshNote = String((payload.plan || {}).ssh || "").toLowerCase();
+  if (sshNote.startsWith("yes")) {
+    return `Connect Ethernet, then SSH to root@${address}.`;
   }
-  return `Connect to the node management network, then SSH to root@${address}.`;
+  return "Connect Ethernet to the node management port.";
 }
 
 function updateRoleDefaultSsh() {
@@ -766,11 +794,6 @@ function activateTab(tabId) {
     const selected = panel.id === tabId;
     panel.hidden = !selected;
     panel.classList.toggle("active", selected);
-  }
-  if (tabId === "tab-mesh" && nativeApi && !state.meshHasScanned && !state.meshBusy) {
-    discoverMesh().catch((error) => {
-      renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
-    });
   }
 }
 
@@ -977,7 +1000,7 @@ function renderFlash(payload) {
   }
   if (payload.ok) {
     const node = payload.node || state.nodeName || "the node";
-    const hint = flashAccessHint(node);
+    const hint = flashAccessHint(node, payload);
     state.flashSignature = currentFlashSignature();
     state.lastFlashOk = true;
     appendLog("success", "Flash complete.");
@@ -1076,6 +1099,8 @@ function renderStateError(error) {
 
 function renderDiskError(error) {
   disks.innerHTML = `<div class="inline-error">${escapeHtml(errorMessage(error))}</div>`;
+  state.diskDevice = "";
+  selectedDisk.textContent = "None";
   updateFlashControls();
 }
 

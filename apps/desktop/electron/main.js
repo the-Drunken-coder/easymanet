@@ -12,6 +12,14 @@ const meshBridgeTimeoutMs = 45000;
 const flashBridgeTimeoutMs = 30 * 60 * 1000;
 const sshModes = new Set(["default", "enable", "disable"]);
 
+function booleanFlag(value) {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+  }
+  return value === true || value === 1;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1180,
@@ -261,12 +269,17 @@ function runBridgeStreaming(args, options = {}) {
 }
 
 async function runFlashWithAdministratorPrivileges(validated, options = {}) {
-  const plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
+  let plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
     timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
   });
   if (!plan.ok) {
     return plan;
   }
+  const ensured = await ensureCachedImageForElevatedFlash(validated, plan, options);
+  if (ensured.ok === false) {
+    return ensured;
+  }
+  plan = ensured;
   sendBridgeFlashEvent(options.webContents, {
     type: "event",
     event_type: "auth_required",
@@ -284,6 +297,32 @@ async function runFlashWithAdministratorPrivileges(validated, options = {}) {
     cleanupElevatedStage(stage);
     return {ok: false, errors: [error.message]};
   }
+}
+
+async function ensureCachedImageForElevatedFlash(validated, plan, options = {}) {
+  const image = plan.image || {};
+  const imagePath = String(image.cached_path || image.path || "");
+  if (imagePath && !imagePath.startsWith("<")) {
+    return plan;
+  }
+  if (!image.url || !image.sha256) {
+    return plan;
+  }
+
+  const result = await runBridgeStreaming(["ensure-image", "--config", validated.config, "--node", validated.node], {
+    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+    webContents: options.webContents,
+  });
+  if (!result.ok) {
+    return result;
+  }
+  return {
+    ...plan,
+    image: {
+      ...image,
+      ...(result.image || {}),
+    },
+  };
 }
 
 function runBridgeWithAdministratorPrivileges(args, options = {}) {
@@ -304,6 +343,7 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
       cwd: bridge.cwd || elevatedTempRoot(),
       env: elevatedBridgeEnv(bridge.env || {}),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
     const state = {
       stdout: "",
@@ -324,7 +364,7 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
     };
 
     const timer = setTimeout(() => {
-      child.kill();
+      terminateElevatedBridge(child);
       finish({ ok: false, errors: [`Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`] });
     }, effectiveTimeoutMs);
 
@@ -358,6 +398,28 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
     child.stdin.write(`${options.adminPassword || ""}\n`);
     child.stdin.end();
   });
+}
+
+function terminateElevatedBridge(child) {
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+      const killTimer = setTimeout(() => {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (_error) {
+          // Process already exited.
+        }
+      }, 5000);
+      if (typeof killTimer.unref === "function") {
+        killTimer.unref();
+      }
+      return;
+    } catch (_error) {
+      // Fall through to killing the wrapper process.
+    }
+  }
+  child.kill("SIGTERM");
 }
 
 function runBridgeProcess(args, handlers) {
@@ -486,7 +548,7 @@ function stageElevatedFlashInputs(validated, plan) {
 
   const configPath = path.join(inputDir, path.basename(validated.config) || "fleet.yml");
   fs.copyFileSync(validated.config, configPath);
-  fs.chmodSync(configPath, 0o644);
+  fs.chmodSync(configPath, 0o600);
 
   const sourceImagePath = String((plan.image || {}).cached_path || (plan.image || {}).path || "");
   let imagePath = "";
@@ -618,6 +680,10 @@ function elevatedBridgeEnv(extraEnv = {}) {
 }
 
 function elevatedPythonPath() {
+  const configured = configuredPythonPath();
+  if (configured && usablePythonCandidate(configured)) {
+    return configured;
+  }
   for (const candidate of [
     "/opt/homebrew/opt/python@3.14/bin/python3.14",
     "/opt/homebrew/bin/python3.14",
@@ -634,6 +700,20 @@ function elevatedPythonPath() {
     return current;
   }
   return process.platform === "win32" ? "python" : "python3";
+}
+
+function configuredPythonPath() {
+  if (process.env.EASYMANET_PYTHON) {
+    return process.env.EASYMANET_PYTHON;
+  }
+  if (process.env.VIRTUAL_ENV) {
+    return venvPython(process.env.VIRTUAL_ENV);
+  }
+  return "";
+}
+
+function usablePythonCandidate(candidate) {
+  return path.isAbsolute(candidate) ? fs.existsSync(candidate) : true;
 }
 
 function isInsideDocuments(value) {
@@ -770,7 +850,7 @@ async function validateMeshPayload(payload) {
   return {
     ok: true,
     config,
-    scanSubnet: Boolean(payload.scanSubnet || payload.scan_subnet),
+    scanSubnet: booleanFlag(payload.scanSubnet) || booleanFlag(payload.scan_subnet),
   };
 }
 

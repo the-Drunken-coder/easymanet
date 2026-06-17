@@ -589,10 +589,12 @@ def _save_version(
 ) -> None:
     path = version_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {}
+    data: dict[str, Any] = {}
     if path.exists():
         try:
-            data = json.loads(path.read_text())
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, dict):
+                data = loaded
         except (json.JSONDecodeError, OSError):
             pass
     entry: dict[str, str] = {"version": version}

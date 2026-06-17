@@ -9,10 +9,28 @@ SCRIPT_DIR="${EASYMANET_LIB_DIR:-/usr/lib/easymanet}"
 
 PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
 API_PORT="${EASYMANET_API_PORT:-10411}"
-FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-2}"
+FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-1}"
+MAX_TOPOLOGY_PEER_PROBES="${EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES:-8}"
+
+case "$MAX_TOPOLOGY_PEER_PROBES" in
+    ""|*[!0-9]*)
+        MAX_TOPOLOGY_PEER_PROBES=8
+        ;;
+esac
 
 json_escape() {
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+    printf '%s' "$1" | awk 'BEGIN { ORS = "" }
+    {
+        if (NR > 1) {
+            printf "\\n"
+        }
+        value = $0
+        gsub(/\\/, "\\\\", value)
+        gsub(/"/, "\\\"", value)
+        gsub(/\t/, "\\t", value)
+        gsub(/\r/, "\\r", value)
+        printf "%s", value
+    }'
 }
 
 json_string() {
@@ -63,6 +81,11 @@ mesh_iface() {
 
 iface_mac() {
     iface="$1"
+    case "$iface" in
+        ""|*[!a-zA-Z0-9_-]*)
+            return 1
+            ;;
+    esac
     cat "/sys/class/net/$iface/address" 2>/dev/null | head -n 1 || true
 }
 
@@ -315,8 +338,7 @@ append_neighbor_records() {
 resolve_node_by_mac() {
     nodes_file="$1"
     mac="$(lower "$2")"
-    sep="$(record_sep)"
-    awk -F "$sep" -v mac="$mac" '
+    awk -F '[|]' -v mac="$mac" '
         tolower($6) == mac || tolower($7) == mac { print $1; exit }
     ' "$nodes_file"
 }
@@ -371,17 +393,25 @@ topology_json_body() {
         return 0
     fi
 
-    tmp_dir="/tmp/easymanet-topology.$$"
+    tmp_dir="$(mktemp -d /tmp/easymanet-topology.XXXXXX 2>/dev/null || true)"
+    if [ -z "$tmp_dir" ]; then
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to allocate topology scratch directory"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        return 0
+    fi
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
     nodes_file="$tmp_dir/nodes.tsv"
     links_file="$tmp_dir/links.tsv"
     warnings_file="$tmp_dir/warnings.txt"
-    mkdir -p "$tmp_dir"
-    : > "$nodes_file"
-    : > "$links_file"
-    : > "$warnings_file"
+    if ! : > "$nodes_file" || ! : > "$links_file" || ! : > "$warnings_file"; then
+        trap - EXIT INT TERM
+        rm -rf "$tmp_dir"
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to initialize topology scratch files"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        return 0
+    fi
 
     self_name="$(node_name)"
     self_ip="$(node_ip)"
+    peer_probes=0
     i=0
     while :; do
         peer_name="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].name" 2>/dev/null || true)"
@@ -398,12 +428,18 @@ topology_json_body() {
             identity="$(identity_json_body)"
             neighbors="$(neighbors_json_body)"
         elif [ -n "$peer_ip" ]; then
-            identity="$(fetch_peer "$peer_ip" identity || true)"
-            if [ "$(json_get "$identity" '@.ok')" = "true" ]; then
-                neighbors="$(fetch_peer "$peer_ip" neighbors || true)"
-            else
+            if [ "$peer_probes" -ge "$MAX_TOPOLOGY_PEER_PROBES" ]; then
                 status="offline"
-                echo "$peer_name did not answer topology API at $peer_ip" >> "$warnings_file"
+                echo "$peer_name skipped after topology probe limit ($MAX_TOPOLOGY_PEER_PROBES)" >> "$warnings_file"
+            else
+                peer_probes=$((peer_probes + 1))
+                identity="$(fetch_peer "$peer_ip" identity || true)"
+                if [ "$(json_get "$identity" '@.ok')" = "true" ]; then
+                    neighbors="$(fetch_peer "$peer_ip" neighbors || true)"
+                else
+                    status="offline"
+                    echo "$peer_name did not answer topology API at $peer_ip" >> "$warnings_file"
+                fi
             fi
         else
             status="offline"
@@ -431,6 +467,7 @@ topology_json_body() {
     links_json="$(links_json_from_file "$links_file" "$nodes_file")"
     warnings_json="$(json_warnings_array "$warnings_file")"
     gateway_json="$(identity_json_body)"
+    trap - EXIT INT TERM
     rm -rf "$tmp_dir"
 
     printf '{"ok":true,"generated_at":%s,"gateway":%s,"nodes":[%s],"links":[%s],"warnings":[%s]}\n' \
@@ -459,6 +496,11 @@ case "${EASYMANET_API_TEST_MODE:-}" in
         ;;
     parse-originators)
         parse_batctl_originators
+        exit 0
+        ;;
+    json-escape)
+        json_string "$(cat)"
+        printf '\n'
         exit 0
         ;;
 esac

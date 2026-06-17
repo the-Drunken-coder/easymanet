@@ -221,7 +221,10 @@ def _write_gz_via_dd(
     dd_proc = subprocess.Popen(dd_cmd, **dd_kwargs)
     gzip_proc.stdout.close()
 
-    dd_stderr = _drain_dd_progress(dd_proc, emit)
+    if emit is None:
+        _dd_stdout, dd_stderr = dd_proc.communicate()
+    else:
+        dd_stderr = _drain_dd_progress(dd_proc, emit)
     dd_return = dd_proc.wait()
     gzip_return = gzip_proc.wait()
 
@@ -261,7 +264,7 @@ def _stream_dd_device_path(device: str) -> str:
 
 def _stream_dd_block_args() -> list[str]:
     if is_macos():
-        return ["ibs=16m", "obs=1m", "iflag=fullblock", "conv=osync"]
+        return ["bs=1m"]
     return [_write_block_size_arg()]
 
 

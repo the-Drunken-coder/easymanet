@@ -2,7 +2,10 @@ from types import SimpleNamespace
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
 
 from easymanet_desktop import bridge
 from easymanet_desktop import mesh
@@ -26,6 +29,29 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_roles"]["point01"] == "point"
     assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
     assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
+
+
+def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
+    manifest = payloads.load_manifest("examples/three-node-field-mesh.yml")
+    original_resolve = payloads.resolve_node_model
+
+    def fake_resolve_node_model(current_manifest, node_name):
+        if node_name == "point01":
+            raise ValueError("broken node")
+        return original_resolve(current_manifest, node_name)
+
+    monkeypatch.setattr(payloads, "resolve_node_model", fake_resolve_node_model)
+
+    access = payloads.node_access(manifest)
+
+    assert set(access) == set(manifest.node_names())
+    assert access["point01"] == {
+        "role": "",
+        "local_ap_enabled": False,
+        "local_ap_ssid": "",
+        "management_ip": "10.41.254.1",
+    }
+    assert access["gate01"]["role"] == "gate"
 
 
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):
@@ -80,6 +106,171 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
+def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with image.open("wb") as handle:
+        handle.truncate(payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1)
+    version_file = tmp_path / "version.json"
+    version_file.write_text(
+        json.dumps({"rpi4-mm6108-spi": {"version": "1.6.5", "sha256": "b" * 64}})
+    )
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+    monkeypatch.setattr(
+        payloads,
+        "image_sha256",
+        lambda _path: (_ for _ in ()).throw(AssertionError("large cache should not be hashed")),
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
+    assert entry["cached_sha256"] == ""
+
+
+def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    image.write_bytes(b"firmware")
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({"rpi4-mm6108-spi": {"sha256": 123}}))
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: image)
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+
+
+def test_desktop_state_discovers_cache_for_malformed_manifest_hash(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    image.write_bytes(b"firmware")
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({"rpi4-mm6108-spi": {"sha256": "not-a-sha"}}))
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_path"] == str(image)
+    assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+
+
+def test_desktop_state_skips_hashing_large_unversioned_cache(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with image.open("wb") as handle:
+        handle.truncate(payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1)
+
+    monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
+    monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
+    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+    monkeypatch.setattr(
+        payloads,
+        "image_sha256",
+        lambda _path: (_ for _ in ()).throw(AssertionError("large cache should not be hashed")),
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
+    assert entry["cached_sha256"] == ""
+
+
+def test_desktop_bridge_ensure_image_downloads_to_operator_cache(tmp_path, monkeypatch):
+    image_path = tmp_path / "Images" / "openmanet.img.gz"
+    events = []
+
+    monkeypatch.setattr(
+        bridge,
+        "flash_image_details",
+        lambda **_kwargs: {
+            "target": "rpi4-mm6108-spi",
+            "version": "images-v0.2.4",
+            "url": "https://example.com/openmanet.img.gz",
+            "sha256": "a" * 64,
+            "cached_path": "",
+        },
+    )
+
+    def fake_download_image(target, version, url, sha256, emit=None, **_kwargs):
+        assert target == "rpi4-mm6108-spi"
+        assert version == "images-v0.2.4"
+        assert url == "https://example.com/openmanet.img.gz"
+        assert sha256 == "a" * 64
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(b"firmware")
+        if emit:
+            emit({"type": "download_completed", "message": f"Saved: {image_path}", "path": str(image_path)})
+        return image_path
+
+    monkeypatch.setattr(bridge, "download_image", fake_download_image)
+
+    payload = bridge.ensure_image_payload(
+        config="field.yml",
+        node="gate01",
+        emit=events.append,
+    )
+
+    assert payload["ok"] is True
+    assert payload["image"]["cached_path"] == str(image_path)
+    assert events[0].event_type == "download_completed"
+    assert events[0].data["path"] == str(image_path)
+
+
+def test_desktop_bridge_ensure_image_returns_typed_download_failure(monkeypatch):
+    monkeypatch.setattr(
+        bridge,
+        "flash_image_details",
+        lambda **_kwargs: {
+            "target": "rpi4-mm6108-spi",
+            "version": "images-v0.2.4",
+            "url": "https://example.com/openmanet.img.gz",
+            "sha256": "a" * 64,
+            "cached_path": "",
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "download_image",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")),
+    )
+
+    payload = bridge.ensure_image_payload(config="field.yml", node="gate01")
+
+    assert payload["ok"] is False
+    assert payload["errors"] == ["Image download failed: offline"]
+    assert payload["image"]["target"] == "rpi4-mm6108-spi"
+
+
 def test_desktop_validate_resolves_workspace_fleet_name(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -105,7 +296,7 @@ def test_desktop_resolve_config_rejects_non_yaml_file(tmp_path):
     assert payload["config_path"] == str(config)
 
 
-def test_desktop_disks_payload_only_serializes_mounted_disks(monkeypatch):
+def test_desktop_disks_payload_serializes_unmounted_disks(monkeypatch):
     monkeypatch.setattr(payloads, "check_platform", lambda: None)
     monkeypatch.setattr(
         payloads,
@@ -133,7 +324,11 @@ def test_desktop_disks_payload_only_serializes_mounted_disks(monkeypatch):
     payload = payloads.disks_payload(include_all=False)
 
     assert payload["ok"] is True
-    assert [disk["device"] for disk in payload["disks"]] == ["/dev/disk4"]
+    assert [disk["device"] for disk in payload["disks"]] == ["/dev/disk4", "/dev/disk5"]
+    assert payload["disks"][0]["removable"] is True
+    assert payload["disks"][0]["mounted"] == ["/Volumes/BOOT"]
+    assert payload["disks"][0]["warnings"] == []
+    assert payload["disks"][1]["mounted"] == []
 
 
 def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
@@ -180,6 +375,85 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
     assert payload["links"][0]["target"] == "point01"
     assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_discovery_tries_next_gateway_after_topology_failure(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    gateways = {
+        "10.41.254.1": "gate01",
+        "manet01.local": "gate02",
+    }
+
+    def fake_probe(candidate):
+        hostname = gateways.get(candidate.host)
+        if hostname:
+            return {
+                **candidate.to_dict(),
+                "ok": True,
+                "status": "connected",
+                "hostname": hostname,
+                "role": "gate",
+                "host": candidate.host,
+            }
+        return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+    attempts: list[str] = []
+
+    def fake_topology(gateway):
+        attempts.append(gateway["host"])
+        if gateway["host"] == "10.41.254.1":
+            return {"ok": False, "code": "api_error", "errors": ["topology failed"]}
+        return {
+            "ok": True,
+            "generated_at": "2026-06-13T00:00:00Z",
+            "nodes": [{"name": "gate02", "role": "gate", "status": "online"}],
+            "links": [],
+            "warnings": [],
+        }
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "", "scanSubnet": False},
+        probe=fake_probe,
+        topology_fetcher=fake_topology,
+    )
+
+    assert payload["ok"] is True
+    assert payload["gateway"]["hostname"] == "gate02"
+    assert attempts == ["10.41.254.1", "manet01.local"]
+
+
+def test_desktop_mesh_discovery_string_false_does_not_scan_subnet(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(
+        mesh,
+        "_local_subnet_hosts",
+        lambda: (_ for _ in ()).throw(AssertionError("subnet scan should stay disabled")),
+    )
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "", "scanSubnet": "false"},
+        probe=lambda candidate: {**candidate.to_dict(), "ok": False, "status": "api_unreachable"},
+    )
+
+    assert payload["ok"] is False
+    assert payload["scan_subnet"] is False
+
+
+def test_desktop_mesh_candidates_skip_bare_fleet_hostnames(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    candidates, warnings = mesh.mesh_candidates(
+        config="examples/three-node-field-mesh.yml",
+        scan_subnet=False,
+    )
+
+    assert warnings == []
+    hosts = {candidate.host for candidate in candidates}
+    assert "gate01" not in hosts
+    assert "gate01.local" in hosts
 
 
 def test_desktop_mesh_discovery_reports_missing_gateway_api(monkeypatch):
@@ -514,10 +788,19 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderNodeOptions" in text
     assert "discoverMesh" in text
     assert "renderMeshDiscovery" in text
+    assert "resetMeshDiscovery" in text
+    assert "partial results" in text
+    assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
     assert "applyRoleDefaultSsh" in text
     assert "node_roles" in text
     assert "node_access" in text
     assert "flashAccessHint" in text
+    assert "Join ${ssid}" not in text
+    assert "local_ap_ssid ? access.local_ap_ssid" not in text
+    assert "payload.plan" in text
+    assert 'sshNote.startsWith("yes")' in text
+    assert "Connect Ethernet, then SSH to root@" in text
+    assert "Connect Ethernet to the node management port." in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
     assert "detectMacPlatform" in text
@@ -528,6 +811,13 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "diskInventorySignature" in text
     assert "visibilitychange" in text
     assert "setInterval(refreshDisksIfChanged" in text
+    disk_error_body = text.split("function renderDiskError(error)", 1)[1].split(
+        "function showCopied",
+        1,
+    )[0]
+    assert 'state.diskDevice = "";' in disk_error_body
+    assert 'selectedDisk.textContent = "None";' in disk_error_body
+    assert "renderImageState" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
@@ -546,6 +836,9 @@ def test_desktop_static_supports_electron_and_http_modes():
 def test_desktop_renderer_safe_tone_allows_only_expected_classes():
     root = Path(__file__).resolve().parents[1]
     render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("node is required for renderer safety test")
     script = """
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -561,7 +854,7 @@ process.stdout.write(JSON.stringify({
 }));
 """
     result = subprocess.run(
-        ["node", "-e", script, str(render_js)],
+        [node_bin, "-e", script, str(render_js)],
         capture_output=True,
         check=True,
         text=True,
@@ -619,7 +912,9 @@ def test_electron_shell_files_exist():
     assert '"sudo"' in (electron / "main.js").read_text()
     assert '"-S"' in (electron / "main.js").read_text()
     assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
+    assert "fs.chmodSync(configPath, 0o600)" in (electron / "main.js").read_text()
     assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
+    assert '"ensure-image"' in (electron / "main.js").read_text()
     assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
     assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
     assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()

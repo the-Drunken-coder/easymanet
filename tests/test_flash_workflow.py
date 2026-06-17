@@ -42,6 +42,117 @@ def test_flash_workflow_dry_run_emits_plan_before_complete(monkeypatch):
     assert result.plan["boot_payload"] == "/easymanet/provision.json"
 
 
+def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
+    image_path = tmp_path / "openmanet.img.gz"
+    events = []
+
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        flash,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.4",
+            url="https://example.test/openmanet.img.gz",
+            sha256="a" * 64,
+        ),
+    )
+
+    def fake_download_image(target, version, url, sha256, force=False, emit=None):
+        assert target == "rpi4-mm6108-spi"
+        assert version == "images-v0.2.4"
+        assert url == "https://example.test/openmanet.img.gz"
+        assert sha256 == "a" * 64
+        assert force is False
+        image_path.write_bytes(b"firmware")
+        if emit:
+            emit({"type": "download_completed", "message": f"Saved: {image_path}", "path": str(image_path)})
+        return image_path
+
+    monkeypatch.setattr(flash, "download_image", fake_download_image)
+
+    result = flash.prepare_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            yes=True,
+        ),
+        emit=events.append,
+    )
+
+    assert result.ok is True
+    assert result.image["cached_path"] == str(image_path)
+    assert result.plan["base_image"] == str(image_path)
+    assert "download_completed" in [event.event_type for event in events]
+    assert events[-1].event_type == "plan"
+
+
+def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        flash,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.4",
+            url="https://example.test/openmanet.img.gz",
+            sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        flash,
+        "download_image",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("network unavailable")),
+    )
+
+    result = flash.prepare_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            yes=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.IMAGE
+    assert result.errors == ["Image download error: network unavailable"]
+    assert result.events[-1].event_type == "error"
+
+
+def test_prepare_flash_workflow_exposes_effective_ssh_enabled(monkeypatch):
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+
+    cases = [
+        ("gate01", {}, True),
+        ("point01", {}, False),
+        ("point01", {"enable_ssh": True}, True),
+        ("gate01", {"disable_ssh": True}, False),
+    ]
+
+    for node, overrides, expected in cases:
+        result = flash.prepare_flash_workflow(
+            flash.FlashOptions(
+                config="examples/three-node-field-mesh.yml",
+                node=node,
+                device="/dev/disk4",
+                dry_run=True,
+                **overrides,
+            )
+        )
+
+        assert result.ok is True
+        assert result.plan["ssh_enabled"] is expected
+
+
 def test_flash_workflow_validation_failure_returns_structured_errors(tmp_path, monkeypatch):
     config = tmp_path / "bad.yml"
     config.write_text("version: 1\nnodes: {}\n")

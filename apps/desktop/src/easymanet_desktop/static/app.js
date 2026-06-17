@@ -20,6 +20,8 @@ const state = {
   nodeRoles: {},
   nodeAccess: {},
   images: {},
+  imageLoadInFlight: false,
+  imageRefreshQueued: false,
   diskSignature: "",
   diskLoadInFlight: false,
   flashBusy: false,
@@ -84,6 +86,8 @@ const meshStatusChip = $("mesh-status-chip");
 const meshConfigSource = $("mesh-config-source");
 const meshScanSubnet = $("mesh-scan-subnet");
 const meshDiscover = $("mesh-discover");
+const meshScanning = $("mesh-scanning");
+const meshScanningDetail = $("mesh-scanning-detail");
 const meshSummary = $("mesh-summary");
 const meshCount = $("mesh-count");
 const meshRadios = $("mesh-radios");
@@ -212,6 +216,7 @@ startFlash.addEventListener("click", async () => {
   try {
     const response = await nativeApi.flash(flashPayload({ includeAdminPassword: true }));
     renderFlash(response);
+    await refreshImageSidebar();
     await loadDisks().catch(renderDiskError);
   } catch (error) {
     hideProgress();
@@ -300,6 +305,30 @@ function renderImageState(imagePayload) {
   state.images = imagePayload || {};
   imageCount.textContent = `${entries.length}`;
   images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
+}
+
+async function refreshImageSidebar() {
+  if (state.imageLoadInFlight) {
+    state.imageRefreshQueued = true;
+    return;
+  }
+  state.imageLoadInFlight = true;
+  try {
+    const payload = await getState();
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Could not refresh image state");
+    }
+    renderImageState(payload.images || {});
+    updateFlashControls();
+  } catch (error) {
+    console.debug("Image sidebar refresh failed", error);
+  } finally {
+    state.imageLoadInFlight = false;
+    if (state.imageRefreshQueued) {
+      state.imageRefreshQueued = false;
+      refreshImageSidebar();
+    }
+  }
 }
 
 async function loadDisks() {
@@ -497,6 +526,7 @@ async function discoverMesh() {
   state.meshHasScanned = true;
   setMeshBusy(true);
   meshSummary.hidden = true;
+  meshRadios.setAttribute("aria-busy", "true");
   setMeshStatus("warn", "scanning");
   try {
     const response = await postJson("/api/mesh/discover", {
@@ -507,6 +537,7 @@ async function discoverMesh() {
   } catch (error) {
     renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
   } finally {
+    meshRadios.removeAttribute("aria-busy");
     setMeshBusy(false);
   }
 }
@@ -559,6 +590,10 @@ function setMeshBusy(busy) {
   meshDiscover.textContent = busy ? "Scanning..." : "Scan Mesh";
   meshDiscover.setAttribute("aria-busy", busy ? "true" : "false");
   meshScanSubnet.disabled = busy;
+  meshScanning.hidden = !busy;
+  meshScanningDetail.textContent = meshScanSubnet.checked
+    ? "Checking gateway APIs, fleet nodes, and local network candidates."
+    : "Checking gateway APIs and fleet node candidates.";
   if (busy) {
     setMeshStatus("warn", "scanning");
   }
@@ -625,8 +660,7 @@ function selectedNodeAccess(node = nodeSelect.value.trim()) {
 function flashAccessHint(node, payload = {}) {
   const access = selectedNodeAccess(node);
   const address = access.management_ip || "10.41.254.1";
-  const sshNote = String((payload.plan || {}).ssh || "").toLowerCase();
-  if (sshNote.startsWith("yes")) {
+  if ((payload.plan || {}).ssh_enabled === true) {
     return `Connect Ethernet, then SSH to root@${address}.`;
   }
   return "Connect Ethernet to the node management port.";
@@ -926,6 +960,9 @@ function renderFlashEvent(event) {
       indeterminate: !total && typeof event.percent !== "number",
     });
     return;
+  }
+  if (type === "download_completed") {
+    refreshImageSidebar();
   }
   if (type === "dd_progress") {
     const written = Number(event.bytes);

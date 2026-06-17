@@ -287,6 +287,13 @@
                   <span class="chip subtle" id="mesh-count">0</span>
                 </header>
                 <div class="card-body">
+                  <div id="mesh-scanning" class="mesh-scanning" role="status" aria-live="polite" hidden>
+                    <span class="mesh-spinner" aria-hidden="true"></span>
+                    <span class="mesh-scanning-copy">
+                      <strong>Scanning mesh</strong>
+                      <span id="mesh-scanning-detail">Checking gateway APIs and local candidates.</span>
+                    </span>
+                  </div>
                   <div id="mesh-radios" class="mesh-grid">
                     <div class="empty-state slim">
                       <p class="empty-title">No topology found</p>

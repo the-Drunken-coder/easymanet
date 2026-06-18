@@ -23,10 +23,9 @@ from easymanet.workspace import (
     resolve_fleet_config,
     workspace_payload,
 )
-from easymanet_image.cli import register_image_commands
-
 from .common import print_errors_and_warnings
 from .flash import register_flash_command
+from .image import register_image_commands
 
 app = typer.Typer(
     name="easymanet",

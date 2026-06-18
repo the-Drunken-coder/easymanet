@@ -4,12 +4,16 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "images" / "openmanet" / "provisioning" / "openwrt-overlay"
 PROVISION_SCRIPT = OVERLAY / "usr" / "lib" / "easymanet" / "provision.sh"
 PROVISION_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "provision-lib.sh"
+PROVISION_RUNTIME = OVERLAY / "usr" / "lib" / "easymanet" / "provision-runtime.sh"
+API_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "api-lib.sh"
 
 
 def test_provision_lib_exists_and_is_sourced():
     assert PROVISION_LIB.exists()
+    assert PROVISION_RUNTIME.exists()
     text = PROVISION_SCRIPT.read_text()
     assert "provision-lib.sh" in text
+    assert "provision-runtime.sh" in text
 
 
 def test_firstboot_provisioner_uses_openwrt_jsonfilter_not_python():
@@ -36,7 +40,7 @@ def test_firstboot_fails_if_root_password_hash_not_applied():
 
 
 def test_firstboot_creates_shadow_temp_file_with_restrictive_umask():
-    text = PROVISION_SCRIPT.read_text()
+    text = PROVISION_RUNTIME.read_text()
     write_block = text.split("write_root_shadow_hash() {", 1)[1].split(
         "wipe_boot_provision_json() {", 1
     )[0]
@@ -77,7 +81,7 @@ def test_firstboot_honors_ssh_enabled_flag():
 
 
 def test_firstboot_temp_boot_mount_is_writable_for_payload_removal():
-    text = PROVISION_SCRIPT.read_text()
+    text = PROVISION_RUNTIME.read_text()
     assert 'mount -t vfat "$dev" "$BOOT_MOUNT_TMP"' in text
     assert 'mount -o ro -t vfat "$dev" "$BOOT_MOUNT_TMP"' not in text
     wipe_block = text.split("wipe_boot_provision_json() {", 1)[1].split("}", 1)[0]
@@ -190,11 +194,13 @@ def test_topology_api_overlay_is_packaged():
     identity = OVERLAY / "www" / "easymanet-api" / "v1" / "identity"
     neighbors = OVERLAY / "www" / "easymanet-api" / "v1" / "neighbors"
     topology = OVERLAY / "www" / "easymanet-api" / "v1" / "topology"
-    provision_text = PROVISION_SCRIPT.read_text()
+    provision_text = PROVISION_RUNTIME.read_text()
 
     for path in (api, identity, neighbors, topology):
         assert path.exists()
         assert path.stat().st_mode & 0o111
+    assert API_LIB.exists()
+    assert "api-lib.sh" in api.read_text()
     assert "configure_easymanet_api" in provision_text
     assert "uhttpd.easymanet_api" in provision_text
     assert "allow_easymanet_api_wan=rule" not in provision_text

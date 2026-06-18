@@ -7,6 +7,10 @@ These files install the generic EasyMANET first-boot hooks:
 
 - `etc/uci-defaults/99-easymanet`
 - `usr/lib/easymanet/provision.sh`
+- `usr/lib/easymanet/provision-runtime.sh`
+- `usr/lib/easymanet/provision-lib.sh`
+- `usr/lib/easymanet/api.sh`
+- `usr/lib/easymanet/api-lib.sh`
 
 At flash time, EasyMANET writes the node-specific payload to the FAT
 boot partition at:

@@ -3,8 +3,7 @@ productName: EasyMANET
 directories:
   output: dist
 files:
-  - main.js
-  - preload.js
+  - "*.js"
   - assets/**
 extraResources:
   - from: ../src/easymanet_desktop/static

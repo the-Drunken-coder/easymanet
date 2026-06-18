@@ -14,7 +14,7 @@ from easymanet_cli.flash import (
     resolve_base_image,
     resolve_flash_ssh_enabled,
 )
-from easymanet_image import cli as cli_image
+from easymanet_cli import image as cli_image
 
 
 FIELD_FLEET_YAML = """\
@@ -376,7 +376,7 @@ def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypat
 def test_image_build_chains_build_error(monkeypatch):
     from typer.testing import CliRunner
 
-    from easymanet_image import cli as cli_image
+    from easymanet_cli import image as cli_image
     from easymanet_image.build import BuildError
     from easymanet_cli.app import app
 
@@ -391,3 +391,10 @@ def test_image_build_chains_build_error(monkeypatch):
 
     assert result.exit_code == 1
     assert "Build error: docker is missing" in result.output
+
+
+def test_image_cli_compatibility_shim_exposes_register_command():
+    from easymanet_image.cli import register_image_commands as shim_register
+    from easymanet_cli.image import register_image_commands
+
+    assert shim_register is register_image_commands

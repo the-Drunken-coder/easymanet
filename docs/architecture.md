@@ -95,8 +95,11 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 - `usr/lib/easymanet/provision.sh`: Generic shell script that finds the
   boot-partition payload, copies it into overlay storage, and applies
   UCI/OpenMANET configuration automatically.
-- `usr/lib/easymanet/network.sh`, `boot-report.sh`: helpers for management
-  LAN repair and post-boot diagnostics (see init.d hooks in the same overlay).
+- `usr/lib/easymanet/api.sh`: CGI/API entrypoint for identity, neighbors, and
+  topology JSON.
+- `usr/lib/easymanet/*-lib.sh`, `provision-runtime.sh`, `network.sh`,
+  `boot-report.sh`: sourced helpers for API parsing, provisioning, management
+  LAN repair, and post-boot diagnostics.
 
 ## Design Principles
 
@@ -125,7 +128,10 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
                               (deleted by OpenWrt after execution)
 
 /usr/lib/easymanet/
-    provision.sh            ← generic provisioning script
+    provision.sh            ← generic provisioning entrypoint
+    api.sh                  ← read-only mesh API entrypoint
+    *-lib.sh                ← sourced helper libraries
+    provision-runtime.sh    ← sourced first-boot provisioning helpers
 ```
 
 ## Firmware Build Requirement

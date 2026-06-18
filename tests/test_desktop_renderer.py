@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
 
 
 def test_desktop_renderer_state_flows_use_bridge_payloads():
@@ -281,11 +284,16 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   process.exit(1);
 });
 """
-    result = subprocess.run(
-        ["node", "-e", script, str(render_js), str(app_js)],
+    node_exe = shutil.which("node")
+    if not node_exe:
+        pytest.skip("Node.js is required for desktop renderer VM tests")
+
+    result = subprocess.run(  # noqa: S603 - fixed executable and repo-local script inputs
+        [node_exe, "-e", script, str(render_js), str(app_js)],
         capture_output=True,
         check=True,
         text=True,
+        timeout=30,
     )
     payload = json.loads(result.stdout)
 

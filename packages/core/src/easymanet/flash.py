@@ -371,15 +371,22 @@ def _prepare_flash_workflow(
                 warnings=warnings,
             )
 
-        ssh_enabled = resolve_flash_ssh_enabled(
+        ssh_override = resolve_flash_ssh_enabled(
             enable_ssh=options.enable_ssh,
             disable_ssh=options.disable_ssh,
         )
-        provision = resolve_provision(manifest, options.node, ssh_enabled=ssh_enabled)
-        provision_dict = provision.to_dict()
+        provision = resolve_provision(manifest, options.node, ssh_enabled=ssh_override)
         resolved_node = provision.node
         target = str(resolved_node.target)
         role = str(resolved_node.role)
+        ssh_enabled = effective_flash_ssh_enabled(
+            role,
+            enable_ssh=options.enable_ssh,
+            disable_ssh=options.disable_ssh,
+        )
+        if ssh_override is None:
+            provision = resolve_provision(manifest, options.node, ssh_enabled=ssh_enabled)
+        provision_dict = provision.to_dict()
         image_path, image_details, image_warnings = resolve_base_image(
             target,
             options.base_image,
@@ -427,11 +434,7 @@ def _prepare_flash_workflow(
                 enable_ssh=options.enable_ssh,
                 disable_ssh=options.disable_ssh,
             ),
-            "ssh_enabled": effective_flash_ssh_enabled(
-                role,
-                enable_ssh=options.enable_ssh,
-                disable_ssh=options.disable_ssh,
-            ),
+            "ssh_enabled": ssh_enabled,
             "secrets_redacted": not options.show_secrets,
             "disk": disk,
         }
@@ -607,9 +610,15 @@ def resolve_base_image(
             ) from exc
 
     if base_image:
+        base_image_path = Path(base_image)
+        if not base_image_path.is_file():
+            raise FlashWorkflowError(
+                FlashErrorCode.IMAGE,
+                f"Base image not found: {base_image}",
+            )
         if normalized_sha256:
             try:
-                verify_image_sha256(Path(base_image), normalized_sha256)
+                verify_image_sha256(base_image_path, normalized_sha256)
             except OSError as exc:
                 raise FlashWorkflowError(
                     FlashErrorCode.IMAGE,
@@ -617,7 +626,7 @@ def resolve_base_image(
                 ) from exc
         else:
             warnings.append("Warning: local --base-image was not verified with --image-sha256.")
-        return base_image, _image_payload(path=base_image, sha256=normalized_sha256), warnings
+        return str(base_image_path), _image_payload(path=str(base_image_path), sha256=normalized_sha256), warnings
 
     if image_url:
         if not normalized_sha256:

@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import easymanet.flash as flash
@@ -49,6 +48,14 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("prepare_flash_workflow must not run flash execution steps")
+
+    monkeypatch.setattr(flash, "check_privileges", fail_if_called)
+    monkeypatch.setattr(flash, "flash_image", fail_if_called)
+    monkeypatch.setattr(flash, "inject", fail_if_called)
+    monkeypatch.setattr(flash, "finish_flash", fail_if_called)
     monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         flash,
@@ -122,6 +129,26 @@ def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):
     assert result.ok is False
     assert result.code is flash.FlashErrorCode.IMAGE
     assert result.errors == ["Image download error: network unavailable"]
+    assert result.events[-1].event_type == "error"
+
+
+def test_prepare_flash_workflow_missing_local_base_image_is_classified(tmp_path, monkeypatch):
+    missing_image = tmp_path / "missing-openmanet.img.gz"
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+
+    result = flash.prepare_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            base_image=str(missing_image),
+            yes=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.IMAGE
+    assert result.errors == [f"Base image not found: {missing_image}"]
     assert result.events[-1].event_type == "error"
 
 
@@ -306,7 +333,13 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(flash, "flash_image", fake_flash_image)
-    monkeypatch.setattr(flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
+    inject_calls = []
+
+    def fake_inject(**kwargs):
+        inject_calls.append(kwargs)
+        return [("/easymanet/provision.json", True)]
+
+    monkeypatch.setattr(flash, "inject", fake_inject)
     monkeypatch.setattr(flash, "finish_flash", fake_finish_flash)
     events = []
 
@@ -324,6 +357,7 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
         "complete",
     ]
     assert events[0].event_type == "warning"
+    assert inject_calls[0]["ssh_enabled"] is False
     assert result.inject_results == [{"path": "/easymanet/provision.json", "ok": True}]
 
 

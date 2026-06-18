@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import easymanet.flash as flash
@@ -39,6 +40,38 @@ def test_flash_workflow_dry_run_emits_plan_before_complete(monkeypatch):
     assert result.ok is True
     assert [event.event_type for event in events][-2:] == ["plan", "complete"]
     assert result.plan["boot_payload"] == "/easymanet/provision.json"
+
+
+def test_flash_workflow_serialization_redacts_provision_secrets(monkeypatch):
+    events = []
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+
+    result = flash.run_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="gate01",
+            device="/dev/disk4",
+            dry_run=True,
+        ),
+        emit=events.append,
+    )
+
+    assert result.ok is True
+    assert result.provision["mesh"]["password"] == "strong-mesh-password-here"
+
+    serialized = json.dumps(result.to_dict(include_events=True))
+    plan_event = next(event for event in events if event.event_type == "plan")
+    assert plan_event.data["provision"]["mesh"]["password"] == flash.REDACTED_VALUE
+    serialized_event = json.dumps(plan_event.to_dict())
+
+    for payload in (serialized, serialized_event):
+        assert "strong-mesh-password-here" not in payload
+        assert "local-ap-password" not in payload
+        assert "replace-with-operator-wifi-password" not in payload
+        assert "AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh" not in payload
+        assert flash.REDACTED_VALUE in payload
 
 
 def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):

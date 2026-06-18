@@ -11,6 +11,7 @@ from easymanet_desktop import bridge
 from easymanet_desktop import mesh
 from easymanet_desktop import payloads
 from easymanet_desktop import server
+from easymanet import flash
 from easymanet.flash import FlashErrorCode, FlashEvent
 from easymanet.workspace import WORKSPACE_ENV, ensure_workspace
 
@@ -575,6 +576,36 @@ def test_desktop_bridge_prepare_flash_streams_events_and_final_result(monkeypatc
     assert calls[0].dry_run is False
     assert calls[0].yes is True
     assert calls[0].disable_ssh is True
+
+
+def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path, monkeypatch):
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(b"firmware")
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        bridge,
+        "_safe_flash_image_details",
+        lambda **_kwargs: {},
+    )
+
+    payload = bridge.prepare_flash_payload(
+        config="examples/three-node-field-mesh.yml",
+        node="gate01",
+        device="/dev/disk4",
+        base_image=str(image),
+    )
+
+    encoded = json.dumps(payload)
+    assert payload["provision"]["mesh"]["password"] == "<redacted>"
+    assert payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
+    assert payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
+    assert payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
+    assert "strong-mesh-password-here" not in encoded
+    assert "local-ap-password" not in encoded
+    assert "replace-with-operator-wifi-password" not in encoded
+    assert "AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh" not in encoded
 
 
 def test_desktop_bridge_prepare_flash_streams_failure_result(monkeypatch, capsys):

@@ -13,9 +13,9 @@ from easymanet.flash import (
     FlashEvent,
     FlashOptions,
     flash_image_details,
+    prepare_flash_workflow,
     run_flash_workflow,
 )
-from easymanet.download import download_image
 
 from .payloads import (
     disks_payload,
@@ -40,7 +40,7 @@ def flash_plan_payload(
     enable_ssh: bool = False,
     disable_ssh: bool = False,
 ) -> dict[str, Any]:
-    result = run_flash_workflow(
+    result = prepare_flash_workflow(
         FlashOptions(
             config=config,
             node=node,
@@ -54,6 +54,36 @@ def flash_plan_payload(
         )
     )
     payload = result.to_dict(include_events=True)
+    payload["image"] = _best_image_details(payload.get("image", {}), config=config, node=node)
+    return payload
+
+
+def prepare_flash_payload(
+    *,
+    config: str,
+    node: str,
+    device: str,
+    base_image: str | None = None,
+    image_sha256: str | None = None,
+    enable_ssh: bool = False,
+    disable_ssh: bool = False,
+    emit: Callable[[FlashEvent], None] | None = None,
+) -> dict[str, Any]:
+    result = prepare_flash_workflow(
+        FlashOptions(
+            config=config,
+            node=node,
+            device=device,
+            base_image=base_image,
+            image_sha256=image_sha256,
+            dry_run=False,
+            yes=True,
+            enable_ssh=enable_ssh,
+            disable_ssh=disable_ssh,
+        ),
+        emit=emit,
+    )
+    payload = result.to_dict(include_events=emit is None)
     payload["image"] = _best_image_details(payload.get("image", {}), config=config, node=node)
     return payload
 
@@ -98,44 +128,6 @@ def flash_payload(
     return payload
 
 
-def ensure_image_payload(
-    *,
-    config: str,
-    node: str,
-    emit: Callable[[FlashEvent], None] | None = None,
-) -> dict[str, Any]:
-    details = flash_image_details(config=config, node=node)
-    if details.get("errors"):
-        return {"ok": False, "errors": details["errors"], "image": details}
-
-    cached_path = str(details.get("cached_path") or "")
-    if cached_path:
-        return {"ok": True, "image": {**details, "path": cached_path}}
-
-    target = str(details.get("target") or "")
-    version = str(details.get("version") or "latest")
-    url = str(details.get("url") or "")
-    sha256 = str(details.get("sha256") or "")
-    if not target or not url or not sha256:
-        return {
-            "ok": False,
-            "errors": ["No downloadable image with SHA-256 is available for this target"],
-            "image": details,
-        }
-
-    try:
-        path = download_image(
-            target,
-            version,
-            url,
-            sha256,
-            emit=lambda event: _emit_download_event(event, emit),
-        )
-    except Exception as exc:  # noqa: BLE001 - surfaced to the desktop as a typed result.
-        return {"ok": False, "errors": [f"Image download failed: {exc}"], "image": details}
-    return {"ok": True, "image": {**details, "path": str(path), "cached_path": str(path)}}
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m easymanet_desktop.bridge")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -159,9 +151,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     flash_plan = subparsers.add_parser("flash-plan")
     _add_flash_args(flash_plan, include_yes=False)
 
-    ensure_image = subparsers.add_parser("ensure-image")
-    ensure_image.add_argument("--config", required=True)
-    ensure_image.add_argument("--node", required=True)
+    prepare_flash = subparsers.add_parser("prepare-flash")
+    _add_flash_args(prepare_flash, include_yes=False)
 
     flash = subparsers.add_parser("flash")
     _add_flash_args(flash, include_yes=True)
@@ -193,10 +184,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 enable_ssh=args.enable_ssh,
                 disable_ssh=args.disable_ssh,
             )
-        elif args.command == "ensure-image":
-            payload = ensure_image_payload(
+        elif args.command == "prepare-flash":
+            payload = prepare_flash_payload(
                 config=args.config,
                 node=args.node,
+                device=args.device,
+                base_image=args.base_image,
+                image_sha256=args.image_sha256,
+                enable_ssh=args.enable_ssh,
+                disable_ssh=args.disable_ssh,
                 emit=_print_bridge_event,
             )
             print(json.dumps({"type": "result", **payload}), flush=True)
@@ -220,6 +216,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - converted into bridge JSON.
         payload = {"ok": False, "errors": [str(exc)]}
 
+    if "args" in locals() and args.command in {"flash", "prepare-flash"}:
+        print(json.dumps({"type": "result", **payload}), flush=True)
+        return 0
     print(json.dumps(payload))
     return 0
 
@@ -238,18 +237,6 @@ def _add_flash_args(parser: argparse.ArgumentParser, *, include_yes: bool) -> No
 
 def _print_bridge_event(event: FlashEvent) -> None:
     print(json.dumps(event.to_dict()), flush=True)
-
-
-def _emit_download_event(
-    event: dict[str, Any],
-    emit: Callable[[FlashEvent], None] | None,
-) -> None:
-    if not emit:
-        return
-    event_type = str(event.get("type") or "download")
-    message = str(event.get("message") or "")
-    data = {key: value for key, value in event.items() if key not in {"type", "message"}}
-    emit(FlashEvent(event_type=event_type, message=message, data=data))
 
 
 def _best_image_details(

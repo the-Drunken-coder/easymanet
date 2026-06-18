@@ -867,6 +867,48 @@ select:disabled {
   background: var(--bg-raised);
 }
 
+.mesh-scanning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 13px;
+  border: 1px solid rgba(52, 211, 153, 0.42);
+  border-radius: 9px;
+  background: rgba(52, 211, 153, 0.09);
+}
+
+.mesh-scanning[hidden] {
+  display: none;
+}
+
+.mesh-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(52, 211, 153, 0.24);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+}
+
+.mesh-scanning-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mesh-scanning-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.mesh-scanning-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .mesh-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

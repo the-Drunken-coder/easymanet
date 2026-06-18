@@ -16,6 +16,54 @@ from easymanet.flash import FlashErrorCode, FlashEvent
 from easymanet.workspace import WORKSPACE_ENV, ensure_workspace
 
 
+def _write_redaction_fleet(path, raw_values):
+    path.write_text(
+        f"""version: 1
+
+mesh:
+  id: redaction-test
+  password: "{raw_values["mesh"]}"
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+
+  local_ap:
+    enabled: true
+    password: "{raw_values["local_ap"]}"
+
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys:
+      - "{raw_values["ssh_key"]}"
+
+  gateway:
+    wifi:
+      enabled: false
+      ssid: "redaction-uplink"
+      password: "{raw_values["gateway_wifi"]}"
+      encryption: psk2
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+
+    local_ap:
+      ssid: gate01-local
+
+    gateway:
+      enabled: true
+      uplink_interface: wifi
+      wifi:
+        enabled: true
+"""
+    )
+
+
 def test_desktop_validate_payload_returns_nodes():
     payload = payloads.validate_payload(
         {
@@ -454,7 +502,7 @@ def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
         return SimpleNamespace(
             to_dict=lambda include_events=False: {
                 "ok": True,
-                "events": [] if include_events else None,
+                **({"events": []} if include_events else {}),
                 "image": {"cached_path": "/tmp/openmanet.img.gz"},
             }
         )
@@ -494,7 +542,7 @@ def test_desktop_bridge_flash_plan_preserves_cached_image_metadata(monkeypatch):
         return SimpleNamespace(
             to_dict=lambda include_events=False: {
                 "ok": True,
-                "events": [] if include_events else None,
+                **({"events": []} if include_events else {}),
                 "image": {
                     "path": "/tmp/openmanet.img.gz",
                     "cached_path": "/tmp/openmanet.img.gz",
@@ -581,6 +629,14 @@ def test_desktop_bridge_prepare_flash_streams_events_and_final_result(monkeypatc
 def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path, monkeypatch):
     image = tmp_path / "openmanet.img.gz"
     image.write_bytes(b"firmware")
+    config = tmp_path / "redaction-fleet.yml"
+    raw_values = {
+        "mesh": "redaction-mesh-value",
+        "local_ap": "redaction-local-ap-value",
+        "gateway_wifi": "redaction-gateway-wifi-value",
+        "ssh_key": "ssh-ed25519 cmVkYWN0aW9uQXV0aG9yaXplZEtleQ== redaction-key",
+    }
+    _write_redaction_fleet(config, raw_values)
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
@@ -591,7 +647,7 @@ def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path
     )
 
     payload = bridge.prepare_flash_payload(
-        config="examples/three-node-field-mesh.yml",
+        config=str(config),
         node="gate01",
         device="/dev/disk4",
         base_image=str(image),
@@ -602,10 +658,9 @@ def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path
     assert payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
     assert payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
     assert payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
-    assert "strong-mesh-password-here" not in encoded
-    assert "local-ap-password" not in encoded
-    assert "replace-with-operator-wifi-password" not in encoded
-    assert "AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh" not in encoded
+    assert "<redacted>" in encoded
+    for raw_value in raw_values.values():
+        assert raw_value not in encoded
 
 
 def test_desktop_bridge_prepare_flash_streams_failure_result(monkeypatch, capsys):

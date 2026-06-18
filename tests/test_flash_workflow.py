@@ -21,6 +21,26 @@ def _options(tmp_path, **overrides):
     return flash.FlashOptions(**values)
 
 
+def _guard_flash_execution_steps(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("prepare_flash_workflow must not run flash execution steps")
+
+    monkeypatch.setattr(flash, "check_privileges", fail_if_called)
+    monkeypatch.setattr(flash, "flash_image", fail_if_called)
+    monkeypatch.setattr(flash, "inject", fail_if_called)
+    monkeypatch.setattr(flash, "finish_flash", fail_if_called)
+
+
+def _raw_provision_secrets(provision):
+    values = [
+        provision["mesh"]["password"],
+        provision["node"]["local_ap"]["password"],
+        provision["node"]["gateway"]["wifi"]["password"],
+        *provision["management"]["ssh_authorized_keys"],
+    ]
+    return {value for value in values if value}
+
+
 def test_flash_workflow_dry_run_emits_plan_before_complete(monkeypatch):
     events = []
     monkeypatch.setattr(flash, "check_platform", lambda: None)
@@ -59,7 +79,9 @@ def test_flash_workflow_serialization_redacts_provision_secrets(monkeypatch):
     )
 
     assert result.ok is True
-    assert result.provision["mesh"]["password"] == "strong-mesh-password-here"
+    raw_secrets = _raw_provision_secrets(result.provision)
+    assert raw_secrets
+    assert flash.REDACTED_VALUE not in raw_secrets
 
     serialized = json.dumps(result.to_dict(include_events=True))
     plan_event = next(event for event in events if event.event_type == "plan")
@@ -67,10 +89,8 @@ def test_flash_workflow_serialization_redacts_provision_secrets(monkeypatch):
     serialized_event = json.dumps(plan_event.to_dict())
 
     for payload in (serialized, serialized_event):
-        assert "strong-mesh-password-here" not in payload
-        assert "local-ap-password" not in payload
-        assert "replace-with-operator-wifi-password" not in payload
-        assert "AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh" not in payload
+        for raw_secret in raw_secrets:
+            assert raw_secret not in payload
         assert flash.REDACTED_VALUE in payload
 
 
@@ -81,14 +101,7 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
-
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("prepare_flash_workflow must not run flash execution steps")
-
-    monkeypatch.setattr(flash, "check_privileges", fail_if_called)
-    monkeypatch.setattr(flash, "flash_image", fail_if_called)
-    monkeypatch.setattr(flash, "inject", fail_if_called)
-    monkeypatch.setattr(flash, "finish_flash", fail_if_called)
+    _guard_flash_execution_steps(monkeypatch)
     monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         flash,
@@ -134,6 +147,7 @@ def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    _guard_flash_execution_steps(monkeypatch)
     monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         flash,
@@ -168,6 +182,7 @@ def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):
 def test_prepare_flash_workflow_missing_local_base_image_is_classified(tmp_path, monkeypatch):
     missing_image = tmp_path / "missing-openmanet.img.gz"
     monkeypatch.setattr(flash, "check_platform", lambda: None)
+    _guard_flash_execution_steps(monkeypatch)
 
     result = flash.prepare_flash_workflow(
         flash.FlashOptions(
@@ -189,6 +204,7 @@ def test_prepare_flash_workflow_exposes_effective_ssh_enabled(monkeypatch):
     monkeypatch.setattr(flash, "check_platform", lambda: None)
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    _guard_flash_execution_steps(monkeypatch)
     monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
 
     cases = [

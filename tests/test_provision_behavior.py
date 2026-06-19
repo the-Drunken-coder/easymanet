@@ -172,7 +172,9 @@ def _point_provision_json() -> dict:
 
 def _copy_api_overlay(prefix: Path) -> None:
     for relative in (
+        "usr/lib/easymanet/api-lib.sh",
         "usr/lib/easymanet/api.sh",
+        "usr/lib/easymanet/provision-lib.sh",
         "www/easymanet-api/v1/identity",
         "www/easymanet-api/v1/neighbors",
         "www/easymanet-api/v1/topology",

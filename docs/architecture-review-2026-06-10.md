@@ -52,7 +52,7 @@ welded to Typer (`typer.Exit`, `typer.secho`), so the desktop must
 emulate a terminal to reuse it. This also creates an
 `apps/desktop → apps/cli` import — an app depending on another app —
 which contradicts the layering described in `docs/monorepo.md`.
-`planning.md` lists "subprocess vs shared core library" as an open
+`docs/product-and-release-planning.md` lists "subprocess vs shared core library" as an open
 question; the implementation answered it by default, with the weaker
 option.
 
@@ -85,7 +85,7 @@ direction, and unlocks real progress display in the desktop app.
 which public repo," in different formats, in different places. A path
 added to one and not the other yields inconsistent public surfaces.
 This recreates, inside the monorepo, exactly the drift risk that
-`planning.md` warns about for public repos.
+`docs/product-and-release-planning.md` warns about for public repos.
 
 **Doc rot:** `docs/monorepo.md` still says public subrepositories are
 "intentionally not configured," but the `Publish Product Repos`
@@ -237,7 +237,7 @@ generated public-surface pyprojects are also produced by two generators
 subprocess vs shared core library for the desktop app, the
 copy-paste-`sudo` strategy for desktop flashing (bridge returns a
 `sudo_command` string instead of escalating in-app) — live scattered in
-`planning.md` and READMEs. The sudo decision in particular deserves a
+`docs/product-and-release-planning.md` and READMEs. The sudo decision in particular deserves a
 written rationale: it is a defensible local-first choice (no privileged
 helpers), but it is non-obvious and embeds `sys.executable` paths.
 

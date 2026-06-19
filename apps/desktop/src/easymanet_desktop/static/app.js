@@ -1,5 +1,5 @@
 // Controller for the EasyMANET operator console.
-// Markup builders live in render.js (EMRender); this file owns state and wiring.
+// Markup builders live in render.js (EMRender); this file owns UI workflow wiring.
 const {
   escapeHtml,
   formatBytes,
@@ -11,32 +11,21 @@ const {
   meshTopologyView,
 } = window.EMRender;
 
-const state = {
-  configPath: "",
-  nodeName: "",
-  diskDevice: "",
-  sudoCommand: "",
-  nodeLoadSeq: 0,
-  nodeRoles: {},
-  nodeAccess: {},
-  images: {},
-  imageLoadInFlight: false,
-  imageRefreshQueued: false,
-  diskSignature: "",
-  diskLoadInFlight: false,
-  flashBusy: false,
-  lastFlashOk: false,
-  meshBusy: false,
-  meshHasScanned: false,
-  meshNodes: [],
-  meshLinks: [],
-  flashSignature: "",
-  planSignature: "",
-  planImageSummary: "",
-  logLines: [],
-};
+const state = window.EMState;
+const { byId: $, detectMacPlatform } = window.EMDom;
+const { nativeApi, postJson, errorDetail, errorMessage, getState, getDisks } = window.EMApi;
+const { uniqueNodeNames, roleSshHint } = window.EMFleet;
+const { diskInventorySignature } = window.EMDisk;
+const {
+  normalizeSshMode,
+  sshModeLabel,
+  flashAccessHint: flashAccessHintForAccess,
+  imageReadinessSummary,
+  imagesFullyCached,
+  planImageSummary,
+} = window.EMFlashUi;
+const { emptyMeshMarkup } = window.EMMesh;
 
-const $ = (id) => document.getElementById(id);
 const workspacePath = $("workspace-path");
 const fleetFolder = $("fleet-folder");
 const fleetEmpty = $("fleet-empty");
@@ -100,7 +89,6 @@ const steps = {
 const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
 const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
-const nativeApi = window.easymanet || null;
 const isMac = detectMacPlatform();
 const diskWatchIntervalMs = 2500;
 let diskWatchTimer = null;
@@ -382,21 +370,6 @@ function renderDisksPayload(payload, signature = diskInventorySignature(payload.
   updateFlashControls();
 }
 
-function diskInventorySignature(diskRecords) {
-  return JSON.stringify(
-    [...diskRecords]
-      .map((disk) => ({
-        device: disk.device || "",
-        model: disk.model || "",
-        mounted: [...(disk.mounted || [])].sort(),
-        removable: Boolean(disk.removable),
-        size: disk.size_human || "",
-        warnings: [...(disk.warnings || [])].sort(),
-      }))
-      .sort((left, right) => left.device.localeCompare(right.device))
-  );
-}
-
 function renderValidation(payload) {
   validationOutput.hidden = false;
   validationOutput.className = `validation ${payload.ok ? "ok" : "bad"}`;
@@ -479,7 +452,7 @@ async function loadNodesForSelectedFleet(preferredNode = "") {
 }
 
 function renderNodeOptions(nodes, preferredNode = "", nodeRoles = {}, nodeAccess = {}) {
-  const uniqueNodes = [...new Set((nodes || []).map((node) => String(node).trim()).filter(Boolean))];
+  const uniqueNodes = uniqueNodeNames(nodes);
   state.nodeRoles = { ...nodeRoles };
   state.nodeAccess = { ...nodeAccess };
   nodeSelect.replaceChildren();
@@ -557,12 +530,7 @@ function renderMeshDiscovery(payload) {
     setMeshStatus(payload.ok ? "ok" : "warn", payload.ok ? `${nodes.length} nodes` : "partial results");
   } else {
     meshRadios.className = "mesh-grid";
-    meshRadios.innerHTML = `
-      <div class="empty-state slim">
-        <p class="empty-title">No topology found</p>
-        <p class="empty-meta">No EasyMANET gateway API answered.</p>
-      </div>
-    `;
+    meshRadios.innerHTML = emptyMeshMarkup("No topology found", "No EasyMANET gateway API answered.");
     setMeshStatus(payload.ok ? "subtle" : "bad", payload.ok ? "none found" : "error");
   }
 }
@@ -575,12 +543,7 @@ function resetMeshDiscovery() {
   meshSummary.hidden = true;
   meshSummary.innerHTML = "";
   meshRadios.className = "mesh-grid";
-  meshRadios.innerHTML = `
-    <div class="empty-state slim">
-      <p class="empty-title">No topology found</p>
-      <p class="empty-meta">Run Scan Mesh to refresh this view.</p>
-    </div>
-  `;
+  meshRadios.innerHTML = emptyMeshMarkup("No topology found", "Run Scan Mesh to refresh this view.");
   setMeshStatus("subtle", "idle");
 }
 
@@ -628,18 +591,11 @@ function flashPayload(options = {}) {
 function selectedSshMode() {
   const checked = document.querySelector("input[name='ssh-mode']:checked");
   const value = checked ? checked.value : "auto";
-  return value === "auto" ? "default" : value;
+  return normalizeSshMode(value);
 }
 
 function selectedSshLabel() {
-  const mode = selectedSshMode();
-  if (mode === "enable") {
-    return "On";
-  }
-  if (mode === "disable") {
-    return "Off";
-  }
-  return `Auto (${sshAutoHint.textContent || "role default"})`;
+  return sshModeLabel(selectedSshMode(), sshAutoHint.textContent || "role default");
 }
 
 function applyRoleDefaultSsh() {
@@ -658,12 +614,7 @@ function selectedNodeAccess(node = nodeSelect.value.trim()) {
 }
 
 function flashAccessHint(node, payload = {}) {
-  const access = selectedNodeAccess(node);
-  const address = access.management_ip || "10.41.254.1";
-  if ((payload.plan || {}).ssh_enabled === true) {
-    return `Connect Ethernet, then SSH to root@${address}.`;
-  }
-  return "Connect Ethernet to the node management port.";
+  return flashAccessHintForAccess(selectedNodeAccess(node), payload);
 }
 
 function updateRoleDefaultSsh() {
@@ -673,7 +624,7 @@ function updateRoleDefaultSsh() {
     nodeRoleChip.hidden = true;
     return;
   }
-  sshAutoHint.textContent = role === "gate" ? "on for gate" : `off for ${role}`;
+  sshAutoHint.textContent = roleSshHint(role);
   nodeRoleChip.textContent = role;
   nodeRoleChip.hidden = false;
 }
@@ -751,47 +702,18 @@ function updateFlashReview({ node, ready, needsPassword, label, tone }) {
   reviewNode.textContent = node || "Select a node";
   reviewDisk.textContent = state.diskDevice || "Select a disk";
   reviewSsh.textContent = selectedSshLabel();
-  reviewImage.textContent = state.planImageSummary || imageReadinessSummary();
+  reviewImage.textContent = state.planImageSummary || imageReadinessSummary(state.images);
   eraseWarning.hidden = !state.diskDevice;
   reviewStatus.textContent = label;
   reviewStatus.className = `chip ${tone}`;
   reviewNode.classList.toggle("pending", !node);
   reviewDisk.classList.toggle("pending", !state.diskDevice);
-  reviewImage.classList.toggle("pending", !state.planImageSummary && !imagesFullyCached());
+  reviewImage.classList.toggle("pending", !state.planImageSummary && !imagesFullyCached(state.images));
   reviewSsh.classList.remove("pending");
   if (ready && !needsPassword && !state.flashBusy) {
     reviewStatus.textContent = state.planImageSummary ? "reviewed" : "ready";
     reviewStatus.className = `chip ${state.planImageSummary ? "ok" : tone}`;
   }
-}
-
-function imageReadinessSummary() {
-  const entries = Object.entries(state.images || {});
-  if (!entries.length) {
-    return "No image targets found";
-  }
-  const missing = entries.filter(([, image]) => !image || !image.cached_path);
-  if (!missing.length) {
-    return entries.length === 1 ? "Image cache ready" : `${entries.length} image targets cached`;
-  }
-  const label = missing.length === 1 ? "target" : "targets";
-  return `${missing.length} image ${label} will download during preview or flash`;
-}
-
-function imagesFullyCached() {
-  const entries = Object.values(state.images || {});
-  return Boolean(entries.length) && entries.every((image) => image && image.cached_path);
-}
-
-function planImageSummary(payload) {
-  const image = payload.image || {};
-  const plan = payload.plan || {};
-  const imagePath = image.cached_path || plan.base_image || image.url || "";
-  const version = image.version ? ` ${image.version}` : "";
-  if (imagePath) {
-    return `Plan confirmed${version}: ${imagePath}`;
-  }
-  return "Plan confirmed exact image";
 }
 
 function updateDiskMode() {
@@ -864,12 +786,6 @@ function setBusy(busy) {
   state.flashBusy = busy;
   document.body.classList.toggle("flash-busy", busy);
   updateFlashControls();
-}
-
-function detectMacPlatform() {
-  const nav = window.navigator || {};
-  const platform = String(nav.userAgentData?.platform || nav.platform || nav.userAgent || "").toLowerCase();
-  return platform.includes("mac");
 }
 
 function setFlashStatus(tone, message) {
@@ -1052,66 +968,6 @@ function renderFlash(payload) {
   updateCopyFlashLogVisibility();
 }
 
-async function getJson(url) {
-  if (nativeApi && url === "/api/state") {
-    return nativeApi.getState();
-  }
-  return fetchJson(url);
-}
-
-async function postJson(url, body) {
-  if (nativeApi && url === "/api/validate") {
-    return nativeApi.validate(body);
-  }
-  if (nativeApi && nativeApi.discoverMesh && url === "/api/mesh/discover") {
-    return nativeApi.discoverMesh(body);
-  }
-  return fetchJson(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-async function fetchJson(url, options) {
-  let response;
-  try {
-    response = await fetch(url, options);
-  } catch (error) {
-    throw new Error(`Request failed for ${url}: ${error.message}`);
-  }
-
-  const text = await response.text();
-  let payload = {};
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`Invalid JSON from ${url}: ${error.message}`);
-    }
-  }
-
-  if (!response.ok) {
-    const detail = errorDetail(payload) || text;
-    const suffix = detail ? ` - ${detail}` : "";
-    throw new Error(`Request failed for ${url}: ${response.status} ${response.statusText}${suffix}`);
-  }
-  return payload;
-}
-
-function errorDetail(payload) {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-  if (payload.error) {
-    return payload.error;
-  }
-  if (Array.isArray(payload.errors)) {
-    return payload.errors.join(", ");
-  }
-  return "";
-}
-
 function handleRefreshError(error) {
   console.error("Refresh failed", error);
   renderStateError(error);
@@ -1153,22 +1009,6 @@ function handleNodeLoadError(error) {
   resetNodeSelect("Could not load nodes");
   renderValidation({ ok: false, errors: [errorMessage(error)] });
   updateFlashControls();
-}
-
-function errorMessage(error) {
-  return error && error.message ? error.message : String(error);
-}
-
-async function getState() {
-  return getJson("/api/state");
-}
-
-async function getDisks(includeAll) {
-  if (nativeApi) {
-    return nativeApi.getDisks(includeAll);
-  }
-  const suffix = includeAll ? "?all=1" : "";
-  return getJson(`/api/disks${suffix}`);
 }
 
 updateRoleDefaultSsh();

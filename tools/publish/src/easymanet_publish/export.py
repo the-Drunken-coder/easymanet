@@ -145,13 +145,13 @@ def _repo_root() -> Path:
     for candidate in (cwd, *cwd.parents):
         if (
             (candidate / "pyproject.toml").exists()
-            and (candidate / "planning.md").exists()
+            and (candidate / "docs" / "monorepo.md").exists()
             and (candidate / "packages" / "core").exists()
         ):
             return candidate
     raise RuntimeError(
         "Could not locate the EasyMANET repo root from "
-        f"{module_path}; checked for pyproject.toml, planning.md, and packages/core."
+        f"{module_path}; checked for pyproject.toml, docs/monorepo.md, and packages/core."
     )
 
 

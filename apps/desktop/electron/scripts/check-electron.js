@@ -7,10 +7,25 @@ const { hasTraversalSegment, resolveConfigPath } = require("../path-utils");
 const repoRoot = path.resolve(__dirname, "../../../..");
 const files = [
   path.join(repoRoot, "apps/desktop/electron/main.js"),
+  path.join(repoRoot, "apps/desktop/electron/bridge-process.js"),
+  path.join(repoRoot, "apps/desktop/electron/constants.js"),
+  path.join(repoRoot, "apps/desktop/electron/elevated-flash.js"),
+  path.join(repoRoot, "apps/desktop/electron/environment.js"),
+  path.join(repoRoot, "apps/desktop/electron/ipc.js"),
   path.join(repoRoot, "apps/desktop/electron/path-utils.js"),
   path.join(repoRoot, "apps/desktop/electron/preload.js"),
+  path.join(repoRoot, "apps/desktop/electron/stream.js"),
+  path.join(repoRoot, "apps/desktop/electron/util.js"),
+  path.join(repoRoot, "apps/desktop/electron/validation.js"),
+  path.join(repoRoot, "apps/desktop/electron/window.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/index.html"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/api.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/app.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/disk.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/flash-ui.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/fleet.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/mesh.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/state.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/styles.css"),
 ];
 
@@ -18,6 +33,16 @@ for (const file of files) {
   if (!fs.existsSync(file)) {
     console.error(`Missing required Electron file: ${file}`);
     process.exit(1);
+  }
+}
+
+for (const file of files.filter((candidate) => candidate.endsWith(".js"))) {
+  const syntax = spawnSync(process.execPath, ["--check", file], {
+    encoding: "utf8",
+  });
+  if (syntax.status !== 0) {
+    console.error(syntax.stderr || syntax.stdout || `Syntax check failed for ${file}`);
+    process.exit(syntax.status || 1);
   }
 }
 

@@ -8,8 +8,20 @@ import pytest
 
 def test_desktop_renderer_state_flows_use_bridge_payloads():
     root = Path(__file__).resolve().parents[1]
-    render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
-    app_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "app.js"
+    static = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static"
+    scripts = [
+        static / name
+        for name in (
+            "render.js",
+            "state.js",
+            "api.js",
+            "fleet.js",
+            "disk.js",
+            "flash-ui.js",
+            "mesh.js",
+            "app.js",
+        )
+    ]
     script = """
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -220,8 +232,9 @@ const context = {
 };
 context.globalThis = context;
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
-vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
+for (const scriptPath of process.argv.slice(1)) {
+  vm.runInContext(fs.readFileSync(scriptPath, "utf8"), context);
+}
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -289,7 +302,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         pytest.skip("Node.js is required for desktop renderer VM tests")
 
     result = subprocess.run(  # noqa: S603 - fixed executable and repo-local script inputs
-        [node_exe, "-e", script, str(render_js), str(app_js)],
+        [node_exe, "-e", script, *map(str, scripts)],
         capture_output=True,
         check=True,
         text=True,

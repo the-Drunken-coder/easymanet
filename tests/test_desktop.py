@@ -858,13 +858,35 @@ def test_desktop_bridge_flash_uses_core_internal_result(monkeypatch, capsys):
 def test_desktop_static_supports_electron_and_http_modes():
     root = Path(__file__).resolve().parents[1]
     index = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "index.html"
-    app_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "app.js"
-    render_js = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "render.js"
-    styles = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "styles.css"
+    static = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static"
+    app_js = static / "app.js"
+    render_js = static / "render.js"
+    styles = static / "styles.css"
 
     assert 'href="styles.css"' in index.read_text()
-    assert 'src="app.js"' in index.read_text()
-    text = app_js.read_text()
+    for script in (
+        "render.js",
+        "state.js",
+        "api.js",
+        "fleet.js",
+        "disk.js",
+        "flash-ui.js",
+        "mesh.js",
+        "app.js",
+    ):
+        assert f'src="{script}"' in index.read_text()
+    text = "\n".join(
+        (static / name).read_text()
+        for name in (
+            "state.js",
+            "api.js",
+            "fleet.js",
+            "disk.js",
+            "flash-ui.js",
+            "mesh.js",
+            "app.js",
+        )
+    )
     assert "window.easymanet" in text
     assert "nativeApi.getState" in text
     assert "nativeApi.chooseConfig" in text
@@ -1004,59 +1026,76 @@ def test_electron_shell_files_exist():
 
     assert (electron / "package.json").exists()
     assert (electron / "electron-builder.yml").exists()
-    assert (electron / "main.js").exists()
-    assert (electron / "path-utils.js").exists()
-    assert (electron / "preload.js").exists()
+    for module in (
+        "main.js",
+        "bridge-process.js",
+        "constants.js",
+        "elevated-flash.js",
+        "environment.js",
+        "ipc.js",
+        "path-utils.js",
+        "preload.js",
+        "stream.js",
+        "util.js",
+        "validation.js",
+        "window.js",
+    ):
+        assert (electron / module).exists()
     assert bridge_runner.exists()
-    assert "loadFile(indexHtmlPath())" in (electron / "main.js").read_text()
+    electron_text = "\n".join(path.read_text() for path in electron.glob("*.js"))
+    main_text = (electron / "main.js").read_text()
+    assert "registerIpc()" in main_text
+    assert "createWindow()" in main_text
+    assert "loadFile(indexHtmlPath())" in (electron / "window.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
-    assert "easymanet:open-fleets-folder" in (electron / "main.js").read_text()
-    assert "easymanet:mesh-discover" in (electron / "main.js").read_text()
-    assert "easymanet:flash-plan" in (electron / "main.js").read_text()
-    assert "easymanet:flash" in (electron / "main.js").read_text()
-    assert "easymanet:flash-event" in (electron / "main.js").read_text()
-    assert "resolveConfigPath(config, {" in (electron / "main.js").read_text()
-    assert "fleetPathCandidates" not in (electron / "main.js").read_text()
-    assert "fleetExtensions" not in (electron / "main.js").read_text()
+    assert "easymanet:open-fleets-folder" in electron_text
+    assert "easymanet:mesh-discover" in electron_text
+    assert "easymanet:flash-plan" in electron_text
+    assert "easymanet:flash" in electron_text
+    assert "easymanet:flash-event" in electron_text
+    assert "resolveConfigPath(config, {" in electron_text
+    assert "fleetPathCandidates" not in electron_text
+    assert "fleetExtensions" not in electron_text
     path_utils_text = (electron / "path-utils.js").read_text()
     assert "resolveConfigPath" in path_utils_text
     assert "hasTraversalSegment" in path_utils_text
     assert "resolve-config" in path_utils_text
     assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
-    assert "flashBridgeTimeoutMs" in (electron / "main.js").read_text()
-    assert "runBridgeStreaming" in (electron / "main.js").read_text()
-    assert "fullStdout" in (electron / "main.js").read_text()
-    assert "isDestroyed" in (electron / "main.js").read_text()
-    assert "runFlashWithAdministratorPrivileges" in (electron / "main.js").read_text()
-    assert '"sudo"' in (electron / "main.js").read_text()
-    assert '"-S"' in (electron / "main.js").read_text()
-    assert "stageElevatedFlashInputs" in (electron / "main.js").read_text()
-    assert "fs.chmodSync(configPath, 0o600)" in (electron / "main.js").read_text()
-    assert "baseImageArgs(stagedImage)" in (electron / "main.js").read_text()
+
+    assert "flashBridgeTimeoutMs" in electron_text
+    assert "runBridgeStreaming" in electron_text
+    assert "fullStdout" in electron_text
+    assert "isDestroyed" in electron_text
+    assert "runFlashWithAdministratorPrivileges" in electron_text
+    assert '"sudo"' in electron_text
+    assert '"-S"' in electron_text
+    assert "stageElevatedFlashInputs" in electron_text
+    assert "fs.chmodSync(configPath, 0o600)" in electron_text
+    assert "baseImageArgs(stagedImage)" in electron_text
     assert '"prepare-flash"' in bridge_text
-    assert '"prepare-flash"' in (electron / "main.js").read_text()
+    assert '"prepare-flash"' in electron_text
     assert '"ensure-image"' not in bridge_text
-    assert "ensureCachedImageForElevatedFlash" not in (electron / "main.js").read_text()
-    assert '"ensure-image"' not in (electron / "main.js").read_text()
-    assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in (electron / "main.js").read_text()
-    assert "const effectiveTimeoutMs = timeoutMs + 60000" in (electron / "main.js").read_text()
-    assert "after ${effectiveTimeoutMs / 1000}s" in (electron / "main.js").read_text()
-    assert "EasyMANET Flash Helper.app" not in (electron / "main.js").read_text()
-    assert 'spawn(sudo.command, sudo.args' in (electron / "main.js").read_text()
-    assert "Mac administrator password is required for flashing" in (electron / "main.js").read_text()
-    assert "with administrator privileges" not in (electron / "main.js").read_text()
-    assert 'spawn("osascript"' not in (electron / "main.js").read_text()
-    assert "streamEvents" not in (electron / "main.js").read_text()
+    assert "ensureCachedImageForElevatedFlash" not in electron_text
+    assert '"ensure-image"' not in electron_text
+    assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in electron_text
+    assert "const effectiveTimeoutMs = timeoutMs + 60000" in electron_text
+    assert "after ${effectiveTimeoutMs / 1000}s" in electron_text
+    assert "EasyMANET Flash Helper.app" not in electron_text
+    assert 'spawn(sudo.command, sudo.args' in electron_text
+    assert "Mac administrator password is required for flashing" in electron_text
+    assert "with administrator privileges" not in electron_text
+    assert 'spawn("osascript"' not in electron_text
+    assert "streamEvents" not in electron_text
     assert "copyText" in (electron / "preload.js").read_text()
     assert "discoverMesh" in (electron / "preload.js").read_text()
     assert "onFlashEvent" in (electron / "preload.js").read_text()
-    assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in (electron / "main.js").read_text()
-    assert "bridgeTimeoutMs" in (electron / "main.js").read_text()
-    assert "meshBridgeTimeoutMs" in (electron / "main.js").read_text()
-    assert "process.resourcesPath" in (electron / "main.js").read_text()
-    assert "desktop-static" in (electron / "main.js").read_text()
-    assert "EASYMANET_BRIDGE_BIN is a development/testing override" in (electron / "main.js").read_text()
-    assert "EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE" in (electron / "main.js").read_text()
+    assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in electron_text
+    assert "bridgeTimeoutMs" in electron_text
+    assert "meshBridgeTimeoutMs" in electron_text
+    assert "process.resourcesPath" in electron_text
+    assert "desktop-static" in electron_text
+    assert "EASYMANET_BRIDGE_BIN is a development/testing override" in electron_text
+    assert "EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE" in electron_text
     assert "build:backend" in (electron / "package.json").read_text()
     assert "electron-builder" in (electron / "package.json").read_text()
     runner_text = bridge_runner.read_text()

@@ -9,17 +9,18 @@ publish/export tooling.
 | Path | Role |
 | --- | --- |
 | `packages/core/src/easymanet/` | Shared fleet parsing, validation, rendering, disk safety, flashing, injection, image cache, and diagnostics primitives. |
-| `apps/cli/src/easymanet_cli/` | Installable CLI surface. The `easymanet` command points here. |
-| `packages/image/src/easymanet_image/` | OpenMANET image build commands and release metadata generation. |
-| `images/openmanet/provisioning/` | OpenWrt overlay files and extra package list used by firmware builds. |
-| `apps/desktop/electron/` | Local Electron shell that loads UI files from disk and uses preload IPC for filesystem-backed operations. |
-| `apps/desktop/src/easymanet_desktop/` | Shared desktop UI assets, JSON bridge, and browser-served fallback console. |
+| `apps/cli/src/easymanet_cli/` | Installable CLI surface. The `easymanet` command and Typer command registration live here. |
+| `packages/image/src/easymanet_image/` | OpenMANET image build and release metadata logic. |
+| `images/openmanet/provisioning/` | OpenWrt overlay entry scripts, sourced `/usr/lib/easymanet/*.sh` helpers, and extra package list used by firmware builds. |
+| `apps/desktop/electron/` | Local Electron shell modules for app/window bootstrap, preload IPC, bridge execution, elevated flash staging, stream parsing, and packaged path resolution. |
+| `apps/desktop/src/easymanet_desktop/` | Shared desktop UI modules, JSON bridge, and browser-served fallback console. |
 | `tools/publish/src/easymanet_publish/` | Local export tooling for generated public product surfaces. |
 
-The monorepo does not keep legacy module aliases. Import from the explicit
-surface that owns the behavior: `easymanet_cli`, `easymanet_image`,
-`easymanet_desktop`, `easymanet_publish`, or shared core modules under
-`easymanet`.
+Import from the explicit surface that owns the behavior: `easymanet_cli`,
+`easymanet_image`, `easymanet_desktop`, `easymanet_publish`, or shared core
+modules under `easymanet`. Compatibility imports may remain when public tests
+or downstream users already rely on them, but new ownership should follow the
+surface boundaries above.
 
 ## Product Surfaces
 

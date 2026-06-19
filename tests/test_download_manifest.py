@@ -1,4 +1,4 @@
-from easymanet import download
+from easymanet import _download_release, download
 
 
 def test_github_release_prefers_image_release_manifest(monkeypatch):
@@ -25,8 +25,8 @@ def test_github_release_prefers_image_release_manifest(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(download, "_fetch_github_release", lambda _repo: release)
-    monkeypatch.setattr(download, "_fetch_release_manifest", lambda _url: manifest)
+    monkeypatch.setattr(_download_release, "_fetch_github_release", lambda _repo: release)
+    monkeypatch.setattr(_download_release, "_fetch_release_manifest", lambda _url: manifest)
 
     ref = download._check_github_release("owner/repo", "rpi4-mm6108-spi")
 

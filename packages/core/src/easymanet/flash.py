@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,8 +62,8 @@ def resolve_base_image(
     no_download: bool,
     dry_run: bool,
     *,
-    emit=None,
-):
+    emit: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[str, dict[str, Any], list[str]]:
     return _resolve_base_image(
         target,
         base_image,

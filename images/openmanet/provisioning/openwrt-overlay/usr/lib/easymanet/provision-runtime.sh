@@ -133,6 +133,7 @@ configure_easymanet_api() {
         uci_add_list uhttpd.easymanet_api.listen_http="$NODE_IP:$EM_EASYMANET_API_PORT"
     fi
     uci_commit uhttpd
+    # provision.sh reads this after network restart to decide whether to start uhttpd.
     EASYMANET_API_CONFIGURED=1
 }
 

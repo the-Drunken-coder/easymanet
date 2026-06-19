@@ -107,8 +107,6 @@ function sendBridgeFlashEvent(webContents, payload) {
   }
 }
 
-async
-
 module.exports = {
   bridgeEventOutputLine,
   parseBridgeJsonOutput,

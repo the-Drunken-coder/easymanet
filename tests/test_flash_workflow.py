@@ -94,6 +94,21 @@ def test_flash_workflow_serialization_redacts_provision_secrets(monkeypatch):
         assert flash.REDACTED_VALUE in payload
 
 
+def test_flash_event_preserves_caller_provision_display():
+    event = flash.FlashEvent(
+        "plan",
+        data={
+            "provision": {"mesh": {"password": "secret"}},
+            "provision_display": "caller-rendered display",
+        },
+    )
+
+    payload = event.to_dict()
+
+    assert payload["provision"]["mesh"]["password"] == flash.REDACTED_VALUE
+    assert payload["provision_display"] == "caller-rendered display"
+
+
 def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
     image_path = tmp_path / "openmanet.img.gz"
     events = []

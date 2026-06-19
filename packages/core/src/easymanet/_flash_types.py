@@ -55,7 +55,7 @@ class FlashEvent:
         data = dict(self.data)
         if isinstance(data.get("provision"), dict):
             data["provision"] = redact_provision_for_display(data["provision"])
-            if "provision_display" in data:
+            if "provision_display" not in data:
                 data["provision_display"] = render_provision_for_display(data["provision"])
         payload = {
             "type": "event",

@@ -875,7 +875,6 @@ def test_desktop_static_supports_electron_and_http_modes():
         "app.js",
     ):
         assert f'src="{script}"' in index.read_text()
-    assert 'src="app.js"' in index.read_text()
     text = "\n".join(
         (static / name).read_text()
         for name in (

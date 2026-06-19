@@ -41,12 +41,8 @@ def register_image_commands(image_app: typer.Typer) -> None:
         set_sha256: Optional[str] = typer.Option(
             None, "--set-sha256", help="Set the expected SHA-256 checksum"
         ),
-        show: bool = typer.Option(
-            False, "--show", help="Show current image config"
-        ),
     ):
         """Manage base image download URLs and cache."""
-        del show
         if ctx.invoked_subcommand:
             return
 

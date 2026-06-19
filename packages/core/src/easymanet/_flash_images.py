@@ -193,7 +193,7 @@ def flash_image_details(*, config: str, node: str) -> dict[str, Any]:
             }
         )
         if latest.sha256:
-            cached = get_cached_image(target, latest.sha256, latest.url)
+            cached = get_cached_image(target, sha256=latest.sha256, url=latest.url)
             details["cached_path"] = str(cached) if cached else ""
     return details
 

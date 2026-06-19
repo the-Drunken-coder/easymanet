@@ -394,7 +394,15 @@ def test_image_build_chains_build_error(monkeypatch):
 
 
 def test_image_cli_compatibility_shim_exposes_register_command():
+    import easymanet_image.cli as shim
     from easymanet_image.cli import register_image_commands as shim_register
     from easymanet_cli.image import register_image_commands
 
     assert shim_register is register_image_commands
+    for name in (
+        "maybe_show_update_notice",
+        "get_image_config",
+        "get_cached_image",
+        "build_image",
+    ):
+        assert hasattr(shim, name)

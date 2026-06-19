@@ -34,7 +34,6 @@ from ._download_integrity import (
     verify_image_sha256,
 )
 from ._download_release import (
-    IMAGE_RELEASE_MANIFEST_ASSETS,
     ImageRef,
     _GITHUB_API_ERRORS,
     _candidate_checksum_assets,
@@ -155,45 +154,6 @@ def check_latest_version(target: str) -> Optional[ImageRef]:
 
     github_repo = info.get("github") or DEFAULT_IMAGE_GITHUB_REPO
     return _check_github_release(github_repo, target)
-
-
-def _check_github_release(repo: str, target: str) -> Optional[ImageRef]:
-    release = _fetch_github_release(repo)
-    if not release:
-        return None
-    manifest_result = _pick_manifest_release_asset(release, target)
-    if manifest_result:
-        return manifest_result
-    result = _pick_release_asset(release, target)
-    if not result:
-        version = release.get("tag_name", "unknown")
-        _debug_note(
-            f"No matching sysupgrade image for target '{target}' in {repo} release {version}. "
-            f"Expected asset like openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
-        )
-    return result
-
-
-def _pick_manifest_release_asset(release: dict, target: str) -> Optional[ImageRef]:
-    assets = release.get("assets", [])
-    for asset in assets:
-        if asset.get("name") not in IMAGE_RELEASE_MANIFEST_ASSETS:
-            continue
-        manifest_url = asset.get("browser_download_url")
-        if not manifest_url:
-            continue
-        manifest = _fetch_release_manifest(manifest_url)
-        if not manifest:
-            continue
-        ref = _image_ref_from_release_manifest(
-            manifest,
-            assets,
-            target,
-            release_version=str(release.get("tag_name", "") or ""),
-        )
-        if ref:
-            return ref
-    return None
 
 
 def download_image(

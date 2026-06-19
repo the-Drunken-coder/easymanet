@@ -36,6 +36,8 @@ generated_at() {
     date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date
 }
 
+# Node accessors require json_val from provision-lib.sh. The api.sh entrypoint
+# must source provision-lib.sh before api-lib.sh.
 node_name() {
     json_val node name
 }

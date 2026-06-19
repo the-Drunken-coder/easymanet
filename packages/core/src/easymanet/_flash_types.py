@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from ._flash_display import redact_provision_for_display, render_provision_for_display
+
 
 class FlashErrorCode(str, Enum):
     OK = "ok"
@@ -50,13 +52,18 @@ class FlashEvent:
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        data = dict(self.data)
+        if isinstance(data.get("provision"), dict):
+            data["provision"] = redact_provision_for_display(data["provision"])
+            if "provision_display" in data:
+                data["provision_display"] = render_provision_for_display(data["provision"])
         payload = {
             "type": "event",
             "event_type": self.event_type,
             "level": self.level,
             "message": self.message,
         }
-        payload.update(self.data)
+        payload.update(data)
         return payload
 
 
@@ -78,7 +85,18 @@ class FlashResult:
     dry_run_info: str = ""
     inject_results: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self, *, include_events: bool = False) -> dict[str, Any]:
+    def to_dict(
+        self,
+        *,
+        include_events: bool = False,
+        include_secrets: bool = False,
+    ) -> dict[str, Any]:
+        provision = dict(self.provision)
+        provision_display = self.provision_display
+        if not include_secrets:
+            provision = redact_provision_for_display(provision)
+            if provision:
+                provision_display = render_provision_for_display(provision)
         payload: dict[str, Any] = {
             "ok": self.ok,
             "exit_code": self.exit_code,
@@ -90,8 +108,8 @@ class FlashResult:
             "device": self.device,
             "image": self.image,
             "plan": self.plan,
-            "provision": self.provision,
-            "provision_display": self.provision_display,
+            "provision": provision,
+            "provision_display": provision_display,
             "dry_run_info": self.dry_run_info,
             "inject_results": self.inject_results,
             "sudo_command": "",

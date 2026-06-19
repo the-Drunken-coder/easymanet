@@ -3,22 +3,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { flashBridgeTimeoutMs, repoRoot } = require("./constants");
 const { elevatedBridgeCommand, elevatedBridgeEnv, elevatedTempRoot, sudoBridgeCommand } = require("./environment");
-const { runBridge, runBridgeStreaming } = require("./bridge-process");
+const { runBridgeStreaming } = require("./bridge-process");
 const { parseElevatedBridgeOutput, processBridgeStreamBuffer, processBridgeStreamLine, sendBridgeFlashEvent } = require("./stream");
 const { flashArgs } = require("./validation");
 
 async function runFlashWithAdministratorPrivileges(validated, options = {}) {
-  let plan = await runBridge(["flash-plan", ...flashArgs(validated)], {
+  const prepared = await runBridgeStreaming(["prepare-flash", ...flashArgs(validated)], {
     timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
+    webContents: options.webContents,
   });
-  if (!plan.ok) {
-    return plan;
+  if (!prepared.ok) {
+    return prepared;
   }
-  const ensured = await ensureCachedImageForElevatedFlash(validated, plan, options);
-  if (ensured.ok === false) {
-    return ensured;
-  }
-  plan = ensured;
   sendBridgeFlashEvent(options.webContents, {
     type: "event",
     event_type: "auth_required",
@@ -27,41 +23,15 @@ async function runFlashWithAdministratorPrivileges(validated, options = {}) {
   });
   let stage = null;
   try {
-    stage = stageElevatedFlashInputs(validated, plan);
+    stage = stageElevatedFlashInputs(validated, prepared);
     const stagedPayload = {...validated, config: stage.configPath};
-    const stagedImage = stage.imagePath ? {...plan.image, cached_path: stage.imagePath} : plan.image || {};
+    const stagedImage = stage.imagePath ? {...prepared.image, cached_path: stage.imagePath} : prepared.image || {};
     const args = ["flash", ...flashArgs(stagedPayload), "--yes", ...baseImageArgs(stagedImage)];
     return await runBridgeWithAdministratorPrivileges(args, {...options, stage});
   } catch (error) {
     cleanupElevatedStage(stage);
     return {ok: false, errors: [error.message]};
   }
-}
-
-async function ensureCachedImageForElevatedFlash(validated, plan, options = {}) {
-  const image = plan.image || {};
-  const imagePath = String(image.cached_path || image.path || "");
-  if (imagePath && !imagePath.startsWith("<")) {
-    return plan;
-  }
-  if (!image.url || !image.sha256) {
-    return plan;
-  }
-
-  const result = await runBridgeStreaming(["ensure-image", "--config", validated.config, "--node", validated.node], {
-    timeoutMs: options.timeoutMs || flashBridgeTimeoutMs,
-    webContents: options.webContents,
-  });
-  if (!result.ok) {
-    return result;
-  }
-  return {
-    ...plan,
-    image: {
-      ...image,
-      ...(result.image || {}),
-    },
-  };
 }
 
 function runBridgeWithAdministratorPrivileges(args, options = {}) {
@@ -239,7 +209,6 @@ function baseImageArgs(image) {
 module.exports = {
   baseImageArgs,
   cleanupElevatedStage,
-  ensureCachedImageForElevatedFlash,
   runBridgeWithAdministratorPrivileges,
   runFlashWithAdministratorPrivileges,
   stageElevatedFlashInputs,

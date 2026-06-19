@@ -48,8 +48,6 @@ function runBridgeStreaming(args, options = {}) {
   });
 }
 
-async
-
 function runBridgeProcess(args, handlers) {
   return new Promise((resolve) => {
     let bridge;

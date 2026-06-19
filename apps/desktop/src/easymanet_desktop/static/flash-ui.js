@@ -16,8 +16,7 @@
 
   function flashAccessHint(access = {}, payload = {}) {
     const address = access.management_ip || "10.41.254.1";
-    const sshNote = String((payload.plan || {}).ssh || "").toLowerCase();
-    if (sshNote.startsWith("yes")) {
+    if ((payload.plan || {}).ssh_enabled === true) {
       return `Connect Ethernet, then SSH to root@${address}.`;
     }
     return "Connect Ethernet to the node management port.";

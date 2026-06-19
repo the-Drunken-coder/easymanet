@@ -22,6 +22,19 @@ def resolve_flash_ssh_enabled(
     return None
 
 
+def effective_flash_ssh_enabled(
+    role: str,
+    *,
+    enable_ssh: bool,
+    disable_ssh: bool,
+) -> bool:
+    if disable_ssh:
+        return False
+    if enable_ssh:
+        return True
+    return role == "gate"
+
+
 def flash_ssh_note(
     role: str,
     *,

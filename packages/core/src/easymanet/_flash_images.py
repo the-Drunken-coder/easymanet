@@ -51,9 +51,15 @@ def resolve_base_image(
             ) from exc
 
     if base_image:
+        base_image_path = Path(base_image)
+        if not base_image_path.is_file():
+            raise FlashWorkflowError(
+                FlashErrorCode.IMAGE,
+                f"Base image not found: {base_image}",
+            )
         if normalized_sha256:
             try:
-                verify_image_sha256_fn(Path(base_image), normalized_sha256)
+                verify_image_sha256_fn(base_image_path, normalized_sha256)
             except OSError as exc:
                 raise FlashWorkflowError(
                     FlashErrorCode.IMAGE,
@@ -61,7 +67,7 @@ def resolve_base_image(
                 ) from exc
         else:
             warnings.append("Warning: local --base-image was not verified with --image-sha256.")
-        return base_image, image_payload(path=base_image, sha256=normalized_sha256), warnings
+        return str(base_image_path), image_payload(path=str(base_image_path), sha256=normalized_sha256), warnings
 
     if image_url:
         if not normalized_sha256:

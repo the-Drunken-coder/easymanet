@@ -11,9 +11,9 @@ from easymanet_cli.image import register_image_commands
 from easymanet_image.build import build_image
 
 __all__ = [
-    "register_image_commands",
-    "maybe_show_update_notice",
-    "get_image_config",
-    "get_cached_image",
     "build_image",
+    "get_cached_image",
+    "get_image_config",
+    "maybe_show_update_notice",
+    "register_image_commands",
 ]

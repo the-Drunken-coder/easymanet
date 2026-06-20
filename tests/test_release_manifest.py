@@ -16,6 +16,7 @@ def test_build_release_manifest_records_artifact_and_provenance(tmp_path):
         board="ekh-bcm2711",
         channel="stable",
         source_ref="abc123",
+        public_repo="the-Drunken-coder/easymanet-images",
     )
 
     assert manifest["schema_version"] == 2

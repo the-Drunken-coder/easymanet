@@ -1,5 +1,7 @@
 #!/bin/sh
 # Shared EasyMANET node status, support-code, and HDMI text helpers.
+# Requires provision-lib.sh, api-lib.sh, and PROVISION_JSON to be initialized by
+# the caller; this file is intentionally a small sourced library, not a daemon.
 
 : "${EASYMANET_STATUS_SCHEMA:=1}"
 : "${EASYMANET_INTERNET_TARGETS:=1.1.1.1 8.8.8.8}"
@@ -77,6 +79,12 @@ status_warnings_json() {
     internet_ok="$3"
     manageable_ok="$4"
     missing_count="$5"
+    case "$neighbor_count" in
+        ""|*[!0-9]*) neighbor_count=0 ;;
+    esac
+    case "$missing_count" in
+        ""|*[!0-9]*) missing_count=0 ;;
+    esac
     first=1
     printf '['
     status_add_warning() {

@@ -186,7 +186,11 @@ def test_diagnostics_run_command_exits_nonzero_on_failure(monkeypatch):
 
     def fake_run_diagnostics(config=""):
         del config
-        return {"ok": False, "summary": "EasyMANET Diagnostics\nSupport code: EM-API-DOWN\n"}
+        return {
+            "ok": False,
+            "summary": "EasyMANET Diagnostics\nSupport code: EM-API-DOWN\n",
+            "errors": ["node API unavailable"],
+        }
 
     monkeypatch.setattr(cli_app, "run_diagnostics", fake_run_diagnostics)
 
@@ -194,6 +198,7 @@ def test_diagnostics_run_command_exits_nonzero_on_failure(monkeypatch):
 
     assert result.exit_code == 1
     assert "EM-API-DOWN" in result.output
+    assert "node API unavailable" in result.output
 
 
 def test_diagnostics_bundle_command_prints_bundle_path(tmp_path, monkeypatch):

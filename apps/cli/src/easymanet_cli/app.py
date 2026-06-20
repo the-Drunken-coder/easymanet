@@ -50,6 +50,9 @@ def diagnostics_run_cmd(
     payload = run_diagnostics(config=config)
     if payload.get("summary"):
         typer.echo(payload["summary"])
+    if not payload.get("ok"):
+        for error in payload.get("errors", []):
+            typer.secho(f"Error: {error}", fg=typer.colors.RED)
     raise typer.Exit(0 if payload.get("ok") else 1)
 
 

@@ -25,6 +25,7 @@ from .workspace import diagnostics_dir, ensure_workspace, resolve_fleet_config, 
 API_PORT = 10411
 HTTP_TIMEOUT_SECONDS = 2
 STATUS_TIMEOUT_SECONDS = 6
+TOPOLOGY_TIMEOUT_SECONDS = 12
 MAX_RESPONSE_BYTES = 1_000_000
 SUPPORT_SCHEMA_VERSION = 1
 COMMON_GATEWAY_HOSTS = ("10.41.254.1", "openmanet.local", "easymanet.local")
@@ -121,7 +122,7 @@ def run_diagnostics(*, config: str = "") -> dict[str, Any]:
         }
         role = _payload_role(identity.payload) or candidate.get("role", "")
         if not topology and role == "gate":
-            top = fetch_node_api(host, "topology", timeout=12)
+            top = fetch_node_api(host, "topology", timeout=TOPOLOGY_TIMEOUT_SECONDS)
             if top.ok:
                 topology = top.payload
 
@@ -389,7 +390,7 @@ def _safe_name(value: str) -> str:
 
 def _is_secret_key(key: str) -> bool:
     lowered = key.lower()
-    return lowered in SECRET_KEYS or any(part in lowered for part in ("password", "secret", "private_key", "token"))
+    return lowered in SECRET_KEYS or any(part in lowered for part in ("password", "passphrase", "secret", "private_key", "token", "psk", "key"))
 
 
 def _redact_text(text: str) -> str:

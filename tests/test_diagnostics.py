@@ -44,6 +44,7 @@ def test_run_diagnostics_collects_status_and_summary(monkeypatch):
     assert "Node gate01" in payload["summary"]
     assert payload["topology"]["nodes"][0]["name"] == "gate01"
     assert observed_timeouts["status"] == diagnostics.STATUS_TIMEOUT_SECONDS
+    assert observed_timeouts["topology"] == diagnostics.TOPOLOGY_TIMEOUT_SECONDS
 
 
 def test_export_support_bundle_writes_zip_layout_and_redacts(tmp_path, monkeypatch):
@@ -197,13 +198,17 @@ def test_diagnostics_support_code_reports_missing_configured_node():
 
 def test_redact_value_removes_obvious_secret_fields():
     value = {
-        "mesh": {"password": "secret"},
-        "gateway": {"wifi": {"password": "wifi-secret"}},
+        "mesh": {"password": "secret", "mesh_psk": "psk-secret"},
+        "gateway": {"wifi": {"password": "wifi-secret", "wifi_passphrase": "phrase-secret"}},
+        "api_key_id": "api-secret",
         "node": {"name": "gate01"},
     }
 
     redacted = diagnostics.redact_value(value)
 
     assert redacted["mesh"]["password"] == "<redacted>"
+    assert redacted["mesh"]["mesh_psk"] == "<redacted>"
     assert redacted["gateway"]["wifi"]["password"] == "<redacted>"
+    assert redacted["gateway"]["wifi"]["wifi_passphrase"] == "<redacted>"
+    assert redacted["api_key_id"] == "<redacted>"
     assert redacted["node"]["name"] == "gate01"

@@ -96,7 +96,7 @@
                   <span class="chip subtle" id="fleet-count"></span>
                 </header>
                 <div class="card-body">
-                  <label class="field">
+                  <label class="field" for="fleet-select">
                     <span class="field-label">Saved fleet</span>
                     <select id="fleet-select"></select>
                   </label>
@@ -105,7 +105,7 @@
                     <p class="empty-meta">Drop a <code>.yml</code> fleet config into<br><span class="mono" id="fleet-empty-path"></span></p>
                     <button id="open-fleets-folder" class="btn ghost" type="button">Open Fleets Folder</button>
                   </div>
-                  <label class="field">
+                  <label class="field" for="config-path">
                     <span class="field-label">Fleet file path</span>
                     <span class="path-picker">
                       <input id="config-path" name="config" placeholder="/path/to/fleet.yml" autocomplete="off" spellcheck="false">
@@ -123,7 +123,7 @@
                   <span class="chip subtle" id="node-role" hidden></span>
                 </header>
                 <div class="card-body">
-                  <label class="field">
+                  <label class="field" for="node-name">
                     <span class="field-label">Node to provision</span>
                     <select id="node-name" name="node" disabled>
                       <option value="">Select a fleet first</option>
@@ -321,9 +321,9 @@
                   </label>
                   <button id="diagnostics-run" class="btn primary block" type="submit">Run Diagnostics</button>
                   <button id="diagnostics-export" class="btn ghost block" type="button">Export Support Bundle</button>
-                  <label class="field">
-                    <span class="field-label">Offline boot report source</span>
-                    <input id="diagnostics-import-source" placeholder="/Volumes/boot or /Volumes/boot/easymanet" autocomplete="off" spellcheck="false">
+                  <label class="field" for="diagnostics-import-source">
+                    <span class="field-label" id="diagnostics-import-source-label">Offline boot report source</span>
+                    <input id="diagnostics-import-source" aria-labelledby="diagnostics-import-source-label" placeholder="/Volumes/boot or /Volumes/boot/easymanet" autocomplete="off" spellcheck="false">
                   </label>
                   <button id="diagnostics-import" class="btn ghost block" type="button">Import Offline Boot Report</button>
                   <div id="diagnostics-result" class="validation" hidden></div>

@@ -231,3 +231,6 @@ def test_topology_api_overlay_is_packaged():
     assert "configure_easymanet_api" in provision_text
     assert "uhttpd.easymanet_api" in provision_text
     assert "allow_easymanet_api_wan=rule" not in provision_text
+    core_check = 'api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors"'
+    assert core_check in provision_text
+    assert 'api_home/v1/status" ] ||' not in provision_text

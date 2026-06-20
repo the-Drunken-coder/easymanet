@@ -102,7 +102,7 @@ status_fleet_json() {
 
     topology="$(topology_json_body 2>/dev/null || true)"
     if [ "$(json_get "$topology" '@.ok')" != "true" ]; then
-        printf '[]'
+        status_unknown_fleet_json
         return 0
     fi
 
@@ -124,6 +124,21 @@ status_fleet_json() {
         [ "$first" -eq 1 ] || printf ','
         first=0
         printf '{"name":%s,"status":%s}' "$(json_string "$name")" "$(json_string "$state")"
+        index=$((index + 1))
+    done
+    printf ']'
+}
+
+status_unknown_fleet_json() {
+    first=1
+    index=0
+    printf '['
+    while :; do
+        name="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].name" 2>/dev/null || true)"
+        [ -n "$name" ] || break
+        [ "$first" -eq 1 ] || printf ','
+        first=0
+        printf '{"name":%s,"status":"UNKNOWN"}' "$(json_string "$name")"
         index=$((index + 1))
     done
     printf ']'

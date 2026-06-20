@@ -24,6 +24,7 @@ from .workspace import diagnostics_dir, ensure_workspace, resolve_fleet_config, 
 
 API_PORT = 10411
 HTTP_TIMEOUT_SECONDS = 2
+STATUS_TIMEOUT_SECONDS = 6
 MAX_RESPONSE_BYTES = 1_000_000
 SUPPORT_SCHEMA_VERSION = 1
 COMMON_GATEWAY_HOSTS = ("10.41.254.1", "openmanet.local", "easymanet.local")
@@ -109,7 +110,7 @@ def run_diagnostics(*, config: str = "") -> dict[str, Any]:
     for candidate in candidates:
         host = candidate["host"]
         identity = fetch_node_api(host, "identity")
-        status = fetch_node_api(host, "status")
+        status = fetch_node_api(host, "status", timeout=STATUS_TIMEOUT_SECONDS)
         neighbors = fetch_node_api(host, "neighbors")
         node_key = _node_key(candidate, identity.payload, status.payload)
         nodes[node_key] = {
@@ -233,7 +234,8 @@ def export_support_bundle(*, config: str = "") -> dict[str, Any]:
         for node_name, record in (diagnostics.get("nodes") or {}).items():
             safe_name = _safe_name(node_name)
             for endpoint in ("identity", "status", "neighbors"):
-                _zip_json(zf, f"nodes/{safe_name}/{endpoint}.json", _api_payload(record, endpoint))
+                endpoint_record = record.get(endpoint, {})
+                _zip_json(zf, f"nodes/{safe_name}/{endpoint}.json", endpoint_record)
         _zip_json(zf, "operator/state.json", workspace_payload())
         image_manifest = images_manifest_path()
         if image_manifest.exists():
@@ -246,10 +248,14 @@ def export_support_bundle(*, config: str = "") -> dict[str, Any]:
 
 
 def import_boot_report(*, source: str) -> dict[str, Any]:
+    if not source.strip():
+        return {"ok": False, "errors": ["source is required"], "imported": []}
     src = Path(source).expanduser().resolve()
     if not src.exists():
         return {"ok": False, "errors": [f"source does not exist: {src}"], "imported": []}
     report_root = _boot_report_root(src)
+    if not report_root.is_dir():
+        return {"ok": False, "errors": [f"source is not a directory: {report_root}"], "imported": []}
     reports = [path for path in report_root.iterdir() if path.is_dir() and path.name.startswith("boot-report")]
     if not reports:
         return {"ok": False, "errors": [f"no boot reports found under {report_root}"], "imported": []}
@@ -287,6 +293,7 @@ def _diagnostics_support_code(nodes: dict[str, dict[str, Any]]) -> str:
         return "EM-API-DOWN"
     status_codes = []
     api_failures = 0
+    missing_configured_node = False
     for record in nodes.values():
         status = record.get("status", {})
         if status.get("ok"):
@@ -295,6 +302,11 @@ def _diagnostics_support_code(nodes: dict[str, dict[str, Any]]) -> str:
                 status_codes.append(code)
         elif not record.get("identity", {}).get("ok"):
             api_failures += 1
+            candidate = record.get("candidate", {})
+            if isinstance(candidate, dict) and candidate.get("source") == "fleet":
+                missing_configured_node = True
+    if missing_configured_node:
+        return "EM-NODE-MISSING"
     for code in ("EM-BOOT-INCOMPLETE", "EM-NODE-MISSING", "EM-MESH-DOWN", "EM-INET-DOWN"):
         if code in status_codes:
             return code
@@ -345,8 +357,21 @@ def _zip_imported_boot_reports(zf: ZipFile) -> None:
     if not root.exists():
         return
     for path in root.rglob("*"):
-        if path.is_file():
-            zf.write(path, f"boot-reports/{path.relative_to(root).as_posix()}")
+        if not path.is_file() or path.is_symlink():
+            continue
+        arcname = f"boot-reports/{path.relative_to(root).as_posix()}"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            zf.writestr(f"{arcname}.skipped.txt", "Skipped non-text boot-report artifact during redacted export.\n")
+            continue
+        if path.suffix == ".json":
+            try:
+                _zip_json(zf, arcname, json.loads(text))
+                continue
+            except json.JSONDecodeError:
+                pass
+        _zip_text(zf, arcname, text)
 
 
 def _boot_report_root(source: Path) -> Path:

@@ -101,6 +101,8 @@ class _DesktopHandler(BaseHTTPRequestHandler):
                 self._send_json(validate_payload(payload))
         except ValueError as exc:
             self._send_json({"ok": False, "errors": [str(exc)]}, status=400)
+        except Exception as exc:  # noqa: BLE001 - converted into desktop JSON.
+            self._send_json({"ok": False, "errors": [str(exc)]}, status=500)
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")

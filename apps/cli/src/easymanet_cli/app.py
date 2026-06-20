@@ -58,7 +58,12 @@ def diagnostics_bundle_cmd(
 ):
     """Export a zip support bundle under the shared Diagnostics folder."""
     payload = export_support_bundle(config=config)
-    typer.echo(payload["summary"])
+    if payload.get("summary"):
+        typer.echo(payload["summary"])
+    if not payload.get("ok"):
+        for error in payload.get("errors", []):
+            typer.secho(f"Error: {error}", fg=typer.colors.RED)
+        raise typer.Exit(1)
     typer.secho(f"Support bundle: {payload['bundle_path']}", fg=typer.colors.GREEN)
 
 

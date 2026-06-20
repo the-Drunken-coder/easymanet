@@ -79,11 +79,11 @@ write_easymanet_status_json() {
         FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-1}"
         MAX_TOPOLOGY_PEER_PROBES="${EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES:-8}"
         # shellcheck source=provision-lib.sh
-        . "$script_dir/provision-lib.sh" &&
+        . "$script_dir/provision-lib.sh" || exit 1
         # shellcheck source=api-lib.sh
-        . "$script_dir/api-lib.sh" &&
+        . "$script_dir/api-lib.sh" || exit 1
         # shellcheck source=status-lib.sh
-        . "$script_dir/status-lib.sh" &&
+        . "$script_dir/status-lib.sh" || exit 1
         status_json_body
     ); then
         printf '{"ok":false,"support_code":"EM-DIAG-PARTIAL","support_level":"warn","warnings":["EasyMANET status generation failed; boot report collection continued."]}\n'

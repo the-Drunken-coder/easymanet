@@ -677,6 +677,7 @@ def test_status_api_reports_point_node_local_status(tmp_path):
     assert payload["node"]["name"] == "point01"
     assert payload["mesh"]["neighbor_count"] == 1
     assert payload["internet"]["ok"] is True
+    assert payload["manageability"]["ok"] is True
     assert payload["fleet"] == []
 
 
@@ -760,6 +761,42 @@ def test_status_api_reports_gateway_missing_fleet_node(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["support_code"] == "EM-NODE-MISSING"
     assert {"name": "point01", "status": "MISSING"} in payload["fleet"]
+    assert {"name": "gate01", "status": "OK"} in payload["fleet"]
+
+
+def test_status_api_reports_gateway_unknown_fleet_when_topology_fails(tmp_path):
+    provision_data = _gate_provision_json()
+    provision_data["fleet"] = {
+        "nodes": [
+            {"name": "gate01", "hostname": "gate01", "role": "gate", "target": "rpi4-mm6108-spi", "ip": "10.41.1.1"},
+            {"name": "point01", "hostname": "point01", "role": "point", "target": "rpi4-mm6108-spi", "ip": "10.41.2.1"},
+        ]
+    }
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(provision_data))
+    script = f'''
+PROVISION_JSON="{provision_json}"
+SCRIPT_DIR="{OVERLAY / "usr" / "lib" / "easymanet"}"
+. "$SCRIPT_DIR/provision-lib.sh"
+. "$SCRIPT_DIR/api-lib.sh"
+. "$SCRIPT_DIR/status-lib.sh"
+is_gateway() {{ return 0; }}
+topology_json_body() {{ printf '%s\\n' '{{"ok":false}}'; }}
+status_fleet_json "{tmp_path / "missing.txt"}"
+'''
+
+    result = subprocess.run(
+        ["sh", "-c", script],
+        env={**os.environ, "PATH": f"{HARNESS}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert {"name": "gate01", "status": "UNKNOWN"} in payload
+    assert {"name": "point01", "status": "UNKNOWN"} in payload
 
 
 def test_display_status_renders_copyable_console_text(tmp_path):

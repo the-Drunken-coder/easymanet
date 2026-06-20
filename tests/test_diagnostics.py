@@ -6,12 +6,15 @@ from easymanet import diagnostics
 from easymanet.workspace import WORKSPACE_ENV, ensure_workspace
 
 
-def _api_result(host, endpoint, payload, ok=True):
+def _api_result(host: str, endpoint: str, payload: dict, *, ok: bool = True) -> diagnostics.ApiResult:
     return diagnostics.ApiResult(ok=ok, host=host, endpoint=endpoint, payload=payload, error="" if ok else "down")
 
 
 def test_run_diagnostics_collects_status_and_summary(monkeypatch):
+    observed_timeouts = {}
+
     def fake_fetch(host, endpoint, timeout=diagnostics.HTTP_TIMEOUT_SECONDS):
+        observed_timeouts[endpoint] = timeout
         if endpoint == "identity":
             return _api_result(host, endpoint, {"ok": True, "node": {"name": "gate01", "role": "gate", "ip": host}})
         if endpoint == "status":
@@ -40,6 +43,7 @@ def test_run_diagnostics_collects_status_and_summary(monkeypatch):
     assert payload["support_code"] == "EM-OK"
     assert "Node gate01" in payload["summary"]
     assert payload["topology"]["nodes"][0]["name"] == "gate01"
+    assert observed_timeouts["status"] == diagnostics.STATUS_TIMEOUT_SECONDS
 
 
 def test_export_support_bundle_writes_zip_layout_and_redacts(tmp_path, monkeypatch):
@@ -65,10 +69,13 @@ nodes:
     role: gate
     hostname: gate01
     ip: 10.41.1.1
-"""
+	"""
     )
+    imported_report = workspace / "Diagnostics" / diagnostics.BOOT_REPORT_IMPORT_DIR / "20260620T000000Z" / "boot-report-latest"
+    imported_report.mkdir(parents=True)
+    (imported_report / "provision.json").write_text('{"mesh":{"password":"boot-secret"},"root_password_hash":"$6$boot"}\n')
 
-    def fake_run_diagnostics(config=""):
+    def fake_run_diagnostics(config: str = "") -> dict:
         return {
             "ok": True,
             "generated_at": "2026-06-20T00:00:00Z",
@@ -84,6 +91,11 @@ nodes:
                     "identity": {"ok": True, "payload": {"node": {"name": "gate01"}}},
                     "status": {"ok": True, "payload": {"support_code": "EM-OK"}},
                     "neighbors": {"ok": True, "payload": {"neighbors": []}},
+                },
+                "point01": {
+                    "identity": {"ok": False, "host": "10.41.2.1", "endpoint": "identity", "payload": {}, "error": "timeout"},
+                    "status": {"ok": False, "host": "10.41.2.1", "endpoint": "status", "payload": {}, "error": "timeout"},
+                    "neighbors": {"ok": False, "host": "10.41.2.1", "endpoint": "neighbors", "payload": {}, "error": "timeout"},
                 }
             },
         }
@@ -102,7 +114,16 @@ nodes:
         assert "nodes/gate01/status.json" in names
         redacted = zf.read("fleet/redacted-fleet.yml").decode()
         assert "super-secret" not in redacted
+        assert "$6$secret" not in redacted
+        assert 'root_password_hash: "<redacted>"' in redacted
         assert "<redacted>" in redacted
+        failed_status = json.loads(zf.read("nodes/point01/status.json"))
+        assert failed_status["ok"] is False
+        assert failed_status["host"] == "10.41.2.1"
+        assert failed_status["error"] == "timeout"
+        boot_report = zf.read("boot-reports/20260620T000000Z/boot-report-latest/provision.json").decode()
+        assert "boot-secret" not in boot_report
+        assert "$6$boot" not in boot_report
 
 
 def test_import_boot_report_copies_reports_to_workspace_diagnostics(tmp_path, monkeypatch):
@@ -120,6 +141,40 @@ def test_import_boot_report_copies_reports_to_workspace_diagnostics(tmp_path, mo
     assert imported.is_dir()
     assert imported.is_relative_to(workspace / "Diagnostics")
     assert (imported / "summary.txt").read_text() == "reason=init\n"
+
+
+def test_import_boot_report_rejects_blank_and_file_sources(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    file_source = tmp_path / "boot-report.txt"
+    file_source.write_text("not a directory\n")
+
+    blank = diagnostics.import_boot_report(source=" ")
+    file_payload = diagnostics.import_boot_report(source=str(file_source))
+
+    assert blank["ok"] is False
+    assert "source is required" in blank["errors"][0]
+    assert file_payload["ok"] is False
+    assert "source is not a directory" in file_payload["errors"][0]
+
+
+def test_diagnostics_support_code_reports_missing_configured_node():
+    code = diagnostics._diagnostics_support_code(
+        {
+            "gate01": {
+                "candidate": {"source": "fleet"},
+                "identity": {"ok": True},
+                "status": {"ok": True, "payload": {"support_code": "EM-OK"}},
+            },
+            "point01": {
+                "candidate": {"source": "fleet"},
+                "identity": {"ok": False},
+                "status": {"ok": False, "payload": {}, "error": "timeout"},
+            },
+        }
+    )
+
+    assert code == "EM-NODE-MISSING"
 
 
 def test_redact_value_removes_obvious_secret_fields():

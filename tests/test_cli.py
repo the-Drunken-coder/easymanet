@@ -1,5 +1,6 @@
 """Tests for CLI helpers."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -167,11 +168,11 @@ def test_diagnostics_run_command_prints_summary(monkeypatch):
     from typer.testing import CliRunner
     import easymanet_cli.app as cli_app
 
-    monkeypatch.setattr(
-        cli_app,
-        "run_diagnostics",
-        lambda config="": {"ok": True, "summary": "EasyMANET Diagnostics\nSupport code: EM-OK\n"},
-    )
+    def fake_run_diagnostics(config=""):
+        del config
+        return {"ok": True, "summary": "EasyMANET Diagnostics\nSupport code: EM-OK\n"}
+
+    monkeypatch.setattr(cli_app, "run_diagnostics", fake_run_diagnostics)
 
     result = CliRunner().invoke(cli_app.app, ["diagnostics", "run", "--config", "field"])
 
@@ -179,24 +180,56 @@ def test_diagnostics_run_command_prints_summary(monkeypatch):
     assert "Support code: EM-OK" in result.output
 
 
-def test_diagnostics_bundle_command_prints_bundle_path(monkeypatch):
+def test_diagnostics_run_command_exits_nonzero_on_failure(monkeypatch):
     from typer.testing import CliRunner
     import easymanet_cli.app as cli_app
 
-    monkeypatch.setattr(
-        cli_app,
-        "export_support_bundle",
-        lambda config="": {
+    def fake_run_diagnostics(config=""):
+        del config
+        return {"ok": False, "summary": "EasyMANET Diagnostics\nSupport code: EM-API-DOWN\n"}
+
+    monkeypatch.setattr(cli_app, "run_diagnostics", fake_run_diagnostics)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "run", "--config", "field"])
+
+    assert result.exit_code == 1
+    assert "EM-API-DOWN" in result.output
+
+
+def test_diagnostics_bundle_command_prints_bundle_path(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_export_support_bundle(config=""):
+        del config
+        return {
             "ok": True,
             "summary": "EasyMANET Diagnostics\n",
-            "bundle_path": "/tmp/EasyMANET/Diagnostics/support.zip",
-        },
-    )
+            "bundle_path": str(tmp_path / "EasyMANET" / "Diagnostics" / "support.zip"),
+        }
+
+    monkeypatch.setattr(cli_app, "export_support_bundle", fake_export_support_bundle)
 
     result = CliRunner().invoke(cli_app.app, ["diagnostics", "bundle", "--config", "field"])
 
     assert result.exit_code == 0
-    assert "/tmp/EasyMANET/Diagnostics/support.zip" in result.output
+    assert str(Path(tmp_path / "EasyMANET" / "Diagnostics" / "support.zip")) in result.output
+
+
+def test_diagnostics_bundle_command_exits_nonzero_on_failure(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_export_support_bundle(config=""):
+        del config
+        return {"ok": False, "summary": "EasyMANET Diagnostics\n", "errors": ["bundle failed"]}
+
+    monkeypatch.setattr(cli_app, "export_support_bundle", fake_export_support_bundle)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "bundle", "--config", "field"])
+
+    assert result.exit_code == 1
+    assert "bundle failed" in result.output
 
 
 def test_flash_base_image_rejects_malformed_sha256(tmp_path, capsys):

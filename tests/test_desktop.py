@@ -514,18 +514,48 @@ def test_desktop_bridge_diagnostics_outputs_json(monkeypatch, capsys):
     assert payload["config"] == "examples/three-node-field-mesh.yml"
 
 
-def test_desktop_bridge_diagnostics_bundle_outputs_json(monkeypatch, capsys):
+def test_desktop_bridge_diagnostics_failure_outputs_json(monkeypatch, capsys):
+    def fail_diagnostics(config=""):
+        raise OSError(f"cannot read {config}")
+
+    monkeypatch.setattr(bridge, "run_diagnostics", fail_diagnostics)
+
+    exit_code = bridge.main(["diagnostics-run", "--config", "missing.yml"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "cannot read missing.yml" in payload["errors"][0]
+
+
+def test_desktop_bridge_diagnostics_bundle_outputs_json(tmp_path, monkeypatch, capsys):
+    bundle = tmp_path / "support.zip"
     monkeypatch.setattr(
         bridge,
         "export_support_bundle",
-        lambda config="": {"ok": True, "bundle_path": "/tmp/support.zip", "config": config},
+        lambda config="": {"ok": True, "bundle_path": str(bundle), "config": config},
     )
 
     exit_code = bridge.main(["diagnostics-bundle", "--config", "field"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["bundle_path"] == "/tmp/support.zip"
+    assert payload["bundle_path"] == str(bundle)
+
+
+def test_desktop_bridge_diagnostics_bundle_failure_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "export_support_bundle",
+        lambda config="": {"ok": False, "errors": [f"bundle failed for {config}"]},
+    )
+
+    exit_code = bridge.main(["diagnostics-bundle", "--config", "field"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"] == ["bundle failed for field"]
 
 
 def test_desktop_bridge_diagnostics_import_outputs_json(monkeypatch, capsys):
@@ -540,6 +570,21 @@ def test_desktop_bridge_diagnostics_import_outputs_json(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["imported"] == ["/Volumes/boot"]
+
+
+def test_desktop_bridge_diagnostics_import_failure_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "import_boot_report",
+        lambda source: {"ok": False, "errors": [f"no reports under {source}"]},
+    )
+
+    exit_code = bridge.main(["diagnostics-import-boot-report", "--source", "/Volumes/boot"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"] == ["no reports under /Volumes/boot"]
 
 
 def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):

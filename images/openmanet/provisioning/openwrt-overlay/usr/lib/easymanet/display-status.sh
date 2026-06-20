@@ -56,8 +56,8 @@ fi
 . "$SCRIPT_DIR/status-lib.sh"
 
 render_once() {
-    if [ -c "$EASYMANET_DISPLAY_TTY" ]; then
-        render_status_text > "$EASYMANET_DISPLAY_TTY" 2>> "$EASYMANET_DISPLAY_LOG" || true
+    if [ -c "$EASYMANET_DISPLAY_TTY" ] && [ -w "$EASYMANET_DISPLAY_TTY" ]; then
+        render_status_text > "$EASYMANET_DISPLAY_TTY" 2>> "$EASYMANET_DISPLAY_LOG" || render_status_text
     else
         render_status_text
     fi

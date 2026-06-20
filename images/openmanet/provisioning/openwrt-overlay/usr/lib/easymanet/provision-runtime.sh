@@ -112,10 +112,13 @@ configure_easymanet_api() {
     api_script="$(_prefix_path /usr/lib/easymanet/api.sh)"
     EASYMANET_API_CONFIGURED=0
     uci -q delete uhttpd.easymanet_api 2>/dev/null || true
-    if [ ! -x "$api_script" ] || [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ] || [ ! -x "$api_home/v1/status" ]; then
+    if [ ! -x "$api_script" ] || [ ! -x "$api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors" ]; then
         echo "WARNING: EasyMANET API endpoint wrappers are missing; skipping API setup" >> "$LOG_FILE"
         uci_commit uhttpd
         return 0
+    fi
+    if [ ! -x "$api_home/v1/status" ]; then
+        echo "WARNING: EasyMANET status endpoint wrapper is missing; continuing without /v1/status" >> "$LOG_FILE"
     fi
 
     echo "Configuring EasyMANET topology API on port $EM_EASYMANET_API_PORT..." >> "$LOG_FILE"

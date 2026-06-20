@@ -232,6 +232,38 @@ def test_diagnostics_bundle_command_exits_nonzero_on_failure(monkeypatch):
     assert "bundle failed" in result.output
 
 
+def test_diagnostics_import_boot_report_command_prints_imported_paths(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_import_boot_report(source):
+        return {"ok": True, "target": "/workspace/Diagnostics/imported", "imported": [source]}
+
+    monkeypatch.setattr(cli_app, "import_boot_report", fake_import_boot_report)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "import-boot-report", "--source", "/Volumes/boot"])
+
+    assert result.exit_code == 0
+    assert "/workspace/Diagnostics/imported" in result.output
+    assert "/Volumes/boot" in result.output
+
+
+def test_diagnostics_import_boot_report_command_exits_nonzero_on_failure(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_import_boot_report(source):
+        del source
+        return {"ok": False, "errors": ["no boot reports found"]}
+
+    monkeypatch.setattr(cli_app, "import_boot_report", fake_import_boot_report)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "import-boot-report", "--source", "/Volumes/boot"])
+
+    assert result.exit_code == 1
+    assert "no boot reports found" in result.output
+
+
 def test_flash_base_image_rejects_malformed_sha256(tmp_path, capsys):
     image = tmp_path / "openmanet.img.gz"
     image.write_bytes(b"firmware")

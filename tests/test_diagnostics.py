@@ -69,7 +69,7 @@ nodes:
     role: gate
     hostname: gate01
     ip: 10.41.1.1
-	"""
+"""
     )
     imported_report = workspace / "Diagnostics" / diagnostics.BOOT_REPORT_IMPORT_DIR / "20260620T000000Z" / "boot-report-latest"
     imported_report.mkdir(parents=True)
@@ -115,7 +115,7 @@ nodes:
         redacted = zf.read("fleet/redacted-fleet.yml").decode()
         assert "super-secret" not in redacted
         assert "$6$secret" not in redacted
-        assert 'root_password_hash: "<redacted>"' in redacted
+        assert "root_password_hash: <redacted>" in redacted
         assert "<redacted>" in redacted
         failed_status = json.loads(zf.read("nodes/point01/status.json"))
         assert failed_status["ok"] is False
@@ -141,6 +141,24 @@ def test_import_boot_report_copies_reports_to_workspace_diagnostics(tmp_path, mo
     assert imported.is_dir()
     assert imported.is_relative_to(workspace / "Diagnostics")
     assert (imported / "summary.txt").read_text() == "reason=init\n"
+
+
+def test_import_boot_report_preserves_symlinks(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    source = tmp_path / "boot" / "easymanet"
+    report = source / "boot-report-latest"
+    report.mkdir(parents=True)
+    target = tmp_path / "host-secret.txt"
+    target.write_text("do not copy\n")
+    (report / "linked-secret.txt").symlink_to(target)
+
+    payload = diagnostics.import_boot_report(source=str(tmp_path / "boot"))
+
+    assert payload["ok"] is True
+    imported_link = Path(payload["imported"][0]) / "linked-secret.txt"
+    assert imported_link.is_symlink()
+    assert imported_link.resolve() == target
 
 
 def test_import_boot_report_rejects_blank_and_file_sources(tmp_path, monkeypatch):

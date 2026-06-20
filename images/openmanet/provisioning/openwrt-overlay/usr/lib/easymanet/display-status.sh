@@ -45,7 +45,12 @@ fi
 
 if [ ! -f "$PROVISION_JSON" ]; then
     log_display "provision payload $PROVISION_JSON not available"
-    [ "$MODE" = "once" ] && exit 0
+    if [ "$MODE" = "once" ]; then
+        exit 0
+    fi
+    while true; do
+        sleep "$EASYMANET_DISPLAY_INTERVAL"
+    done
 fi
 
 # shellcheck source=provision-lib.sh
@@ -57,7 +62,7 @@ fi
 
 render_once() {
     if [ -c "$EASYMANET_DISPLAY_TTY" ] && [ -w "$EASYMANET_DISPLAY_TTY" ]; then
-        render_status_text > "$EASYMANET_DISPLAY_TTY" 2>> "$EASYMANET_DISPLAY_LOG" || render_status_text
+        render_status_text > "$EASYMANET_DISPLAY_TTY" 2>> "$EASYMANET_DISPLAY_LOG" || render_status_text 2>> "$EASYMANET_DISPLAY_LOG"
     else
         render_status_text
     fi

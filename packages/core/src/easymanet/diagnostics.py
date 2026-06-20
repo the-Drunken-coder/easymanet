@@ -265,7 +265,7 @@ def import_boot_report(*, source: str) -> dict[str, Any]:
     imported: list[str] = []
     for report in sorted(reports, key=lambda path: path.name):
         dest = target_root / report.name
-        shutil.copytree(report, dest)
+        shutil.copytree(report, dest, symlinks=True)
         imported.append(str(dest))
     return {"ok": True, "source": str(report_root), "target": str(target_root), "imported": imported}
 

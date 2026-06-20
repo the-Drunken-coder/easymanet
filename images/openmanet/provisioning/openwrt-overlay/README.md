@@ -6,6 +6,7 @@ tree under `files/` before building the image.
 These files install the generic EasyMANET first-boot hooks:
 
 - `etc/uci-defaults/99-easymanet`
+- `etc/uci-defaults/95-easymanet-display-status`
 - `usr/lib/easymanet/provision.sh`
 - `usr/lib/easymanet/provision-runtime.sh`
 - `usr/lib/easymanet/provision-lib.sh`

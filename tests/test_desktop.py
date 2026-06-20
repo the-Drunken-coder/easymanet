@@ -1166,6 +1166,9 @@ def test_electron_shell_files_exist():
     assert "resolveConfigPath" in path_utils_text
     assert "hasTraversalSegment" in path_utils_text
     assert "resolve-config" in path_utils_text
+    validation_text = (electron / "validation.js").read_text()
+    assert "Boot report source path must not contain traversal segments" in validation_text
+    assert "hasTraversalSegment(source)" in validation_text
     assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
 
     assert "flashBridgeTimeoutMs" in electron_text

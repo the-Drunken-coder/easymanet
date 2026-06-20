@@ -114,6 +114,9 @@ function validateBootReportImportPayload(payload) {
   if (!source) {
     return { ok: false, errors: ["Boot report source path is required"] };
   }
+  if (hasTraversalSegment(source)) {
+    return { ok: false, errors: ["Boot report source path must not contain traversal segments"] };
+  }
   return { ok: true, source };
 }
 

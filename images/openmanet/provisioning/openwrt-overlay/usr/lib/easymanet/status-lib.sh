@@ -208,6 +208,36 @@ status_reset_color() {
     printf '\033[0m'
 }
 
+resources_text() {
+    # Load average (1/5/15 min)
+    load="$(awk '{print $1"/"$2"/"$3}' /proc/loadavg 2>/dev/null || true)"
+
+    # Memory: used / total in MiB
+    mem_total=0; mem_avail=0
+    while read -r key value _; do
+        case "$key" in
+            MemTotal:) mem_total="$value" ;;
+            MemAvailable:) mem_avail="$value" ;;
+            MemFree:)
+                [ "$mem_avail" -eq 0 ] 2>/dev/null && mem_avail="$value"
+                ;;
+        esac
+    done < /proc/meminfo 2>/dev/null || true
+    if [ "$mem_total" -gt 0 ] 2>/dev/null; then
+        mem_used=$((mem_total - mem_avail))
+        mem_pct="$(( mem_used * 100 / mem_total ))%"
+        mem_str="${mem_used}/${mem_total}MiB (${mem_pct})"
+    else
+        mem_str="unknown"
+    fi
+
+    # Rootfs usage
+    disk_pct="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,""); print $5}')"
+    [ -n "$disk_pct" ] && disk_str="${disk_pct}%" || disk_str="unknown"
+
+    printf 'LOAD %s | MEM %s | DISK %s' "$load" "$mem_str" "$disk_str"
+}
+
 render_status_text() {
     payload="${1:-$(status_json_body)}"
     name="$(json_get "$payload" '@.node.name')"
@@ -230,6 +260,7 @@ render_status_text() {
         "$(status_color "$internet_label")" "$internet_label" "$(status_reset_color)" \
         "$(status_color "$manage_label")" "$manage_label" "$(status_reset_color)"
     printf 'CODE %s%s%s\n' "$(status_color "$code")" "$code" "$(status_reset_color)"
+    printf '%s\n' "$(resources_text)"
 
     if [ "$(json_get "$payload" '@.node.role')" = "gate" ]; then
         printf '\nFLEET\n'

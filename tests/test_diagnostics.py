@@ -47,6 +47,28 @@ def test_run_diagnostics_collects_status_and_summary(monkeypatch):
     assert observed_timeouts["topology"] == diagnostics.TOPOLOGY_TIMEOUT_SECONDS
 
 
+def test_run_diagnostics_skips_remaining_probes_when_identity_unreachable(monkeypatch):
+    calls = []
+
+    def fake_fetch(host, endpoint, timeout=diagnostics.HTTP_TIMEOUT_SECONDS):
+        calls.append((host, endpoint, timeout))
+        if endpoint == "identity":
+            return _api_result(host, endpoint, {}, ok=False)
+        raise AssertionError(f"unexpected {endpoint} probe for {host}")
+
+    monkeypatch.setattr(diagnostics, "fetch_node_api", fake_fetch)
+
+    payload = diagnostics.run_diagnostics(config="examples/three-node-field-mesh.yml")
+
+    assert payload["support_code"] == "EM-NODE-MISSING"
+    assert {endpoint for _, endpoint, _ in calls} == {"identity"}
+    assert all(timeout == diagnostics.HTTP_TIMEOUT_SECONDS for _, _, timeout in calls)
+    gate = payload["nodes"]["gate01"]
+    assert gate["status"]["error"] == "skipped because identity API was unavailable"
+    assert gate["neighbors"]["error"] == "skipped because identity API was unavailable"
+    assert payload["topology"] == {}
+
+
 def test_export_support_bundle_writes_zip_layout_and_redacts(tmp_path, monkeypatch):
     workspace = tmp_path / "EasyMANET"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))

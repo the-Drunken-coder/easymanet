@@ -111,8 +111,12 @@ def run_diagnostics(*, config: str = "") -> dict[str, Any]:
     for candidate in candidates:
         host = candidate["host"]
         identity = fetch_node_api(host, "identity")
-        status = fetch_node_api(host, "status", timeout=STATUS_TIMEOUT_SECONDS)
-        neighbors = fetch_node_api(host, "neighbors")
+        if identity.ok:
+            status = fetch_node_api(host, "status", timeout=STATUS_TIMEOUT_SECONDS)
+            neighbors = fetch_node_api(host, "neighbors")
+        else:
+            status = _skipped_api_result(host, "status", "skipped because identity API was unavailable")
+            neighbors = _skipped_api_result(host, "neighbors", "skipped because identity API was unavailable")
         node_key = _node_key(candidate, identity.payload, status.payload)
         nodes[node_key] = {
             "candidate": candidate,
@@ -121,7 +125,7 @@ def run_diagnostics(*, config: str = "") -> dict[str, Any]:
             "neighbors": neighbors.to_dict(),
         }
         role = _payload_role(identity.payload) or candidate.get("role", "")
-        if not topology and role == "gate":
+        if identity.ok and not topology and role == "gate":
             top = fetch_node_api(host, "topology", timeout=TOPOLOGY_TIMEOUT_SECONDS)
             if top.ok:
                 topology = top.payload
@@ -164,6 +168,10 @@ def fetch_node_api(host: str, endpoint: str, *, timeout: int = HTTP_TIMEOUT_SECO
     if not isinstance(payload, dict):
         return ApiResult(False, host, endpoint, {}, "JSON payload is not an object")
     return ApiResult(True, host, endpoint, payload)
+
+
+def _skipped_api_result(host: str, endpoint: str, error: str) -> ApiResult:
+    return ApiResult(False, host, endpoint, {}, error)
 
 
 def render_summary(payload: dict[str, Any]) -> str:

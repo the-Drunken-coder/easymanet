@@ -14,7 +14,7 @@ from .download import (
     set_image_config,
     verify_image_sha256,
 )
-from .release_trust import OFFICIAL_TRUST_STATUS
+from .release_trust import OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS
 from .manifest import load_manifest
 from .provision import resolve_provision
 from .validate import validate
@@ -149,7 +149,7 @@ def resolve_base_image(
         "warnings": list(latest_warnings),
     })
 
-    if latest_source == "official" and latest_trust_status != OFFICIAL_TRUST_STATUS:
+    if latest_source == "official" and latest_trust_status not in {OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS}:
         detail = "; ".join(latest_warnings) if latest_warnings else "official verification failed"
         raise FlashWorkflowError(
             FlashErrorCode.IMAGE,
@@ -157,7 +157,7 @@ def resolve_base_image(
         )
     warnings.extend(latest_warnings)
 
-    if not download:
+    if not download and not (latest_source == "official" and latest_trust_status == PENDING_TRUST_STATUS):
         cached = get_cached_image_fn(target, sha256=latest.sha256, url=latest.url)
         if cached:
             return (
@@ -200,6 +200,8 @@ def resolve_base_image(
                 force=download,
                 emit=emit,
             )
+        if latest_source == "official" and latest_trust_status == PENDING_TRUST_STATUS:
+            latest_trust_status = OFFICIAL_TRUST_STATUS
     except OSError as exc:
         raise FlashWorkflowError(
             FlashErrorCode.IMAGE,

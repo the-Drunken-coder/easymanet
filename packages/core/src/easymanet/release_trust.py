@@ -9,6 +9,7 @@ from ._download_integrity import normalize_sha256
 
 IMAGE_RELEASE_PRODUCT = "easymanet-openmanet-image"
 OFFICIAL_TRUST_STATUS = "verified"
+PENDING_TRUST_STATUS = "verification-pending"
 CUSTOM_TRUST_STATUS = "checksum-only"
 UNTRUSTED_STATUS = "untrusted"
 ALLOWED_CHANNELS = {"stable", "candidate"}
@@ -24,6 +25,8 @@ class ReleaseTrust:
     image_status: str = "current"
     manifest_url: str = ""
     manifest_schema_version: int = 0
+    expected_repo: str = ""
+    attestation_subject_digest: str = ""
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
@@ -35,6 +38,8 @@ class ReleaseTrust:
             "image_status": self.image_status,
             "manifest_url": self.manifest_url,
             "manifest_schema_version": self.manifest_schema_version,
+            "expected_repo": self.expected_repo,
+            "attestation_subject_digest": self.attestation_subject_digest,
             "warnings": list(self.warnings),
         }
 
@@ -130,13 +135,15 @@ def trust_from_manifest(
         warnings.append(f"Image release is marked {image_status}; continuing with a warning.")
 
     return ReleaseTrust(
-        status=OFFICIAL_TRUST_STATUS,
+        status=PENDING_TRUST_STATUS,
         source="official",
         channel=channel,
         release_tag=str(manifest.get("release_tag") or release_tag),
         image_status=image_status,
         manifest_url=manifest_url,
         manifest_schema_version=schema_version,
+        expected_repo=expected,
+        attestation_subject_digest=subject,
         warnings=tuple(warnings),
     )
 

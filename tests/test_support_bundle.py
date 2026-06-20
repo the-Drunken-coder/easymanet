@@ -124,3 +124,49 @@ def test_support_bundle_preserves_non_utf_boot_report_file(tmp_path, monkeypatch
 
     with zipfile.ZipFile(result.path) as archive:
         assert archive.read("boot-reports/capture.bin") == binary
+
+
+def test_support_bundle_redacts_private_key_blocks_in_boot_reports(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    boot = tmp_path / "boot-report-latest"
+    boot.mkdir()
+    private_key = """-----BEGIN OPENSSH PRIVATE KEY-----
+abc123
+-----END OPENSSH PRIVATE KEY-----
+"""
+    (boot / "logread.txt").write_text(f"before\n{private_key}after\n")
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        text = archive.read("boot-reports/logread.txt").decode()
+        assert "OPENSSH PRIVATE KEY" not in text
+        assert "abc123" not in text
+        assert "<redacted>" in text
+        report = json.loads(archive.read("redaction-report.json"))
+        assert "private_key" in report["redacted"]
+
+
+def test_support_bundle_redacts_sensitive_boot_report_filenames(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    boot = tmp_path / "boot-report-latest"
+    ssh_dir = boot / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "id_rsa").write_text("super-secret-private-key-material")
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        assert archive.read("boot-reports/.ssh/id_rsa").decode() == "<redacted>\n"
+        report = json.loads(archive.read("redaction-report.json"))
+        assert "private_key_file" in report["redacted"]

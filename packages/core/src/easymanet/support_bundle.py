@@ -27,6 +27,14 @@ SECRET_LINE_PATTERN = re.compile(
     r"(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)|(?P<unquoted>[^\s#\n]+))",
     re.IGNORECASE,
 )
+PRIVATE_KEY_BLOCK_PATTERN = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+SENSITIVE_FILENAME_PATTERN = re.compile(
+    r"(^|/)(id_(rsa|dsa|ecdsa|ed25519)|.*private.*key.*|.*\.pem)$",
+    re.IGNORECASE,
+)
 REDACTED = "<redacted>"
 
 
@@ -133,12 +141,18 @@ def image_inventory() -> dict[str, Any]:
 
 
 def redact_text(text: str, redactions: list[str] | None = None) -> str:
+    def replace_private_key(_match: re.Match[str]) -> str:
+        if redactions is not None:
+            redactions.append("private_key")
+        return REDACTED
+
     def replace(match: re.Match[str]) -> str:
         if redactions is not None:
             redactions.append(match.group("key").lower())
         quote = match.group("quote") or ""
         return f"{match.group('prefix')}{quote}{REDACTED}{quote}"
 
+    text = PRIVATE_KEY_BLOCK_PATTERN.sub(replace_private_key, text)
     return SECRET_LINE_PATTERN.sub(replace, text)
 
 
@@ -191,6 +205,11 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
         return
     if root.is_file():
         arcname = f"boot-reports/{root.name}"
+        if _sensitive_boot_report_name(root.name):
+            zf.writestr(arcname, REDACTED + "\n")
+            redactions.append("private_key_file")
+            files.append(arcname)
+            return
         try:
             zf.writestr(arcname, redact_text(root.read_text(encoding="utf-8"), redactions))
         except UnicodeDecodeError:
@@ -203,12 +222,22 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
             continue
         rel = path.relative_to(root).as_posix()
         arcname = f"boot-reports/{rel}"
+        if _sensitive_boot_report_name(rel):
+            zf.writestr(arcname, REDACTED + "\n")
+            redactions.append("private_key_file")
+            files.append(arcname)
+            continue
         try:
             zf.writestr(arcname, redact_text(path.read_text(encoding="utf-8"), redactions))
         except UnicodeDecodeError:
             with path.open("rb") as src, zf.open(arcname, "w") as dst:
                 shutil.copyfileobj(src, dst)
         files.append(arcname)
+
+
+def _sensitive_boot_report_name(name: str) -> bool:
+    normalized = name.replace("\\", "/")
+    return bool(SENSITIVE_FILENAME_PATTERN.search(normalized))
 
 
 def _read_json_file(path: Path) -> Any:

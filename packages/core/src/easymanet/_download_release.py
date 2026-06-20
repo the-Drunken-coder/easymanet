@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -24,6 +25,7 @@ IMAGE_RELEASE_MANIFEST_ASSETS = {
     "easymanet-image-release.json",
     "easymanet-images.json",
 }
+CANDIDATE_TAG_RE = re.compile(r"^images-v\d+\.\d+\.\d+-candidate\.\d+$")
 
 _GITHUB_API_ERRORS = (
     urllib.error.URLError,
@@ -48,6 +50,8 @@ class ImageRef(NamedTuple):
     release_tag: str = ""
     image_status: str = "current"
     manifest_url: str = ""
+    expected_repo: str = ""
+    attestation_subject_digest: str = ""
     warnings: tuple[str, ...] = ()
 
     @property
@@ -59,6 +63,8 @@ class ImageRef(NamedTuple):
             "release_tag": self.release_tag,
             "image_status": self.image_status,
             "manifest_url": self.manifest_url,
+            "expected_repo": self.expected_repo,
+            "attestation_subject_digest": self.attestation_subject_digest,
             "warnings": list(self.warnings),
         }
 
@@ -75,6 +81,17 @@ def _fetch_github_release(repo: str) -> Optional[dict]:
     except _GITHUB_API_ERRORS as exc:
         _debug_note(f"GitHub release lookup failed for {repo}: {exc}")
         return None
+
+
+def _fetch_github_releases(repo: str) -> list[dict]:
+    try:
+        api_url = f"https://api.github.com/repos/{repo}/releases?per_page=30"
+        with _urlopen_with_retries(api_url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        return data if isinstance(data, list) else []
+    except _GITHUB_API_ERRORS as exc:
+        _debug_note(f"GitHub release list lookup failed for {repo}: {exc}")
+        return []
 
 
 def _pick_release_asset(release: dict, target: str) -> Optional[ImageRef]:
@@ -103,23 +120,38 @@ def _pick_release_asset(release: dict, target: str) -> Optional[ImageRef]:
     return None
 
 
-def _check_github_release(repo: str, target: str) -> Optional[ImageRef]:
-    release = _fetch_github_release(repo)
-    if not release:
-        return None
-    manifest_result = _pick_manifest_release_asset(release, target, expected_repo=repo)
-    if manifest_result:
-        return manifest_result
-    result = _pick_release_asset(release, target)
-    if not result:
+def _check_github_release(repo: str, target: str, *, channel: str = "stable") -> Optional[ImageRef]:
+    releases = _candidate_releases(repo) if channel == "candidate" else [_fetch_github_release(repo)]
+    for release in releases:
+        if not release:
+            continue
+        manifest_result = _pick_manifest_release_asset(release, target, expected_repo=repo)
+        if manifest_result:
+            if channel != "candidate" or manifest_result.channel == "candidate":
+                return manifest_result
+        result = _pick_release_asset(release, target)
+        if result:
+            return result._replace(
+                source="official",
+                trust_status="untrusted",
+                warnings=("Official image release does not include a canonical trust manifest.",),
+            )
         version = release.get("tag_name", "unknown")
         _debug_note(
             f"No matching sysupgrade image for target '{target}' in {repo} release {version}. "
             f"Expected asset like openmanet-{version}-{target}-squashfs-sysupgrade.img.gz"
         )
-    if result:
-        return result._replace(source="official", trust_status="untrusted", warnings=("Official image release does not include a canonical trust manifest.",))
-    return result
+    return None
+
+
+def _candidate_releases(repo: str) -> list[dict]:
+    return [
+        release
+        for release in _fetch_github_releases(repo)
+        if release.get("prerelease") is True
+        and CANDIDATE_TAG_RE.match(str(release.get("tag_name") or ""))
+        and release.get("draft") is not True
+    ]
 
 
 def _pick_manifest_release_asset(
@@ -241,6 +273,8 @@ def _image_ref(version: str, url: str, sha256: str, *, trust: ReleaseTrust) -> I
         release_tag=trust.release_tag,
         image_status=trust.image_status,
         manifest_url=trust.manifest_url,
+        expected_repo=trust.expected_repo,
+        attestation_subject_digest=trust.attestation_subject_digest,
         warnings=trust.warnings,
     )
 

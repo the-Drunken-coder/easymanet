@@ -911,6 +911,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "preview-flash" in index.read_text()
     assert "start-flash" in index.read_text()
     assert "copy-flash-log" in index.read_text()
+    assert "export-support-bundle" in index.read_text()
     assert "role-default-ssh" in index.read_text()
     assert "admin-password" in index.read_text()
     assert 'value="default"' not in index.read_text()
@@ -957,6 +958,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderImageState" in text
     assert "refreshImageSidebar" in text
     assert 'type === "download_completed"' in text
+    assert "exportSupportBundle" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()

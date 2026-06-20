@@ -14,3 +14,5 @@ def test_extra_packages_referenced_by_image_workflow():
     assert "image build" in text
     assert "easymanet" in text
     assert "extra-packages.txt" in text
+    assert "easymanet-image-release.json" in text
+    assert "easymanet-image-manifest.json" not in text

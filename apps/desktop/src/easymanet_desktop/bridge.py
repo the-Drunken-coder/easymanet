@@ -16,6 +16,7 @@ from easymanet.flash import (
     prepare_flash_workflow,
     run_flash_workflow,
 )
+from easymanet.support_bundle import create_support_bundle
 
 from .payloads import (
     disks_payload,
@@ -148,6 +149,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     mesh_discover.add_argument("--config", default="")
     mesh_discover.add_argument("--scan-subnet", action="store_true")
 
+    support_bundle = subparsers.add_parser("support-bundle")
+    support_bundle.add_argument("--config", default="")
+    support_bundle.add_argument("--node", default="")
+    support_bundle.add_argument("--boot-report", default="")
+    support_bundle.add_argument("--output", default="")
+    support_bundle.add_argument("--include-disks", action="store_true")
+
     flash_plan = subparsers.add_parser("flash-plan")
     _add_flash_args(flash_plan, include_yes=False)
 
@@ -174,6 +182,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "scan_subnet": args.scan_subnet,
                 }
             )
+        elif args.command == "support-bundle":
+            payload = create_support_bundle(
+                config=args.config,
+                node=args.node,
+                boot_report=args.boot_report,
+                output=args.output,
+                include_disks=args.include_disks,
+            ).to_dict()
         elif args.command == "flash-plan":
             payload = flash_plan_payload(
                 config=args.config,

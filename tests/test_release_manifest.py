@@ -18,7 +18,7 @@ def test_build_release_manifest_records_artifact_and_provenance(tmp_path):
         source_ref="abc123",
     )
 
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["product"] == "easymanet-openmanet-image"
     assert manifest["target"] == "rpi4-mm6108-spi"
     assert manifest["openmanet_version"] == "1.6.5"
@@ -26,6 +26,8 @@ def test_build_release_manifest_records_artifact_and_provenance(tmp_path):
     assert manifest["artifact"]["filename"] == artifact.name
     assert manifest["artifact"]["sha256"] == hashlib.sha256(b"firmware").hexdigest()
     assert manifest["provenance"]["monorepo_source"] == "abc123"
+    assert manifest["trust"]["attestation_subject_digest"] == f"sha256:{hashlib.sha256(b'firmware').hexdigest()}"
+    assert manifest["status"] == "current"
 
 
 def test_write_release_manifest_outputs_json_file(tmp_path):

@@ -55,6 +55,7 @@ from ._download_release import (
 from . import __version__
 from .format import human_size
 from .workspace import images_dir
+from .release_trust import CUSTOM_TRUST_STATUS, OFFICIAL_TRUST_STATUS
 
 DownloadEventCallback = Callable[[dict[str, Any]], None]
 
@@ -150,7 +151,14 @@ def check_latest_version(target: str) -> Optional[ImageRef]:
             except ValueError as exc:
                 _debug_note(f"invalid SHA-256 configured for {target}: {exc}")
                 sha256 = None
-        return ImageRef(info.get("version", "latest"), info["url"], sha256)
+        return ImageRef(
+            info.get("version", "latest"),
+            info["url"],
+            sha256,
+            trust_status=CUSTOM_TRUST_STATUS,
+            source="custom",
+            warnings=("Custom image is checksum-only and not an official EasyMANET release.",),
+        )
 
     github_repo = info.get("github") or DEFAULT_IMAGE_GITHUB_REPO
     return _check_github_release(github_repo, target)
@@ -163,6 +171,8 @@ def download_image(
     sha256: str,
     force: bool = False,
     emit: DownloadEventCallback | None = None,
+    *,
+    trust: dict[str, Any] | None = None,
 ) -> Path:
     _validate_download_url(url)
     expected_sha256 = normalize_sha256(sha256)
@@ -172,7 +182,8 @@ def download_image(
 
     if dest.exists() and not force:
         if _valid_cached_image(dest) and _cached_image_matches_sha256(dest, expected_sha256):
-            _save_version(target, version, sha256=expected_sha256, url=url)
+            _save_version(target, version, sha256=expected_sha256, url=url, trust=trust)
+            _prune_verified_cache(target, keep=dest, trust=trust)
             return dest
         dest.unlink()
 
@@ -237,7 +248,8 @@ def download_image(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
-    _save_version(target, version, sha256=expected_sha256, url=url)
+    _save_version(target, version, sha256=expected_sha256, url=url, trust=trust)
+    _prune_verified_cache(target, keep=dest, trust=trust)
     _emit_event(emit, "download_completed", f"  Saved: {dest}", path=str(dest))
     return dest
 
@@ -295,6 +307,7 @@ def _save_version(
     *,
     sha256: Optional[str] = None,
     url: str = "",
+    trust: dict[str, Any] | None = None,
 ) -> None:
     path = version_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,8 +324,33 @@ def _save_version(
         entry["sha256"] = normalize_sha256(sha256)
     if url:
         entry["url"] = url
+    if trust:
+        for key in ("status", "source", "channel", "release_tag", "image_status", "manifest_url"):
+            value = trust.get(key)
+            if isinstance(value, str):
+                entry[f"trust_{key}" if key == "status" else key] = value
+        warnings = trust.get("warnings")
+        if isinstance(warnings, list):
+            entry["warnings"] = [str(item) for item in warnings]
     data[target] = entry
     path.write_text(json.dumps(data, indent=2))
+
+
+def _prune_verified_cache(target: str, *, keep: Path, trust: dict[str, Any] | None = None) -> None:
+    if not trust or trust.get("status") != OFFICIAL_TRUST_STATUS or trust.get("source") != "official":
+        return
+    cache = cache_dir()
+    try:
+        candidates = sorted(cache.glob(f"*{target}*"), key=_cache_mtime)
+    except OSError:
+        return
+    for path in candidates:
+        if path == keep or not path.is_file() or not path.name.endswith((".img", ".img.gz")):
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def easymanet_update_repo() -> str:

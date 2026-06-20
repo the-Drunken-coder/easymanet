@@ -81,6 +81,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
             assert (repo / "tools" / "release_smoke.py").exists()
 
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
+    assert (generated["images"] / "tools" / "packaging" / "cleanup_image_releases.py").exists()
+    assert (generated["images"] / "tools" / "packaging" / "generate_image_release_notes.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
 
     cli_pyproject = tomllib.loads((generated["cli"] / "pyproject.toml").read_text(encoding="utf-8"))
@@ -114,6 +116,10 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "packages/image/src/easymanet_image/build.py" in image_release
     assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
+    assert "actions/attest-build-provenance@v2" in image_release
+    assert "cosign sign-blob" in image_release
+    assert "generate_image_release_notes.py" in image_release
+    assert "cleanup_image_releases.py" in image_release
 
 
 def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject(tmp_path):

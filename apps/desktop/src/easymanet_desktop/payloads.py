@@ -39,6 +39,18 @@ def state_payload() -> dict[str, Any]:
         entry["cached_path"] = str(cached) if cached else ""
         if cached_version.get("version") and not entry.get("version"):
             entry["version"] = cached_version["version"]
+        for key in (
+            "trust_status",
+            "source",
+            "channel",
+            "release_tag",
+            "image_status",
+            "manifest_url",
+        ):
+            if cached_version.get(key) and not entry.get(key):
+                entry[key] = cached_version[key]
+        if cached_version.get("warnings") and not entry.get("warnings"):
+            entry["warnings"] = cached_version["warnings"]
         if cached:
             add_cached_image_details(
                 entry,
@@ -70,7 +82,7 @@ def configured_images() -> dict[str, dict[str, Any]]:
     } or {"rpi4-mm6108-spi": {}}
 
 
-def cached_versions() -> dict[str, dict[str, str]]:
+def cached_versions() -> dict[str, dict[str, Any]]:
     path = version_file_path()
     if not path.exists():
         return {}
@@ -80,7 +92,7 @@ def cached_versions() -> dict[str, dict[str, str]]:
         return {}
     if not isinstance(data, dict):
         return {}
-    versions: dict[str, dict[str, str]] = {}
+    versions: dict[str, dict[str, Any]] = {}
     for target, entry in data.items():
         if isinstance(entry, str):
             versions[str(target)] = {"version": entry}
@@ -90,6 +102,11 @@ def cached_versions() -> dict[str, dict[str, str]]:
                 for key, value in entry.items()
                 if isinstance(value, str)
             }
+            warnings = entry.get("warnings")
+            if isinstance(warnings, list):
+                versions[str(target)]["warnings"] = [
+                    str(item) for item in warnings if isinstance(item, str)
+                ]
     return versions
 
 

@@ -16,6 +16,9 @@
     if (nativeApi && nativeApi.discoverMesh && url === "/api/mesh/discover") {
       return nativeApi.discoverMesh(body);
     }
+    if (nativeApi && nativeApi.exportSupportBundle && url === "/api/support/bundle") {
+      return nativeApi.exportSupportBundle(body);
+    }
     return fetchJson(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

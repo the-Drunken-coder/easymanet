@@ -60,6 +60,7 @@ const adminPasswordRow = $("admin-password-row");
 const adminPasswordInput = $("admin-password");
 const previewFlash = $("preview-flash");
 const startFlash = $("start-flash");
+const exportSupportBundle = $("export-support-bundle");
 const flashStatus = $("flash-status");
 const flashStatusText = $("flash-status-text");
 const flashProgress = $("flash-progress");
@@ -232,6 +233,27 @@ copyFlashLog.addEventListener("click", async () => {
   const result = await nativeApi.copyText(logText);
   if (result.ok) {
     showCopied(copyFlashLog, "Copy Log");
+  }
+});
+exportSupportBundle.addEventListener("click", async () => {
+  if (!nativeApi || !nativeApi.exportSupportBundle) {
+    setFlashStatus("bad", "Support bundle export is available in the desktop app.");
+    return;
+  }
+  const payload = {
+    config: state.configPath || configInput.value.trim(),
+    node: state.nodeName || nodeSelect.value.trim(),
+  };
+  try {
+    const result = await nativeApi.exportSupportBundle(payload);
+    if (result.ok) {
+      appendLog("success", `Support bundle exported: ${result.path}`);
+      setFlashStatus("ok", "Support bundle exported.");
+    } else if (!result.canceled) {
+      setFlashStatus("bad", (result.errors || [])[0] || "Support bundle export failed");
+    }
+  } catch (error) {
+    setFlashStatus("bad", errorMessage(error));
   }
 });
 meshDiscoveryForm.addEventListener("submit", async (event) => {

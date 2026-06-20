@@ -23,6 +23,7 @@ from easymanet.workspace import (
     resolve_fleet_config,
     workspace_payload,
 )
+from easymanet.support_bundle import create_support_bundle
 from .common import print_errors_and_warnings
 from .flash import register_flash_command
 from .image import register_image_commands
@@ -33,10 +34,34 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 image_app = typer.Typer(help="Manage image URLs, cache, and firmware builds")
+diagnostics_app = typer.Typer(help="Export diagnostics and support artifacts")
 app.add_typer(image_app, name="image")
+app.add_typer(diagnostics_app, name="diagnostics")
 
 register_flash_command(app)
 register_image_commands(image_app)
+
+
+@diagnostics_app.command(name="bundle")
+def diagnostics_bundle_cmd(
+    config: str = typer.Option("", "--config", "-c", help="Fleet config to include"),
+    node: str = typer.Option("", "--node", "-n", help="Node context to include"),
+    boot_report: str = typer.Option("", "--boot-report", help="Boot report file or directory"),
+    output: str = typer.Option("", "--output", "-o", help="Output .zip path"),
+    include_mesh: bool = typer.Option(False, "--include-mesh", help="Include mesh payload data when provided by callers"),
+    include_disks: bool = typer.Option(False, "--include-disks", help="Include removable disk inventory"),
+):
+    """Create a redacted EasyMANET support bundle."""
+    result = create_support_bundle(
+        config=config,
+        node=node,
+        boot_report=boot_report,
+        output=output,
+        include_mesh=include_mesh,
+        include_disks=include_disks,
+    )
+    typer.secho("Support bundle exported.", fg=typer.colors.GREEN)
+    typer.echo(f"  Path: {result.path}")
 
 
 @app.command(name="validate")

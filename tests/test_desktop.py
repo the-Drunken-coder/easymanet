@@ -540,6 +540,7 @@ def test_desktop_bridge_diagnostics_bundle_outputs_json(tmp_path, monkeypatch, c
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
     assert payload["bundle_path"] == str(bundle)
 
 

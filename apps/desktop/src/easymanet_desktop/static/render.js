@@ -48,13 +48,15 @@
     const cachedSize = formatBytes(image.cached_size_bytes);
     const trustLabel = trustStatus === "verified"
       ? "verified official"
-      : source === "custom" || trustStatus === "checksum-only"
-        ? "checksum-only custom"
-        : cached ? "checksum-only" : "needs download";
+      : trustStatus === "untrusted"
+        ? "untrusted official"
+        : source === "custom" || trustStatus === "checksum-only"
+          ? "checksum-only custom"
+          : cached ? "checksum-only" : "needs download";
     const lines = [
       `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(cached ? "ok" : "warn", cached ? "cached" : "will download")}</div>`,
       `<div class="meta-line">${escapeHtml(image.version || "unversioned")}</div>`,
-      `<div class="meta-line">${chip(trustStatus === "verified" ? "ok" : cached ? "warn" : "subtle", trustLabel)}</div>`,
+      `<div class="meta-line">${chip(trustStatus === "verified" ? "ok" : trustStatus === "untrusted" ? "bad" : cached ? "warn" : "subtle", trustLabel)}</div>`,
     ];
     if (imageStatus === "superseded" || imageStatus === "unsafe") {
       lines.push(`<div class="meta-line image-action">warning: ${escapeHtml(imageStatus)}</div>`);

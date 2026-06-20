@@ -493,6 +493,49 @@ def test_desktop_bridge_mesh_discover_outputs_json(monkeypatch, capsys):
     assert payload["received"]["scan_subnet"] is True
 
 
+def test_desktop_bridge_support_bundle_outputs_json(monkeypatch, capsys, tmp_path):
+    output = tmp_path / "support.zip"
+
+    class FakeSupportBundleResult:
+        def to_dict(self):
+            return {"ok": True, "path": str(output), "files": ["support-bundle.json"], "redactions": []}
+
+    monkeypatch.setattr(bridge, "create_support_bundle", lambda **_kwargs: FakeSupportBundleResult())
+
+    exit_code = bridge.main(
+        [
+            "support-bundle",
+            "--config",
+            "field",
+            "--node",
+            "point01",
+            "--boot-report",
+            str(tmp_path / "boot"),
+            "--output",
+            str(output),
+            "--include-disks",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["path"] == str(output)
+
+
+def test_desktop_bridge_support_bundle_reports_errors(monkeypatch, capsys):
+    def fail_create_support_bundle(**_kwargs):
+        raise ValueError("support export failed")
+
+    monkeypatch.setattr(bridge, "create_support_bundle", fail_create_support_bundle)
+
+    exit_code = bridge.main(["support-bundle"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"ok": False, "errors": ["support export failed"]}
+
+
 def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
     calls = []
 
@@ -912,6 +955,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "start-flash" in index.read_text()
     assert "copy-flash-log" in index.read_text()
     assert "export-support-bundle" in index.read_text()
+    assert 'postJson("/api/support/bundle", payload)' in text
     assert "role-default-ssh" in index.read_text()
     assert "admin-password" in index.read_text()
     assert 'value="default"' not in index.read_text()
@@ -965,6 +1009,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "meshRadioCard" in render_js.read_text()
     assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
+    assert "untrusted official" in render_js.read_text()
     assert "ALLOWED_TONES" in render_js.read_text()
     assert '["ok", "warn", "bad", "subtle"]' in render_js.read_text()
     assert "body.flash-busy .appbar" in styles.read_text()

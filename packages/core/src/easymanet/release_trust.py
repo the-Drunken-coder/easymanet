@@ -69,7 +69,10 @@ def trust_from_manifest(
     manifest_url: str,
 ) -> ReleaseTrust:
     warnings: list[str] = []
-    schema_version = int(manifest.get("schema_version") or 0)
+    try:
+        schema_version = int(manifest.get("schema_version") or 0)
+    except (TypeError, ValueError):
+        return untrusted_release("Image manifest schema_version is invalid.", manifest_url=manifest_url, release_tag=release_tag)
     channel = str(manifest.get("channel") or "")
     image_status = str(manifest.get("status") or "current")
 
@@ -100,11 +103,15 @@ def trust_from_manifest(
 
     trust = manifest.get("trust", {})
     expected = str(trust.get("expected_github_repo") or "")
-    if expected and expected != expected_repo:
+    if not expected:
+        return untrusted_release("Official image manifest does not declare the expected GitHub repo.", manifest_url=manifest_url, release_tag=release_tag)
+    if expected != expected_repo:
         return untrusted_release("Image manifest was not issued for the configured official image repo.", manifest_url=manifest_url, release_tag=release_tag)
 
     subject = str(trust.get("attestation_subject_digest") or "")
-    if subject and subject.removeprefix("sha256:") != artifact_sha:
+    if not subject:
+        return untrusted_release("Official image manifest does not declare an attestation subject digest.", manifest_url=manifest_url, release_tag=release_tag)
+    if subject.removeprefix("sha256:") != artifact_sha:
         return untrusted_release("Image attestation digest does not match the artifact SHA-256.", manifest_url=manifest_url, release_tag=release_tag)
 
     asset_names = {str(asset.get("name") or "") for asset in assets}

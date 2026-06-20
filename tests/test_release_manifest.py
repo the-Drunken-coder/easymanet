@@ -27,6 +27,11 @@ def test_build_release_manifest_records_artifact_and_provenance(tmp_path):
     assert manifest["artifact"]["sha256"] == hashlib.sha256(b"firmware").hexdigest()
     assert manifest["provenance"]["monorepo_source"] == "abc123"
     assert manifest["trust"]["attestation_subject_digest"] == f"sha256:{hashlib.sha256(b'firmware').hexdigest()}"
+    assert manifest["trust"]["expected_github_repo"] == "the-Drunken-coder/easymanet-images"
+    assert manifest["trust"]["signature_assets"] == [
+        f"{artifact.name}.sha256",
+        "easymanet-image-release.json.sigstore.json",
+    ]
     assert manifest["status"] == "current"
 
 

@@ -16,6 +16,7 @@ CANDIDATE_KEEP = 3
 CANDIDATE_MAX_DAYS = 90
 STABLE_RE = re.compile(r"^images-v\d+\.\d+\.\d+$")
 CANDIDATE_RE = re.compile(r"^images-v\d+\.\d+\.\d+-candidate\.\d+$")
+IMAGE_ASSET_RE = re.compile(r"^openmanet-.+?-(?P<target>[A-Za-z0-9._-]+)-squashfs-sysupgrade\.img\.gz$")
 
 
 @dataclass(frozen=True)
@@ -76,15 +77,22 @@ def main() -> int:
 
 
 def fetch_releases(repo: str) -> list[ReleaseRecord]:
-    result = run(["gh", "release", "list", "--repo", repo, "--limit", "100", "--json", "tagName,createdAt"])
-    data = json.loads(result.stdout)
+    result = run(["gh", "api", f"repos/{repo}/releases?per_page=100", "--paginate", "--slurp"])
+    pages = json.loads(result.stdout)
+    data: list[dict[str, Any]] = []
+    for page in pages:
+        if isinstance(page, list):
+            data.extend(item for item in page if isinstance(item, dict))
+        elif isinstance(page, dict):
+            data.append(page)
+
     records: list[ReleaseRecord] = []
     for item in data:
-        tag = str(item.get("tagName") or "")
-        created = str(item.get("createdAt") or "")
+        tag = str(item.get("tag_name") or item.get("tagName") or "")
+        created = str(item.get("created_at") or item.get("createdAt") or "")
         if not tag or not created:
             continue
-        records.append(ReleaseRecord(tag=tag, created_at=_parse_time(created), target=_target_from_tag(tag)))
+        records.append(ReleaseRecord(tag=tag, created_at=_parse_time(created), target=_target_from_assets(item)))
     return records
 
 
@@ -92,9 +100,18 @@ def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _target_from_tag(tag: str) -> str:
-    del tag
-    return "rpi4-mm6108-spi"
+def _target_from_assets(release: dict[str, Any]) -> str:
+    assets = release.get("assets", [])
+    if not isinstance(assets, list):
+        return "unknown"
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "")
+        match = IMAGE_ASSET_RE.match(name)
+        if match:
+            return match.group("target")
+    return "unknown"
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:

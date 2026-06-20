@@ -23,8 +23,8 @@ SECRET_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SECRET_LINE_PATTERN = re.compile(
-    r"(?P<prefix>\b(password|passphrase|psk|secret|token|api[_-]?key|root_password_hash)\b\s*[:=]\s*)"
-    r"(?P<quote>['\"]?)(?P<value>[^'\"\n#]+)(?P=quote)",
+    r"(?P<prefix>\b(?P<key>password|passphrase|psk|secret|token|api[_-]?key|root_password_hash)\b\s*[:=]\s*)"
+    r"(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)|(?P<unquoted>[^\s#\n]+))",
     re.IGNORECASE,
 )
 REDACTED = "<redacted>"
@@ -135,8 +135,9 @@ def image_inventory() -> dict[str, Any]:
 def redact_text(text: str, redactions: list[str] | None = None) -> str:
     def replace(match: re.Match[str]) -> str:
         if redactions is not None:
-            redactions.append(match.group(2).lower())
-        return f"{match.group('prefix')}{match.group('quote')}{REDACTED}{match.group('quote')}"
+            redactions.append(match.group("key").lower())
+        quote = match.group("quote") or ""
+        return f"{match.group('prefix')}{quote}{REDACTED}{quote}"
 
     return SECRET_LINE_PATTERN.sub(replace, text)
 
@@ -190,7 +191,11 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
         return
     if root.is_file():
         arcname = f"boot-reports/{root.name}"
-        zf.writestr(arcname, redact_text(root.read_text(errors="replace"), redactions))
+        try:
+            zf.writestr(arcname, redact_text(root.read_text(encoding="utf-8"), redactions))
+        except UnicodeDecodeError:
+            with root.open("rb") as src, zf.open(arcname, "w") as dst:
+                shutil.copyfileobj(src, dst)
         files.append(arcname)
         return
     for path in sorted(root.rglob("*")):
@@ -199,7 +204,7 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
         rel = path.relative_to(root).as_posix()
         arcname = f"boot-reports/{rel}"
         try:
-            zf.writestr(arcname, redact_text(path.read_text(errors="replace"), redactions))
+            zf.writestr(arcname, redact_text(path.read_text(encoding="utf-8"), redactions))
         except UnicodeDecodeError:
             with path.open("rb") as src, zf.open(arcname, "w") as dst:
                 shutil.copyfileobj(src, dst)

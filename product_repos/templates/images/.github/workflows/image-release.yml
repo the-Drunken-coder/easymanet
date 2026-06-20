@@ -218,7 +218,7 @@ jobs:
           PY
 
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
         with:
           subject-path: |
             dist/*.img.gz
@@ -226,7 +226,7 @@ jobs:
             dist/easymanet-image-release.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9
 
       - name: Sign release manifest
         run: |
@@ -234,12 +234,30 @@ jobs:
 
       - name: Generate release notes
         if: inputs.release_tag != ''
+        continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_RELEASE_NOTES_MODEL: ${{ vars.OPENAI_RELEASE_NOTES_MODEL || 'gpt-5.4-mini' }}
           IMAGE_MANIFEST: dist/easymanet-image-release.json
           RELEASE_NOTES: dist/release-notes.md
-        run: python tools/packaging/generate_image_release_notes.py
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY is not configured; fallback release notes will be used."
+            exit 0
+          fi
+          python tools/packaging/generate_image_release_notes.py
+
+      - name: Fallback release notes
+        if: inputs.release_tag != ''
+        run: |
+          if [ ! -s dist/release-notes.md ]; then
+            {
+              printf '%s\n' '## User Summary'
+              printf '%s\n\n' 'EasyMANET firmware image release.'
+              printf '%s\n' '## Technical Appendix'
+              printf '%s\n' 'See easymanet-image-release.json and attached checksums/signatures.'
+            } > dist/release-notes.md
+          fi
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -275,6 +293,7 @@ jobs:
 
       - name: Clean up old image releases
         if: inputs.release_tag != ''
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

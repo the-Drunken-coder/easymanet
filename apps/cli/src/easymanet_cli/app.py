@@ -48,7 +48,6 @@ def diagnostics_bundle_cmd(
     node: str = typer.Option("", "--node", "-n", help="Node context to include"),
     boot_report: str = typer.Option("", "--boot-report", help="Boot report file or directory"),
     output: str = typer.Option("", "--output", "-o", help="Output .zip path"),
-    include_mesh: bool = typer.Option(False, "--include-mesh", help="Include mesh payload data when provided by callers"),
     include_disks: bool = typer.Option(False, "--include-disks", help="Include removable disk inventory"),
 ):
     """Create a redacted EasyMANET support bundle."""
@@ -57,7 +56,6 @@ def diagnostics_bundle_cmd(
         node=node,
         boot_report=boot_report,
         output=output,
-        include_mesh=include_mesh,
         include_disks=include_disks,
     )
     typer.secho("Support bundle exported.", fg=typer.colors.GREEN)

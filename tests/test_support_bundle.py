@@ -75,3 +75,52 @@ def test_default_support_bundle_path_uses_diagnostics_dir(tmp_path, monkeypatch)
     assert path.parent == workspace / "Diagnostics"
     assert path.name.startswith("easymanet-support-")
     assert path.suffix == ".zip"
+
+
+def test_support_bundle_redacts_quoted_secrets_containing_hash(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    fleet = workspace / "Fleets" / "field.yml"
+    fleet.write_text(FLEET.replace("mesh-secret", "mesh#secret").replace("ap-secret", "ap#secret"))
+    boot = tmp_path / "boot-report-latest"
+    boot.mkdir()
+    (boot / "logread.txt").write_text('password="abc#123"\n')
+
+    result = support_bundle.create_support_bundle(
+        config="field",
+        node="point01",
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+        flash_log="token='tok#en'\n",
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        config_text = archive.read("fleet/redacted-config.yml").decode()
+        boot_text = archive.read("boot-reports/logread.txt").decode()
+        flash_text = archive.read("flash/log.txt").decode()
+        combined = "\n".join([config_text, boot_text, flash_text])
+        assert "mesh#secret" not in combined
+        assert "ap#secret" not in combined
+        assert "abc#123" not in combined
+        assert "tok#en" not in combined
+        assert '<redacted>' in boot_text
+        assert "'<redacted>'" in flash_text
+
+
+def test_support_bundle_preserves_non_utf_boot_report_file(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    boot = tmp_path / "boot-report-latest"
+    boot.mkdir()
+    binary = b"\xff\xfe\x00\x01"
+    (boot / "capture.bin").write_bytes(binary)
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        assert archive.read("boot-reports/capture.bin") == binary

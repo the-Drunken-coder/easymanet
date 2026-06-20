@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, urlparse
 
 import typer
 
+from easymanet.support_bundle import create_support_bundle
+
 from .mesh import mesh_discover_payload
 from .payloads import disks_payload, state_payload, validate_payload
 
@@ -76,13 +78,23 @@ class _DesktopHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/validate", "/api/mesh/discover"}:
+        if parsed.path not in {"/api/validate", "/api/mesh/discover", "/api/support/bundle"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
             payload = self._read_json()
             if parsed.path == "/api/mesh/discover":
                 self._send_json(mesh_discover_payload(payload))
+            elif parsed.path == "/api/support/bundle":
+                self._send_json(
+                    create_support_bundle(
+                        config=str(payload.get("config") or ""),
+                        node=str(payload.get("node") or ""),
+                        boot_report=str(payload.get("boot_report") or ""),
+                        output=str(payload.get("output") or ""),
+                        include_disks=bool(payload.get("include_disks", False)),
+                    ).to_dict()
+                )
             else:
                 self._send_json(validate_payload(payload))
         except ValueError as exc:

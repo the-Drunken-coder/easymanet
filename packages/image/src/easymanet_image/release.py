@@ -9,10 +9,11 @@ from typing import Any, Optional
 
 from easymanet import __version__ as EASYMANET_VERSION
 from easymanet._download_integrity import image_sha256
+from easymanet.release_trust import IMAGE_RELEASE_PRODUCT as _IMAGE_RELEASE_PRODUCT
 
 IMAGE_RELEASE_MANIFEST = "easymanet-image-release.json"
 IMAGE_RELEASE_SCHEMA_VERSION = 2
-IMAGE_RELEASE_PRODUCT = "easymanet-openmanet-image"
+IMAGE_RELEASE_PRODUCT = _IMAGE_RELEASE_PRODUCT
 DEFAULT_PUBLIC_IMAGE_REPO = "the-Drunken-coder/easymanet-images"
 
 

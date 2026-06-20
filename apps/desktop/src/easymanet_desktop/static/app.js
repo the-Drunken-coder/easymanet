@@ -236,16 +236,12 @@ copyFlashLog.addEventListener("click", async () => {
   }
 });
 exportSupportBundle.addEventListener("click", async () => {
-  if (!nativeApi || !nativeApi.exportSupportBundle) {
-    setFlashStatus("bad", "Support bundle export is available in the desktop app.");
-    return;
-  }
   const payload = {
     config: state.configPath || configInput.value.trim(),
     node: state.nodeName || nodeSelect.value.trim(),
   };
   try {
-    const result = await nativeApi.exportSupportBundle(payload);
+    const result = await postJson("/api/support/bundle", payload);
     if (result.ok) {
       appendLog("success", `Support bundle exported: ${result.path}`);
       setFlashStatus("ok", "Support bundle exported.");

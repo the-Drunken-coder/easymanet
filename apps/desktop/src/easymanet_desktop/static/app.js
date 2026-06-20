@@ -658,6 +658,8 @@ async function copyDiagnosticsSummary() {
   const result = await nativeApi.copyText(text);
   if (result.ok) {
     showCopied(diagnosticsCopy, "Copy Summary");
+  } else {
+    renderDiagnosticsResult({ ok: false, message: errorDetail(result) || "Could not copy support summary." });
   }
 }
 

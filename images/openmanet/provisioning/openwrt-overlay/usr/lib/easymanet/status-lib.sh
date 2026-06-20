@@ -125,7 +125,7 @@ status_fleet_json() {
             online) state="OK" ;;
             offline)
                 state="MISSING"
-                echo missing >> "$missing_count_file"
+                printf '%s\n' missing >> "$missing_count_file"
                 ;;
             *) state="UNKNOWN" ;;
         esac

@@ -201,6 +201,7 @@ def test_redact_value_removes_obvious_secret_fields():
         "mesh": {"password": "secret", "mesh_psk": "psk-secret"},
         "gateway": {"wifi": {"password": "wifi-secret", "wifi_passphrase": "phrase-secret"}},
         "api_key_id": "api-secret",
+        "public_key_fingerprint": "not-secret",
         "node": {"name": "gate01"},
     }
 
@@ -211,4 +212,5 @@ def test_redact_value_removes_obvious_secret_fields():
     assert redacted["gateway"]["wifi"]["password"] == "<redacted>"
     assert redacted["gateway"]["wifi"]["wifi_passphrase"] == "<redacted>"
     assert redacted["api_key_id"] == "<redacted>"
+    assert redacted["public_key_fingerprint"] == "not-secret"
     assert redacted["node"]["name"] == "gate01"

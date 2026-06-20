@@ -273,9 +273,12 @@ def import_boot_report(*, source: str) -> dict[str, Any]:
 
 def redacted_yaml_text(path: Path) -> str:
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return _redact_text(path.read_text(encoding="utf-8", errors="replace"))
+        text = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text)
+    except OSError:
+        return ""
+    except yaml.YAMLError:
+        return _redact_text(text)
     return yaml.safe_dump(redact_value(data), sort_keys=False)
 
 
@@ -390,7 +393,11 @@ def _safe_name(value: str) -> str:
 
 def _is_secret_key(key: str) -> bool:
     lowered = key.lower()
-    return lowered in SECRET_KEYS or any(part in lowered for part in ("password", "passphrase", "secret", "private_key", "token", "psk", "key"))
+    if lowered in SECRET_KEYS:
+        return True
+    if any(part in lowered for part in ("password", "passphrase", "secret", "private_key", "api_key", "token", "psk")):
+        return True
+    return (lowered == "key" or lowered.endswith("_key")) and lowered not in {"public_key", "primary_key"}
 
 
 def _redact_text(text: str) -> str:

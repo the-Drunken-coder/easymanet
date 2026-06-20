@@ -11,6 +11,7 @@ from typing import Optional
 
 import typer
 
+from easymanet.diagnostics import export_support_bundle, import_boot_report, run_diagnostics
 from easymanet.disks import list_disks
 from easymanet.manifest import ManifestError, load_manifest
 from easymanet.platform import check_platform
@@ -33,10 +34,47 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 image_app = typer.Typer(help="Manage image URLs, cache, and firmware builds")
+diagnostics_app = typer.Typer(help="Collect node diagnostics and support bundles")
 app.add_typer(image_app, name="image")
+app.add_typer(diagnostics_app, name="diagnostics")
 
 register_flash_command(app)
 register_image_commands(image_app)
+
+
+@diagnostics_app.command(name="run")
+def diagnostics_run_cmd(
+    config: str = typer.Option("", "--config", "-c", help="Path or workspace name for a fleet config"),
+):
+    """Collect live EasyMANET diagnostics and print a copyable summary."""
+    payload = run_diagnostics(config=config)
+    typer.echo(payload["summary"])
+    raise typer.Exit(0 if payload.get("ok") else 1)
+
+
+@diagnostics_app.command(name="bundle")
+def diagnostics_bundle_cmd(
+    config: str = typer.Option("", "--config", "-c", help="Path or workspace name for a fleet config"),
+):
+    """Export a zip support bundle under the shared Diagnostics folder."""
+    payload = export_support_bundle(config=config)
+    typer.echo(payload["summary"])
+    typer.secho(f"Support bundle: {payload['bundle_path']}", fg=typer.colors.GREEN)
+
+
+@diagnostics_app.command(name="import-boot-report")
+def diagnostics_import_boot_report_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Mounted boot drive or easymanet report folder"),
+):
+    """Import offline boot reports into the shared Diagnostics folder."""
+    payload = import_boot_report(source=source)
+    if not payload.get("ok"):
+        for error in payload.get("errors", []):
+            typer.secho(f"Error: {error}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.secho(f"Imported boot reports: {payload['target']}", fg=typer.colors.GREEN)
+    for path in payload.get("imported", []):
+        typer.echo(f"  {path}")
 
 
 @app.command(name="validate")

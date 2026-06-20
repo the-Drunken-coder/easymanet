@@ -84,6 +84,39 @@ async function validateMeshPayload(payload) {
   };
 }
 
+async function validateDiagnosticsPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Diagnostics payload must be an object"] };
+  }
+
+  const rawConfig = typeof payload.config === "string" ? payload.config.trim() : "";
+  if (!rawConfig) {
+    return { ok: true, config: "" };
+  }
+  if (hasTraversalSegment(rawConfig)) {
+    return { ok: false, errors: ["Fleet config path must not contain traversal segments"] };
+  }
+  const resolved = await resolveConfigPath(rawConfig, {
+    runBridge,
+    homeDir: () => app.getPath("home"),
+  });
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return { ok: true, config: resolved.config };
+}
+
+function validateBootReportImportPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Boot report import payload must be an object"] };
+  }
+  const source = typeof payload.source === "string" ? payload.source.trim() : "";
+  if (!source) {
+    return { ok: false, errors: ["Boot report source path is required"] };
+  }
+  return { ok: true, source };
+}
+
 function flashArgs(payload) {
   const args = ["--config", payload.config, "--node", payload.node, "--device", payload.device];
   if (payload.sshMode === "enable") {
@@ -96,6 +129,8 @@ function flashArgs(payload) {
 
 module.exports = {
   flashArgs,
+  validateBootReportImportPayload,
+  validateDiagnosticsPayload,
   validateFlashPayload,
   validateMeshPayload,
   validatePayload,

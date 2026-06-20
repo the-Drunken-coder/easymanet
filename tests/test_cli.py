@@ -163,6 +163,42 @@ def test_image_set_url_requires_sha256():
     assert "--set-url requires --set-sha256" in result.output
 
 
+def test_diagnostics_run_command_prints_summary(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    monkeypatch.setattr(
+        cli_app,
+        "run_diagnostics",
+        lambda config="": {"ok": True, "summary": "EasyMANET Diagnostics\nSupport code: EM-OK\n"},
+    )
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "run", "--config", "field"])
+
+    assert result.exit_code == 0
+    assert "Support code: EM-OK" in result.output
+
+
+def test_diagnostics_bundle_command_prints_bundle_path(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    monkeypatch.setattr(
+        cli_app,
+        "export_support_bundle",
+        lambda config="": {
+            "ok": True,
+            "summary": "EasyMANET Diagnostics\n",
+            "bundle_path": "/tmp/EasyMANET/Diagnostics/support.zip",
+        },
+    )
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "bundle", "--config", "field"])
+
+    assert result.exit_code == 0
+    assert "/tmp/EasyMANET/Diagnostics/support.zip" in result.output
+
+
 def test_flash_base_image_rejects_malformed_sha256(tmp_path, capsys):
     image = tmp_path / "openmanet.img.gz"
     image.write_bytes(b"firmware")

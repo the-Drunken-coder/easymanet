@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld("easymanet", {
   getDisks: (includeAll = false) => ipcRenderer.invoke("easymanet:disks", { includeAll }),
   validate: (payload) => ipcRenderer.invoke("easymanet:validate", payload),
   discoverMesh: (payload) => ipcRenderer.invoke("easymanet:mesh-discover", payload),
+  runDiagnostics: (payload) => ipcRenderer.invoke("easymanet:diagnostics-run", payload),
+  exportDiagnosticsBundle: (payload) => ipcRenderer.invoke("easymanet:diagnostics-bundle", payload),
+  importBootReport: (payload) => ipcRenderer.invoke("easymanet:diagnostics-import-boot-report", payload),
   flashPlan: (payload) => ipcRenderer.invoke("easymanet:flash-plan", payload),
   flash: (payload) => ipcRenderer.invoke("easymanet:flash", payload),
   onFlashEvent: (callback) => {

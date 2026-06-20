@@ -11,6 +11,8 @@ These files install the generic EasyMANET first-boot hooks:
 - `usr/lib/easymanet/provision-lib.sh`
 - `usr/lib/easymanet/api.sh`
 - `usr/lib/easymanet/api-lib.sh`
+- `usr/lib/easymanet/status-lib.sh`
+- `usr/lib/easymanet/display-status.sh`
 
 At flash time, EasyMANET writes the node-specific payload to the FAT
 boot partition at:

@@ -61,7 +61,7 @@
           </div>
           <div class="sidebar-section">
             <span class="sidebar-label">System</span>
-            <button class="nav-item" type="button" role="tab" aria-selected="false" disabled>
+            <button class="nav-item" id="nav-diagnostics" type="button" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab-target="tab-diagnostics">
               <span class="nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4 19h16"></path>
@@ -300,6 +300,45 @@
                       <p class="empty-meta">Run Scan Mesh to refresh this view.</p>
                     </div>
                   </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-diagnostics" role="tabpanel" aria-labelledby="nav-diagnostics" data-tab-panel hidden>
+          <div class="layout mesh-layout">
+            <form class="rail" id="diagnostics-form">
+              <section class="card">
+                <header class="card-head">
+                  <h2>Diagnostics</h2>
+                  <span class="chip subtle" id="diagnostics-status-chip">idle</span>
+                </header>
+                <div class="card-body">
+                  <label class="field">
+                    <span class="field-label">Fleet source</span>
+                    <span class="mesh-source mono trunc" id="diagnostics-config-source"></span>
+                  </label>
+                  <button id="diagnostics-run" class="btn primary block" type="submit">Run Diagnostics</button>
+                  <button id="diagnostics-export" class="btn ghost block" type="button">Export Support Bundle</button>
+                  <label class="field">
+                    <span class="field-label">Offline boot report source</span>
+                    <input id="diagnostics-import-source" placeholder="/Volumes/boot or /Volumes/boot/easymanet" autocomplete="off" spellcheck="false">
+                  </label>
+                  <button id="diagnostics-import" class="btn ghost block" type="button">Import Offline Boot Report</button>
+                  <div id="diagnostics-result" class="validation" hidden></div>
+                </div>
+              </section>
+            </form>
+
+            <div class="main-col">
+              <section class="card" id="diagnostics-panel">
+                <header class="card-head">
+                  <h2>Support Summary</h2>
+                  <button id="diagnostics-copy" class="btn ghost small" type="button">Copy Summary</button>
+                </header>
+                <div class="card-body">
+                  <div id="diagnostics-output" class="console" aria-live="polite">Run diagnostics to create a copyable support summary.</div>
                 </div>
               </section>
             </div>

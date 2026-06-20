@@ -115,7 +115,7 @@ def _target_from_assets(release: dict[str, Any]) -> str:
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, check=True, text=True, capture_output=True)
+    return subprocess.run(args, check=True, text=True, encoding="utf-8", capture_output=True)
 
 
 if __name__ == "__main__":

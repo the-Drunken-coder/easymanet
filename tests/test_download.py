@@ -406,6 +406,43 @@ def test_download_image_verifies_official_attestation_before_reusing_cache(tmp_p
     assert calls[0][0] == ["gh", "attestation", "verify", str(image), "--repo", "owner/repo"]
 
 
+def test_prune_verified_cache_treats_target_as_literal_glob(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    keep = cache / "openmanet-new-target[1].img.gz"
+    old = cache / "openmanet-old-target[1].img.gz"
+    unrelated = cache / "openmanet-old-target1.img.gz"
+    for path in (keep, old, unrelated):
+        _write_gzip(path)
+
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+
+    download._prune_verified_cache(
+        "target[1]",
+        keep=keep,
+        trust={"status": OFFICIAL_TRUST_STATUS, "source": "official"},
+    )
+
+    assert keep.exists()
+    assert not old.exists()
+    assert unrelated.exists()
+
+
+def test_get_cached_image_treats_target_as_literal_glob(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    literal = cache / "openmanet-target[1].img.gz"
+    glob_match = cache / "openmanet-target1.img.gz"
+    _write_gzip(literal, payload=b"literal")
+    _write_gzip(glob_match, payload=b"glob")
+    expected = _sha256(literal)
+
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "get_image_config", lambda _target: None)
+
+    assert download.get_cached_image("target[1]", sha256=expected) == literal
+
+
 def test_save_version_recovers_from_non_object_version_file(tmp_path, monkeypatch):
     version_file = tmp_path / "version.json"
     version_file.write_text("[]")

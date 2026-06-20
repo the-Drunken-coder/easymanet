@@ -92,7 +92,7 @@ class _DesktopHandler(BaseHTTPRequestHandler):
                         node=str(payload.get("node") or ""),
                         boot_report=str(payload.get("boot_report") or ""),
                         output=str(payload.get("output") or ""),
-                        include_disks=bool(payload.get("include_disks", False)),
+                        include_disks=_bool_payload(payload.get("include_disks", False)),
                     ).to_dict()
                 )
             else:
@@ -140,3 +140,13 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _bool_payload(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False

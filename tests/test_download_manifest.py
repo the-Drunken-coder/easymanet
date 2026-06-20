@@ -123,6 +123,32 @@ def test_release_manifest_missing_signature_assets_is_untrusted():
     assert ref.trust_status == "untrusted"
 
 
+def test_release_manifest_malformed_signature_assets_is_untrusted():
+    image_name = "image.img.gz"
+    ref = download._image_ref_from_release_manifest(
+        {
+            "schema_version": 2,
+            "product": "easymanet-openmanet-image",
+            "channel": "stable",
+            "target": "rpi4-mm6108-spi",
+            "artifact": {"filename": image_name, "sha256": "a" * 64},
+            "trust": {
+                "expected_github_repo": "owner/repo",
+                "attestation_subject_digest": f"sha256:{'a' * 64}",
+                "signature_assets": [f"{image_name}.sha256", {"name": "bad"}],
+            },
+        },
+        [{"name": image_name, "browser_download_url": "https://example.invalid/image.img.gz"}, {"name": f"{image_name}.sha256"}],
+        "rpi4-mm6108-spi",
+        expected_repo="owner/repo",
+        manifest_url="https://example.invalid/easymanet-image-release.json",
+    )
+
+    assert ref is not None
+    assert ref.trust_status == "untrusted"
+    assert "malformed" in ref.warnings[0]
+
+
 def test_release_manifest_missing_required_trust_fields_is_untrusted():
     image_name = "image.img.gz"
     ref = download._image_ref_from_release_manifest(

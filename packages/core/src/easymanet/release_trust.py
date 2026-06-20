@@ -120,7 +120,10 @@ def trust_from_manifest(
         return untrusted_release("Image attestation digest does not match the artifact SHA-256.", manifest_url=manifest_url, release_tag=release_tag)
 
     asset_names = {str(asset.get("name") or "") for asset in assets}
-    signature_assets = [str(name) for name in trust.get("signature_assets", []) if isinstance(name, str)]
+    raw_signature_assets = trust.get("signature_assets", [])
+    if not isinstance(raw_signature_assets, list) or not all(isinstance(name, str) for name in raw_signature_assets):
+        return untrusted_release("Official image manifest signature assets are malformed.", manifest_url=manifest_url, release_tag=release_tag)
+    signature_assets = [name for name in raw_signature_assets if name]
     if not signature_assets:
         return untrusted_release("Official image manifest does not list signature assets.", manifest_url=manifest_url, release_tag=release_tag)
     missing = [name for name in signature_assets if name not in asset_names]

@@ -203,6 +203,13 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
         zf.writestr("boot-reports/error.json", json.dumps({"errors": [f"Boot report not found: {root}"]}, indent=2) + "\n")
         files.append("boot-reports/error.json")
         return
+    if root.is_symlink():
+        zf.writestr(
+            "boot-reports/error.json",
+            json.dumps({"errors": [f"Boot report symlink skipped: {root}"]}, indent=2) + "\n",
+        )
+        files.append("boot-reports/error.json")
+        return
     if root.is_file():
         arcname = f"boot-reports/{root.name}"
         if _sensitive_boot_report_name(root.name):
@@ -218,7 +225,7 @@ def _add_boot_report(zf: zipfile.ZipFile, root: Path, *, files: list[str], redac
         files.append(arcname)
         return
     for path in sorted(root.rglob("*")):
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
         arcname = f"boot-reports/{rel}"

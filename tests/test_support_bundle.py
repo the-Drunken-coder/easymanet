@@ -171,3 +171,128 @@ def test_support_bundle_redacts_sensitive_boot_report_filenames(tmp_path, monkey
         assert archive.read("boot-reports/.ssh/id_rsa").decode() == "<redacted>\n"
         report = json.loads(archive.read("redaction-report.json"))
         assert "private_key_file" in report["redacted"]
+
+
+def test_support_bundle_skips_boot_report_symlink_file(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("password=outside-secret\n")
+    boot_link = tmp_path / "boot-link.txt"
+    boot_link.symlink_to(outside)
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot_link),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        names = set(archive.namelist())
+        assert "boot-reports/boot-link.txt" not in names
+        assert "outside-secret" not in "\n".join(
+            archive.read(name).decode(errors="ignore") for name in names
+        )
+        error = json.loads(archive.read("boot-reports/error.json"))
+        assert "symlink skipped" in error["errors"][0]
+
+
+def test_support_bundle_skips_boot_report_symlink_directory(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    (outside / "password.txt").write_text("password=outside-secret\n")
+    boot_link = tmp_path / "boot-link"
+    boot_link.symlink_to(outside, target_is_directory=True)
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot_link),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        names = set(archive.namelist())
+        assert "boot-reports/boot-link/password.txt" not in names
+        assert "outside-secret" not in "\n".join(
+            archive.read(name).decode(errors="ignore") for name in names
+        )
+        error = json.loads(archive.read("boot-reports/error.json"))
+        assert "symlink skipped" in error["errors"][0]
+
+
+def test_support_bundle_skips_broken_symlink(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    boot_link = tmp_path / "broken-boot-link"
+    boot_link.symlink_to(tmp_path / "missing-boot-report")
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot_link),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        error = json.loads(archive.read("boot-reports/error.json"))
+        assert "Boot report not found" in error["errors"][0]
+
+
+def test_support_bundle_skips_symlinks_inside_boot_report_dir(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("token=outside-secret\n")
+    boot = tmp_path / "boot-report-latest"
+    boot.mkdir()
+    (boot / "logread.txt").write_text("normal log\n")
+    (boot / "linked-secret.txt").symlink_to(outside)
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        names = set(archive.namelist())
+        assert "boot-reports/logread.txt" in names
+        assert "boot-reports/linked-secret.txt" not in names
+        assert "outside-secret" not in "\n".join(
+            archive.read(name).decode(errors="ignore") for name in names
+        )
+
+
+def test_support_bundle_skips_symlinked_directory_inside_boot_report(tmp_path, monkeypatch):
+    workspace = tmp_path / "EasyMANET"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    (outside / "password.txt").write_text("password=outside-secret\n")
+    nested = outside / "nested"
+    nested.mkdir()
+    (nested / "token.txt").write_text("token=outside-token\n")
+    boot = tmp_path / "boot-report-latest"
+    boot.mkdir()
+    (boot / "logread.txt").write_text("normal log\n")
+    (boot / "linked-dir").symlink_to(outside, target_is_directory=True)
+
+    result = support_bundle.create_support_bundle(
+        boot_report=str(boot),
+        output=str(tmp_path / "support.zip"),
+    )
+
+    with zipfile.ZipFile(result.path) as archive:
+        names = set(archive.namelist())
+        assert "boot-reports/logread.txt" in names
+        assert "boot-reports/linked-dir" not in names
+        assert "boot-reports/linked-dir/password.txt" not in names
+        assert "boot-reports/linked-dir/nested/token.txt" not in names
+        assert "outside-secret" not in "\n".join(
+            archive.read(name).decode(errors="ignore") for name in names
+        )
+        assert "outside-token" not in "\n".join(
+            archive.read(name).decode(errors="ignore") for name in names
+        )

@@ -25,6 +25,7 @@ import tempfile
 import time
 import urllib.request
 import urllib.error
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -311,7 +312,7 @@ def get_cached_image(
                 return cached
             if cached.exists():
                 cached.unlink()
-    cached_images = sorted(cache.glob(f"*{target}*"), key=_cache_mtime, reverse=True)
+    cached_images = sorted(cache.glob(f"*{glob_escape(target)}*"), key=_cache_mtime, reverse=True)
     for path in cached_images:
         if _valid_cached_image(path) and _cached_image_matches_sha256(path, expected_sha256):
             return path
@@ -377,7 +378,7 @@ def _prune_verified_cache(target: str, *, keep: Path, trust: dict[str, Any] | No
         return
     cache = cache_dir()
     try:
-        candidates = sorted(cache.glob(f"*{target}*"), key=_cache_mtime)
+        candidates = sorted(cache.glob(f"*{glob_escape(target)}*"), key=_cache_mtime)
     except OSError:
         return
     for path in candidates:

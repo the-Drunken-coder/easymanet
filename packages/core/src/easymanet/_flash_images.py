@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -179,7 +180,7 @@ def resolve_base_image(
             )
 
     try:
-        try:
+        if _accepts_keyword(download_image_fn, "trust"):
             path = download_image_fn(
                 target,
                 latest.version,
@@ -189,9 +190,7 @@ def resolve_base_image(
                 emit=emit,
                 trust=latest_trust,
             )
-        except TypeError as exc:
-            if "trust" not in str(exc):
-                raise
+        else:
             path = download_image_fn(
                 target,
                 latest.version,
@@ -223,6 +222,22 @@ def resolve_base_image(
             manifest_url=latest_manifest_url,
         ),
         warnings,
+    )
+
+
+def _accepts_keyword(fn: Callable[..., Any], keyword: str) -> bool:
+    """Return whether a callable accepts a keyword argument.
+
+    If introspection fails, return True so security-relevant trust metadata is
+    attempted and any incompatibility is surfaced by the callable itself.
+    """
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return True
+    return keyword in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
     )
 
 

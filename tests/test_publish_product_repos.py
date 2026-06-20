@@ -50,6 +50,21 @@ def test_repo_spec_source_paths_exist_in_current_layout():
             assert (ROOT / rel_path).exists(), f"{spec.key} source path is missing: {rel_path}"
 
 
+def test_tracked_files_rejects_untracked_file_source(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    rel_path = "tmp-untracked-source.txt"
+    source = tmp_path / rel_path
+    source.write_text("do not publish\n", encoding="utf-8")
+    spec = SimpleNamespace(source_paths=(rel_path,))
+
+    monkeypatch.setattr(publish, "ROOT", tmp_path)
+    monkeypatch.setattr(publish, "REPO_SPECS", {"test": spec})
+    monkeypatch.setattr(publish, "git_output", lambda _args: "")
+
+    with pytest.raises(FileNotFoundError, match="no tracked files"):
+        publish.tracked_files_for(rel_path)
+
+
 def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     publish = load_publish_module()
 

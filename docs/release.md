@@ -99,9 +99,11 @@ optionally, an `OPENAI_RELEASE_NOTES_MODEL` variable. The default model is
 Retention is automatic after a successful image release:
 
 - keep the latest 5 stable image releases,
-- keep the latest 3 candidate releases per target or candidates younger than
-  90 days, whichever keeps fewer,
+- delete candidate releases once they fall outside the latest 3 for their
+  target or become older than 90 days,
 - never delete the just-published release.
+
+## Diagnostics And Support
 
 Support bundles are exported as redacted `.zip` files from
 `easymanet diagnostics bundle` or the desktop app. They include fleet
@@ -118,5 +120,7 @@ git tag -a v0.2.0 -m "EasyMANET v0.2.0"
 
 Publish the wheel, Electron artifact, image artifacts, checksum files,
 `easymanet-image-release.json`, signature bundle, attestations, and release
-notes together. Keep the tag, Python version, Electron version, and image
-release manifest aligned.
+notes together. Each image artifact `NAME.img.gz` must have a sibling
+`NAME.img.gz.sha256` file containing one `sha256sum`-style line:
+`<hex sha256>  NAME.img.gz`. Keep the tag, Python version, Electron version,
+and image release manifest aligned.

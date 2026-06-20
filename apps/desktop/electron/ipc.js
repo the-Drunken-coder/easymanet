@@ -66,7 +66,9 @@ function registerIpc() {
     if (payload.bootReport) {
       args.push("--boot-report", String(payload.bootReport));
     }
-    args.push("--include-disks");
+    if (payload.includeDisks) {
+      args.push("--include-disks");
+    }
     return runBridge(args);
   });
   ipcMain.handle("easymanet:flash", async (event, payload = {}) => {

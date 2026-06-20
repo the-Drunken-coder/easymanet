@@ -70,9 +70,11 @@ def build_release_manifest(
         "provenance": {
             "source_repo": source_repo,
             "source_ref": source_ref or "",
+            # Prefer source_sha in new consumers; keep monorepo_source through schema v2.
             "source_sha": source_commit,
             "monorepo_source": source_commit,
             "public_repo": public_repo_name,
+            # Prefer public_repo_commit in new consumers; keep public_sha through schema v2.
             "public_repo_commit": public_sha,
             "public_sha": public_sha,
             "workflow_name": workflow_name or os.environ.get("GITHUB_WORKFLOW", ""),

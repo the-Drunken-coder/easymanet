@@ -41,8 +41,8 @@
   function imageItem(target, image) {
     const cached = Boolean(image.cached_path);
     const trustStatus = String(image.trust_status || image.trust_status === "" ? image.trust_status : image.trustStatus || "");
-    const imageStatus = String(image.image_status || "");
-    const source = String(image.source || "");
+    const imageStatus = String(image.image_status ?? image.imageStatus ?? "");
+    const source = String(image.source ?? image.imageSource ?? "");
     const configuredSha = String(image.sha256 || "");
     const cachedSha = String(image.cached_sha256 || "");
     const cachedSize = formatBytes(image.cached_size_bytes);

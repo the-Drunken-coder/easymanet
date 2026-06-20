@@ -90,15 +90,6 @@ def tracked_files_for(rel_path: str) -> tuple[str, ...]:
     if files:
         return files
 
-    allowed_file_paths = {
-        path
-        for spec in REPO_SPECS.values()
-        for path in spec.source_paths
-        if (ROOT / path).is_file()
-    }
-    if rel_path in allowed_file_paths:
-        return (rel_path,)
-
     raise FileNotFoundError(f"Source path has no tracked files: {rel_path}")
 
 

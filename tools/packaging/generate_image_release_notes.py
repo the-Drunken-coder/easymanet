@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -76,8 +77,16 @@ def call_openai(api_key: str, model: str, context: dict[str, Any]) -> str:
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        payload = json.loads(response.read().decode())
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = json.loads(response.read().decode(errors="replace"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")[:500]
+        raise SystemExit(f"OpenAI API error {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"OpenAI API unreachable: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"OpenAI API returned invalid JSON: {exc}") from exc
     text = payload.get("output_text")
     if isinstance(text, str) and text.strip():
         return text

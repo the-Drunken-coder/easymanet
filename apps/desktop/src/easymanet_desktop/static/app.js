@@ -239,6 +239,7 @@ exportSupportBundle.addEventListener("click", async () => {
   const payload = {
     config: state.configPath || configInput.value.trim(),
     node: state.nodeName || nodeSelect.value.trim(),
+    include_disks: true,
   };
   try {
     const result = await postJson("/api/support/bundle", payload);

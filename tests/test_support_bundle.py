@@ -85,7 +85,7 @@ def test_support_bundle_redacts_quoted_secrets_containing_hash(tmp_path, monkeyp
     fleet.write_text(FLEET.replace("mesh-secret", "mesh#secret").replace("ap-secret", "ap#secret"))
     boot = tmp_path / "boot-report-latest"
     boot.mkdir()
-    (boot / "logread.txt").write_text('password="abc#123"\n')
+    (boot / "logread.txt").write_text('password="abc#123"\ntoken=abc#123\n')
 
     result = support_bundle.create_support_bundle(
         config="field",
@@ -99,12 +99,13 @@ def test_support_bundle_redacts_quoted_secrets_containing_hash(tmp_path, monkeyp
         config_text = archive.read("fleet/redacted-config.yml").decode()
         boot_text = archive.read("boot-reports/logread.txt").decode()
         flash_text = archive.read("flash/log.txt").decode()
-        combined = "\n".join([config_text, boot_text, flash_text])
+        combined = f"{config_text}\n{boot_text}\n{flash_text}"
         assert "mesh#secret" not in combined
         assert "ap#secret" not in combined
         assert "abc#123" not in combined
         assert "tok#en" not in combined
         assert '<redacted>' in boot_text
+        assert "token=<redacted>" in boot_text
         assert "'<redacted>'" in flash_text
 
 

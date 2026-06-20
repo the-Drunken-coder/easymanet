@@ -24,7 +24,7 @@ SECRET_KEY_PATTERN = re.compile(
 )
 SECRET_LINE_PATTERN = re.compile(
     r"(?P<prefix>\b(?P<key>password|passphrase|psk|secret|token|api[_-]?key|root_password_hash)\b\s*[:=]\s*)"
-    r"(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)|(?P<unquoted>[^\s#\n]+))",
+    r"(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)|(?P<unquoted>[^\s\n]+))",
     re.IGNORECASE,
 )
 PRIVATE_KEY_BLOCK_PATTERN = re.compile(

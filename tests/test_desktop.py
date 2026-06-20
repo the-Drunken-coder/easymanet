@@ -955,6 +955,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "start-flash" in index.read_text()
     assert "copy-flash-log" in index.read_text()
     assert "export-support-bundle" in index.read_text()
+    assert "include_disks: true" in text
     assert 'postJson("/api/support/bundle", payload)' in text
     assert "role-default-ssh" in index.read_text()
     assert "admin-password" in index.read_text()

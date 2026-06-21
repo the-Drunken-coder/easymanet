@@ -44,7 +44,6 @@ class SurfaceSpec:
 
 
 PRODUCT_DOC_PATHS = (
-    "docs/README.md",
     "docs/architecture.md",
     "docs/flashing.md",
     "docs/lessons-learned.md",
@@ -207,6 +206,7 @@ SURFACES = {
         description="Public local-first desktop operator console for EasyMANET.",
         source_paths=(
             ".gitignore",
+            "docs/flashing.md",
             "docs/manifest.md",
             "examples/three-node-field-mesh.yml",
             "packages/core/src/easymanet",

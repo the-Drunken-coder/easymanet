@@ -40,10 +40,17 @@ python tools/packaging/publish_product_repos.py \
 Release dispatches are intentional:
 
 ```bash
+VERSION=$(python - <<'PY'
+import tomllib
+from pathlib import Path
+
+print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+PY
+)
 python tools/packaging/publish_product_repos.py \
   --product images \
   --dispatch \
-  --release-tag images-v0.2.0 \
+  --release-tag "images-v${VERSION}" \
   --openmanet-version 1.6.5 \
   --board ekh-bcm2711 \
   --target rpi4-mm6108-spi \
@@ -67,10 +74,10 @@ Each generated public repo has:
 This keeps public runner cost on the public product repo while the authoring
 repo controls the generated release logic.
 
-Authoring-only publisher files, public-repo docs, design-decision notes, and
-problem-tracking notes are intentionally not copied into the public product
-repos. Add new exported files to the publish manifest deliberately instead of
-copying whole authoring directories.
+Authoring-only publisher files, the authoring documentation index, public-repo
+docs, design-decision notes, and problem-tracking notes are intentionally not
+copied into the public product repos. Add new exported files to the publish
+manifest deliberately instead of copying whole authoring directories.
 
 ## Python Package Publishing
 
@@ -87,7 +94,7 @@ Before the first PyPI upload, configure a PyPI pending trusted publisher for:
 - Environment: `pypi`
 
 After that one-time PyPI setup, run the authoring repo publish workflow with
-`product=cli`, `push=true`, `dispatch=true`, `release_tag=cli-v0.2.0`, and
+`product=cli`, `push=true`, `dispatch=true`, `release_tag=cli-v<version>`, and
 `publish_pypi=true` to update the public repo, dispatch the CLI release, and
-upload the package to PyPI. Leave `publish_pypi=false` to create only the GitHub
-release and workflow artifact.
+upload the package to PyPI. Leave `publish_pypi=false` to create only the
+GitHub release and workflow artifact.

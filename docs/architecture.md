@@ -60,9 +60,11 @@ discovery, shared workspace fleet discovery, and fleet validation. The Python
 `easymanet-desktop serve` command keeps a browser-served fallback for
 development and smoke testing.
 
-### Publish Surface (`tools/publish/src/easymanet_publish/`)
-Exports generated public product surfaces locally. It does not configure public
-subrepositories or credentials.
+### Publish Surface (`tools/publish/src/easymanet_publish/`, `tools/packaging/publish_product_repos.py`)
+Owns the public product surface definitions. The `easymanet-publish export`
+command creates local previews, while the packaging publish script can generate,
+push, and dispatch the public product repositories when configured with
+credentials.
 
 ### Manifest (`manifest.py`)
 Parses `fleet.yml` into a structured Python object. Provides accessor

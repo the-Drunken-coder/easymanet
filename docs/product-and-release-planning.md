@@ -16,8 +16,9 @@ philosophy, reasoning, constraints, and tradeoffs that should survive
 repo churn.
 
 Implementation note: the private monorepo split now lives in
-`docs/monorepo.md`. Public subrepositories are intentionally not configured
-in this repo; only local generated public-surface exports are implemented.
+`docs/monorepo.md`. Public product repositories are generated from this repo;
+the current publish tooling can create local previews, push generated contents,
+and dispatch public release workflows when configured with credentials.
 
 ## Starting Point
 

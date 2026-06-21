@@ -493,6 +493,79 @@ def test_desktop_bridge_mesh_discover_outputs_json(monkeypatch, capsys):
     assert payload["received"]["scan_subnet"] is True
 
 
+def test_desktop_bridge_support_bundle_outputs_json(monkeypatch, capsys, tmp_path):
+    output = tmp_path / "support.zip"
+    boot = tmp_path / "boot"
+    captured_kwargs = {}
+
+    class FakeSupportBundleResult:
+        def to_dict(self):
+            return {"ok": True, "path": str(output), "files": ["support-bundle.json"], "redactions": []}
+
+    def fake_create_support_bundle(**kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeSupportBundleResult()
+
+    monkeypatch.setattr(bridge, "create_support_bundle", fake_create_support_bundle)
+
+    exit_code = bridge.main(
+        [
+            "support-bundle",
+            "--config",
+            "field",
+            "--node",
+            "point01",
+            "--boot-report",
+            str(boot),
+            "--output",
+            str(output),
+            "--include-disks",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["path"] == str(output)
+    assert captured_kwargs == {
+        "config": "field",
+        "node": "point01",
+        "boot_report": str(boot),
+        "output": str(output),
+        "include_disks": True,
+    }
+
+
+def test_desktop_server_bool_payload_parses_false_strings():
+    assert server._bool_payload(True) is True
+    assert server._bool_payload("true") is True
+    assert server._bool_payload("1") is True
+    assert server._bool_payload(1) is True
+    assert server._bool_payload("false") is False
+    assert server._bool_payload("0") is False
+    assert server._bool_payload("no") is False
+    assert server._bool_payload(0) is False
+    assert server._bool_payload(None) is False
+    assert server._bool_payload("") is False
+    assert server._bool_payload("FALSE") is False
+    assert server._bool_payload("TRUE") is True
+    assert server._bool_payload("Yes") is True
+    assert server._bool_payload("No") is False
+
+
+def test_desktop_bridge_support_bundle_reports_errors(monkeypatch, capsys):
+    def fail_create_support_bundle(**_kwargs):
+        raise ValueError("support export failed")
+
+    monkeypatch.setattr(bridge, "create_support_bundle", fail_create_support_bundle)
+
+    exit_code = bridge.main(["support-bundle"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"ok": False, "errors": ["support export failed"]}
+
+
 def test_desktop_bridge_diagnostics_outputs_json(monkeypatch, capsys):
     monkeypatch.setattr(
         bridge,
@@ -957,6 +1030,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     app_js = static / "app.js"
     render_js = static / "render.js"
     styles = static / "styles.css"
+    ipc_js = root / "apps" / "desktop" / "electron" / "ipc.js"
 
     assert 'href="styles.css"' in index.read_text()
     for script in (
@@ -994,6 +1068,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "nativeApi.flash" in text
     assert "nativeApi.onFlashEvent" in text
     assert "nativeApi.copyText" in text
+    assert "booleanFlag(payload.includeDisks)" in ipc_js.read_text()
     assert "fleet-select" in index.read_text()
     assert "open-fleets-folder" in index.read_text()
     assert "app-shell" in index.read_text()
@@ -1014,6 +1089,10 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "preview-flash" in index.read_text()
     assert "start-flash" in index.read_text()
     assert "copy-flash-log" in index.read_text()
+    assert "export-support-bundle" in index.read_text()
+    assert "include_disks: true" in text
+    assert "includeDisks: true" in text
+    assert 'postJson("/api/support/bundle", payload)' in text
     assert "role-default-ssh" in index.read_text()
     assert "admin-password" in index.read_text()
     assert 'value="default"' not in index.read_text()
@@ -1060,12 +1139,15 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "renderImageState" in text
     assert "refreshImageSidebar" in text
     assert 'type === "download_completed"' in text
+    assert "exportSupportBundle" in text
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
     assert "meshRadioCard" in render_js.read_text()
     assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
+    assert "untrusted official" in render_js.read_text()
+    assert "image.imageStatus" in render_js.read_text()
     assert "ALLOWED_TONES" in render_js.read_text()
     assert '["ok", "warn", "bad", "subtle"]' in render_js.read_text()
     assert "body.flash-busy .appbar" in styles.read_text()

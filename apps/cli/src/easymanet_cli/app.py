@@ -24,6 +24,7 @@ from easymanet.workspace import (
     resolve_fleet_config,
     workspace_payload,
 )
+from easymanet.support_bundle import create_support_bundle
 from .common import print_errors_and_warnings
 from .flash import register_flash_command
 from .image import register_image_commands
@@ -59,8 +60,24 @@ def diagnostics_run_cmd(
 @diagnostics_app.command(name="bundle")
 def diagnostics_bundle_cmd(
     config: str = typer.Option("", "--config", "-c", help="Path or workspace name for a fleet config"),
+    node: str = typer.Option("", "--node", "-n", help="Node context to include in a local bundle"),
+    boot_report: str = typer.Option("", "--boot-report", help="Boot report file or directory to include"),
+    output: str = typer.Option("", "--output", "-o", help="Output .zip path for a local bundle"),
+    include_disks: bool = typer.Option(False, "--include-disks", help="Include removable disk inventory"),
 ):
     """Export a zip support bundle under the shared Diagnostics folder."""
+    if node or boot_report or output or include_disks:
+        result = create_support_bundle(
+            config=config,
+            node=node,
+            boot_report=boot_report,
+            output=output,
+            include_disks=include_disks,
+        )
+        typer.secho("Support bundle exported.", fg=typer.colors.GREEN)
+        typer.echo(f"  Path: {result.path}")
+        return
+
     payload = export_support_bundle(config=config)
     if payload.get("summary"):
         typer.echo(payload["summary"])

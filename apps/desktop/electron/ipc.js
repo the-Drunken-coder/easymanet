@@ -2,6 +2,7 @@ const { clipboard, dialog, ipcMain, shell } = require("electron");
 const { diagnosticsBridgeTimeoutMs, flashBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
 const { runBridge, runBridgeStreaming } = require("./bridge-process");
 const { runFlashWithAdministratorPrivileges } = require("./elevated-flash");
+const { booleanFlag } = require("./util");
 const {
   flashArgs,
   validateBootReportImportPayload,
@@ -51,6 +52,32 @@ function registerIpc() {
       args.push("--scan-subnet");
     }
     return runBridge(args, { timeoutMs: meshBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:support-bundle", async (_event, payload = {}) => {
+    const state = await runBridge(["state"]);
+    const defaultPath = state.ok && state.workspace ? state.workspace.diagnostics_dir : undefined;
+    const result = await dialog.showSaveDialog({
+      title: "Export EasyMANET support bundle",
+      defaultPath,
+      filters: [{ name: "Zip archive", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true, errors: ["Support bundle export canceled"] };
+    }
+    const args = ["support-bundle", "--output", result.filePath];
+    if (payload.config) {
+      args.push("--config", String(payload.config));
+    }
+    if (payload.node) {
+      args.push("--node", String(payload.node));
+    }
+    if (payload.bootReport) {
+      args.push("--boot-report", String(payload.bootReport));
+    }
+    if (booleanFlag(payload.includeDisks)) {
+      args.push("--include-disks");
+    }
+    return runBridge(args);
   });
   ipcMain.handle("easymanet:diagnostics-run", async (_event, payload = {}) => {
     const validated = await validateDiagnosticsPayload(payload);

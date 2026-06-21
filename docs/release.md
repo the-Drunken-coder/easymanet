@@ -78,6 +78,38 @@ easymanet image manifest \
   --output-dir dist/release/images
 ```
 
+## Image Trust And Channels
+
+Public image releases use two channels:
+
+- `stable`: tags like `images-v0.2.1`
+- `candidate`: tags like `images-v0.2.1-candidate.1`
+
+Official EasyMANET image auto-downloads require a verified schema-v2
+`easymanet-image-release.json`, SHA-256 checksum, GitHub artifact attestation,
+and Sigstore/cosign signature bundle. Custom local images and custom URLs are
+still allowed with an explicit SHA-256, but they are treated as
+checksum-only/user-supplied rather than official.
+
+The image release workflow generates release notes with the OpenAI Responses
+API. Configure the public image repository with an `OPENAI_API_KEY` secret and,
+optionally, an `OPENAI_RELEASE_NOTES_MODEL` variable. The default model is
+`gpt-5.4-mini`.
+
+Retention is automatic after a successful image release:
+
+- keep the latest 5 stable image releases,
+- delete candidate releases once they fall outside the latest 3 for their
+  target or become older than 90 days,
+- never delete the just-published release.
+
+## Diagnostics And Support
+
+Support bundles are exported as redacted `.zip` files from
+`easymanet diagnostics bundle` or the desktop app. They include fleet
+validation, workspace state, image trust/cache metadata, optional boot reports,
+optional disk inventory, and redaction notes.
+
 ## Tag And Publish
 
 Only tag after every verification item above passes:
@@ -86,6 +118,9 @@ Only tag after every verification item above passes:
 git tag -a v0.2.0 -m "EasyMANET v0.2.0"
 ```
 
-Publish the wheel, Electron artifact, image artifacts, and
-`easymanet-image-release.json` together. Keep the tag, Python version, Electron
-version, and image release manifest aligned.
+Publish the wheel, Electron artifact, image artifacts, checksum files,
+`easymanet-image-release.json`, signature bundle, attestations, and release
+notes together. Each image artifact `NAME.img.gz` must have a sibling
+`NAME.img.gz.sha256` file containing one `sha256sum`-style line:
+`<hex sha256>  NAME.img.gz`. Keep the tag, Python version, Electron version,
+and image release manifest aligned.

@@ -50,6 +50,21 @@ def test_repo_spec_source_paths_exist_in_current_layout():
             assert (ROOT / rel_path).exists(), f"{spec.key} source path is missing: {rel_path}"
 
 
+def test_tracked_files_rejects_untracked_file_source(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    rel_path = "tmp-untracked-source.txt"
+    source = tmp_path / rel_path
+    source.write_text("do not publish\n", encoding="utf-8")
+    spec = SimpleNamespace(source_paths=(rel_path,))
+
+    monkeypatch.setattr(publish, "ROOT", tmp_path)
+    monkeypatch.setattr(publish, "REPO_SPECS", {"test": spec})
+    monkeypatch.setattr(publish, "git_output", lambda _args: "")
+
+    with pytest.raises(FileNotFoundError, match="no tracked files"):
+        publish.tracked_files_for(rel_path)
+
+
 def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     publish = load_publish_module()
 
@@ -81,6 +96,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
             assert (repo / "tools" / "release_smoke.py").exists()
 
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
+    assert (generated["images"] / "tools" / "packaging" / "cleanup_image_releases.py").exists()
+    assert (generated["images"] / "tools" / "packaging" / "generate_image_release_notes.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
 
     cli_pyproject = tomllib.loads((generated["cli"] / "pyproject.toml").read_text(encoding="utf-8"))
@@ -114,6 +131,10 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "packages/image/src/easymanet_image/build.py" in image_release
     assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
+    assert "actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45" in image_release
+    assert "cosign sign-blob" in image_release
+    assert "generate_image_release_notes.py" in image_release
+    assert "cleanup_image_releases.py" in image_release
 
 
 def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject(tmp_path):

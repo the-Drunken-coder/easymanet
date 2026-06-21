@@ -16,6 +16,9 @@
     if (nativeApi && nativeApi.discoverMesh && url === "/api/mesh/discover") {
       return nativeApi.discoverMesh(body);
     }
+    if (nativeApi && nativeApi.exportSupportBundle && url === "/api/support/bundle") {
+      return nativeApi.exportSupportBundle(body);
+    }
     if (nativeApi && nativeApi.runDiagnostics && url === "/api/diagnostics/run") {
       return nativeApi.runDiagnostics(body);
     }

@@ -40,13 +40,30 @@
 
   function imageItem(target, image) {
     const cached = Boolean(image.cached_path);
+    const trustStatus = String(image.trust_status || image.trust_status === "" ? image.trust_status : image.trustStatus || "");
+    const imageStatus = String(image.image_status ?? image.imageStatus ?? "");
+    const source = String(image.source ?? image.imageSource ?? "");
     const configuredSha = String(image.sha256 || "");
     const cachedSha = String(image.cached_sha256 || "");
     const cachedSize = formatBytes(image.cached_size_bytes);
+    const trustLabel = trustStatus === "verified"
+      ? "verified official"
+      : trustStatus === "untrusted"
+        ? "untrusted official"
+        : source === "custom" || trustStatus === "checksum-only"
+          ? "checksum-only custom"
+          : cached ? "checksum-only" : "needs download";
     const lines = [
       `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(cached ? "ok" : "warn", cached ? "cached" : "will download")}</div>`,
       `<div class="meta-line">${escapeHtml(image.version || "unversioned")}</div>`,
+      `<div class="meta-line">${chip(trustStatus === "verified" ? "ok" : trustStatus === "untrusted" ? "bad" : cached ? "warn" : "subtle", trustLabel)}</div>`,
     ];
+    if (imageStatus === "superseded" || imageStatus === "unsafe") {
+      lines.push(`<div class="meta-line image-action">warning: ${escapeHtml(imageStatus)}</div>`);
+    }
+    for (const warning of image.warnings || []) {
+      lines.push(`<div class="meta-line image-action">${escapeHtml(warning)}</div>`);
+    }
     if (cached && cachedSize) {
       lines.push(`<div class="meta-line">${escapeHtml(cachedSize)}</div>`);
     }

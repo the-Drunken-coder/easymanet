@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import typer
 
 from easymanet.diagnostics import export_support_bundle, import_boot_report, run_diagnostics
+from easymanet.support_bundle import create_support_bundle
 
 from .mesh import mesh_discover_payload
 from .payloads import disks_payload, state_payload, validate_payload
@@ -81,6 +82,7 @@ class _DesktopHandler(BaseHTTPRequestHandler):
         if parsed.path not in {
             "/api/validate",
             "/api/mesh/discover",
+            "/api/support/bundle",
             "/api/diagnostics/run",
             "/api/diagnostics/bundle",
             "/api/diagnostics/import-boot-report",
@@ -91,6 +93,16 @@ class _DesktopHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if parsed.path == "/api/mesh/discover":
                 self._send_json(mesh_discover_payload(payload))
+            elif parsed.path == "/api/support/bundle":
+                self._send_json(
+                    create_support_bundle(
+                        config=str(payload.get("config") or ""),
+                        node=str(payload.get("node") or ""),
+                        boot_report=str(payload.get("boot_report") or ""),
+                        output=str(payload.get("output") or ""),
+                        include_disks=_bool_payload(payload.get("include_disks", False)),
+                    ).to_dict()
+                )
             elif parsed.path == "/api/diagnostics/run":
                 self._send_json(run_diagnostics(config=str(payload.get("config", "") or "")))
             elif parsed.path == "/api/diagnostics/bundle":
@@ -144,3 +156,13 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _bool_payload(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False

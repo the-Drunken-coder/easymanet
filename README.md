@@ -237,6 +237,7 @@ on `flash` and `image build`.
 | `easymanet image manifest --image IMG` | Write image release metadata with checksum and provenance |
 | `easymanet flash --config FILE --node NAME --device DEV --base-image IMG --yes` | Flash and provision |
 | `easymanet flash ... --dry-run` | Preview flash without writing |
+| `easymanet diagnostics bundle` | Export a redacted support bundle ZIP |
 | `npm --prefix apps/desktop/electron start` | Run the local Electron operator console |
 | `easymanet-desktop serve` | Run the browser-served fallback console |
 | `easymanet-publish export` | Generate local public product surfaces without setting up subrepos |

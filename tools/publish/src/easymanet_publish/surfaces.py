@@ -160,6 +160,8 @@ SURFACES = {
         description="Public firmware image factory for EasyMANET/OpenMANET releases.",
         source_paths=COMMON_PRODUCT_SOURCE_PATHS + CLI_RUNTIME_SOURCE_PATHS + (
             "tests/test_image_workflows.py",
+            "tools/packaging/cleanup_image_releases.py",
+            "tools/packaging/generate_image_release_notes.py",
         ),
         package_roots=(
             "packages/core/src",

@@ -17,6 +17,7 @@ from easymanet.flash import (
     run_flash_workflow,
 )
 from easymanet.diagnostics import export_support_bundle, import_boot_report, run_diagnostics
+from easymanet.support_bundle import create_support_bundle
 
 from .payloads import (
     disks_payload,
@@ -149,6 +150,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     mesh_discover.add_argument("--config", default="")
     mesh_discover.add_argument("--scan-subnet", action="store_true")
 
+    support_bundle = subparsers.add_parser("support-bundle")
+    support_bundle.add_argument("--config", default="")
+    support_bundle.add_argument("--node", default="")
+    support_bundle.add_argument("--boot-report", default="")
+    support_bundle.add_argument("--output", default="")
+    support_bundle.add_argument("--include-disks", action="store_true")
+
     diagnostics_run = subparsers.add_parser("diagnostics-run")
     diagnostics_run.add_argument("--config", default="")
 
@@ -184,6 +192,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "scan_subnet": args.scan_subnet,
                 }
             )
+        elif args.command == "support-bundle":
+            payload = create_support_bundle(
+                config=args.config,
+                node=args.node,
+                boot_report=args.boot_report,
+                output=args.output,
+                include_disks=args.include_disks,
+            ).to_dict()
         elif args.command == "diagnostics-run":
             payload = run_diagnostics(config=args.config)
         elif args.command == "diagnostics-bundle":

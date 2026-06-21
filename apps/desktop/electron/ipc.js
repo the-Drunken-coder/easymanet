@@ -2,6 +2,7 @@ const { clipboard, dialog, ipcMain, shell } = require("electron");
 const { diagnosticsBridgeTimeoutMs, flashBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
 const { runBridge, runBridgeStreaming } = require("./bridge-process");
 const { runFlashWithAdministratorPrivileges } = require("./elevated-flash");
+const { booleanFlag } = require("./util");
 const {
   flashArgs,
   validateBootReportImportPayload,
@@ -73,7 +74,7 @@ function registerIpc() {
     if (payload.bootReport) {
       args.push("--boot-report", String(payload.bootReport));
     }
-    if (payload.includeDisks) {
+    if (booleanFlag(payload.includeDisks)) {
       args.push("--include-disks");
     }
     return runBridge(args);

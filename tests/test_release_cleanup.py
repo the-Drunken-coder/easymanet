@@ -99,3 +99,21 @@ def test_fetch_releases_paginates_and_derives_targets_from_assets(monkeypatch):
 
     assert calls == [["gh", "api", "repos/owner/repo/releases?per_page=100", "--paginate", "--slurp"]]
     assert [release.target for release in releases] == ["rpi4-mm6108-spi", "rpi5-mm6108-spi"]
+
+
+def test_run_uses_timeout(monkeypatch):
+    cleanup = load_cleanup()
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(cleanup.subprocess, "run", fake_run)
+
+    cleanup.run(["gh", "--version"])
+
+    assert captured["args"] == ["gh", "--version"]
+    assert captured["kwargs"]["timeout"] == cleanup.COMMAND_TIMEOUT_SECONDS
+    assert captured["kwargs"]["check"] is True

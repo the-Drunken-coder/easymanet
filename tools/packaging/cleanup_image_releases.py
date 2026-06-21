@@ -14,6 +14,7 @@ from typing import Any
 STABLE_KEEP = 5
 CANDIDATE_KEEP = 3
 CANDIDATE_MAX_DAYS = 90
+COMMAND_TIMEOUT_SECONDS = 120
 STABLE_RE = re.compile(r"^images-v\d+\.\d+\.\d+$")
 CANDIDATE_RE = re.compile(r"^images-v\d+\.\d+\.\d+-candidate\.\d+$")
 IMAGE_ASSET_RE = re.compile(r"^openmanet-.+?-(?P<target>[A-Za-z0-9._-]+)-squashfs-sysupgrade\.img\.gz$")
@@ -115,7 +116,14 @@ def _target_from_assets(release: dict[str, Any]) -> str:
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, check=True, text=True, encoding="utf-8", capture_output=True)
+    return subprocess.run(
+        args,
+        check=True,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=COMMAND_TIMEOUT_SECONDS,
+    )
 
 
 if __name__ == "__main__":

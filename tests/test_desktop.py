@@ -1068,7 +1068,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "nativeApi.flash" in text
     assert "nativeApi.onFlashEvent" in text
     assert "nativeApi.copyText" in text
-    assert "if (payload.includeDisks)" in ipc_js.read_text()
+    assert "booleanFlag(payload.includeDisks)" in ipc_js.read_text()
     assert "fleet-select" in index.read_text()
     assert "open-fleets-folder" in index.read_text()
     assert "app-shell" in index.read_text()

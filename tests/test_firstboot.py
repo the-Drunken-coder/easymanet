@@ -145,6 +145,8 @@ def test_boot_report_hook_is_packaged_and_enabled():
     assert "vtun_gate_key" in report_text
     assert 'run_report_cmd "$latest/uci-mesh11sd.txt" easymanet_redact_uci_mesh11sd' in report_text
     assert 'easymanet_redact_config_mesh11sd > "$latest/config-mesh11sd"' in report_text
+    assert 'write_easymanet_status_json > "$latest/status.json"' in report_text
+    assert "easymanet-display-status.log" in report_text
     assert 'cp /etc/easymanet/provision.json' not in report_text
     assert 'cp /etc/config/mesh11sd "$latest/config-mesh11sd"' not in report_text
     assert "/etc/init.d/easymanet-boot-report enable" in defaults.read_text()
@@ -189,18 +191,46 @@ def test_led_status_hook_is_packaged_enabled_and_reported():
     assert "easymanet-led-status.log" in report.read_text()
 
 
+def test_display_status_hook_is_packaged_enabled_and_reported():
+    script = OVERLAY / "usr" / "lib" / "easymanet" / "display-status.sh"
+    status_lib = OVERLAY / "usr" / "lib" / "easymanet" / "status-lib.sh"
+    init = OVERLAY / "etc" / "init.d" / "easymanet-display-status"
+    defaults = OVERLAY / "etc" / "uci-defaults" / "95-easymanet-display-status"
+    report = OVERLAY / "usr" / "lib" / "easymanet" / "boot-report.sh"
+
+    for path in (script, status_lib, init, defaults):
+        assert path.exists()
+        assert path.stat().st_mode & 0o111
+
+    assert "--once" in script.read_text()
+    assert "EASYMANET_DISPLAY_TTY:=/dev/tty1" in status_lib.read_text()
+    assert "render_status_text" in status_lib.read_text()
+    init_text = init.read_text()
+    assert "procd_set_param command /usr/lib/easymanet/display-status.sh" in init_text
+    assert "procd_set_param respawn" not in init_text
+    assert "/etc/init.d/easymanet-display-status enable" in defaults.read_text()
+    assert "easymanet-display-status.log" in report.read_text()
+
+
 def test_topology_api_overlay_is_packaged():
     api = OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"
     identity = OVERLAY / "www" / "easymanet-api" / "v1" / "identity"
     neighbors = OVERLAY / "www" / "easymanet-api" / "v1" / "neighbors"
     topology = OVERLAY / "www" / "easymanet-api" / "v1" / "topology"
+    status = OVERLAY / "www" / "easymanet-api" / "v1" / "status"
     provision_text = PROVISION_RUNTIME.read_text()
 
-    for path in (api, identity, neighbors, topology):
+    for path in (api, identity, neighbors, topology, status):
         assert path.exists()
         assert path.stat().st_mode & 0o111
     assert API_LIB.exists()
-    assert "api-lib.sh" in api.read_text()
+    api_text = api.read_text()
+    assert "api-lib.sh" in api_text
+    assert "status-lib.sh" in api_text
+    assert api_text.index("status-lib.sh") > api_text.index('status)')
     assert "configure_easymanet_api" in provision_text
     assert "uhttpd.easymanet_api" in provision_text
     assert "allow_easymanet_api_wan=rule" not in provision_text
+    core_check = 'api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors"'
+    assert core_check in provision_text
+    assert 'api_home/v1/status" ] ||' not in provision_text

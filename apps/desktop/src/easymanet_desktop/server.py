@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, urlparse
 
 import typer
 
+from easymanet.diagnostics import export_support_bundle, import_boot_report, run_diagnostics
+
 from .mesh import mesh_discover_payload
 from .payloads import disks_payload, state_payload, validate_payload
 
@@ -76,17 +78,31 @@ class _DesktopHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/validate", "/api/mesh/discover"}:
+        if parsed.path not in {
+            "/api/validate",
+            "/api/mesh/discover",
+            "/api/diagnostics/run",
+            "/api/diagnostics/bundle",
+            "/api/diagnostics/import-boot-report",
+        }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
             payload = self._read_json()
             if parsed.path == "/api/mesh/discover":
                 self._send_json(mesh_discover_payload(payload))
+            elif parsed.path == "/api/diagnostics/run":
+                self._send_json(run_diagnostics(config=str(payload.get("config", "") or "")))
+            elif parsed.path == "/api/diagnostics/bundle":
+                self._send_json(export_support_bundle(config=str(payload.get("config", "") or "")))
+            elif parsed.path == "/api/diagnostics/import-boot-report":
+                self._send_json(import_boot_report(source=str(payload.get("source", "") or "")))
             else:
                 self._send_json(validate_payload(payload))
         except ValueError as exc:
             self._send_json({"ok": False, "errors": [str(exc)]}, status=400)
+        except Exception as exc:  # noqa: BLE001 - converted into desktop JSON.
+            self._send_json({"ok": False, "errors": [str(exc)]}, status=500)
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")

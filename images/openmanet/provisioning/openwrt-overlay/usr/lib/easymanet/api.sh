@@ -51,6 +51,15 @@ case "$endpoint" in
         emit_header
         topology_json_body
         ;;
+    status)
+        emit_header
+        if ! (
+            # shellcheck source=status-lib.sh
+            . "$SCRIPT_DIR/status-lib.sh" && status_json_body
+        ); then
+            printf '{"ok":false,"schema_version":1,"support_code":"EM-DIAG-PARTIAL","support_level":"warn","warnings":["EasyMANET status endpoint failed; identity, neighbors, and topology remain independent."],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        fi
+        ;;
     *)
         emit_header
         printf '{"ok":false,"code":"not_found","errors":["Unknown EasyMANET API endpoint"],"generated_at":%s}\n' "$(json_string "$(generated_at)")"

@@ -1,37 +1,44 @@
-# Node display monitoring
+# Node And Operator Observability
 
-## Concept
+This plan supersedes the earlier HDMI-only display-monitoring concept. Node
+status display, desktop diagnostics, CLI diagnostics, offline boot-report import,
+and support bundles all use the same node facts and support codes.
 
-Each mesh node can drive a local monitoring UI on an attached HDMI display. The experience should feel like plugging a monitor into a powered-on Pi: after a short boot delay, the screen shows live status without any on-device login or setup.
+## V1 Product Shape
 
-The UI is not the primary configuration path (fleet config and provisioning stay file-driven). The display is for field visibility—what the node is doing right now, and eventually how it relates to the rest of the mesh.
+- Audience: EasyMANET field operator.
+- HDMI/console display: simple colored text, no browser or desktop stack.
+- Gateway display: local node status plus expected fleet nodes as `OK`,
+  `MISSING`, or `UNKNOWN`.
+- Point display: local node status only.
+- Desktop Diagnostics tab: run diagnostics, copy a support summary, export a zip
+  bundle, and import offline boot reports.
+- CLI diagnostics: same run, bundle, and import workflows for scripts and agents.
 
-## Priorities
+## Shared Facts
 
-### Plug-and-watch
+The on-node `/v1/status` endpoint and boot-report `status.json` include:
 
-- Power on the Pi; plug in a display; monitoring UI appears on its own.
-- No keyboard, no touch login, no browser on another machine required for the basic case.
-- A startup delay is acceptable; an interactive setup step on the display is not.
+- node name, role, target, and IP address,
+- mesh connected state and neighbor count,
+- public internet reachability using configurable public ping targets,
+- manageability/API state,
+- stable support code and warnings,
+- gateway fleet status when running on a gate node.
 
-### Live, not static
+Stable V1 support codes are:
 
-- Content refreshes on a timer or as state changes—not a one-shot splash screen.
-- Early versions can be simple (text and counters). The architecture should allow richer layouts later without redefining the product.
+- `EM-OK`
+- `EM-BOOT-INCOMPLETE`
+- `EM-MESH-DOWN`
+- `EM-INET-DOWN`
+- `EM-NODE-MISSING`
+- `EM-API-DOWN`
+- `EM-DIAG-PARTIAL`
 
-### Room to grow visually
+## Support Bundle
 
-- Future iterations may include small diagrams (topology sketches, link state, role indicators)—lightweight graphics, not a full desktop or heavy UI framework.
-- Start minimal; add meaning and visuals as mesh observability matures.
-
-## Non-goals (for now)
-
-- Replacing remote admin (SSH, web UI, fleet tooling).
-- Requiring a specific monitor resolution or input device.
-- Defining exact metrics, screens, or implementation layout in this document.
-
-## Open questions
-
-- What belongs on screen at boot vs after mesh is up?
-- How much fleet context (intended topology) vs node-local view (neighbors, link quality)?
-- Headless operation: display optional; no impact when nothing is plugged in.
+Support bundles are written under the shared EasyMANET workspace
+`Diagnostics/` folder. They are meant for copy/paste into an AI agent or for
+keeping local field evidence. Bundles include raw logs where available and redact
+obvious secrets by default.

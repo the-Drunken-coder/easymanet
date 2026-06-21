@@ -95,11 +95,11 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 - `usr/lib/easymanet/provision.sh`: Generic shell script that finds the
   boot-partition payload, copies it into overlay storage, and applies
   UCI/OpenMANET configuration automatically.
-- `usr/lib/easymanet/api.sh`: CGI/API entrypoint for identity, neighbors, and
-  topology JSON.
+- `usr/lib/easymanet/api.sh`: CGI/API entrypoint for identity, neighbors,
+  status, and topology JSON.
 - `usr/lib/easymanet/*-lib.sh`, `provision-runtime.sh`, `network.sh`,
   `boot-report.sh`: sourced helpers for API parsing, provisioning, management
-  LAN repair, and post-boot diagnostics.
+  LAN repair, HDMI status display, and post-boot diagnostics.
 
 ## Design Principles
 
@@ -130,9 +130,23 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 /usr/lib/easymanet/
     provision.sh            ← generic provisioning entrypoint
     api.sh                  ← read-only mesh API entrypoint
+    status-lib.sh           ← shared support-code/status helpers
+    display-status.sh       ← simple HDMI/console status renderer
     *-lib.sh                ← sourced helper libraries
     provision-runtime.sh    ← sourced first-boot provisioning helpers
 ```
+
+## Observability V1
+
+Nodes expose a shared `/v1/status` JSON contract. The same facts feed the
+HDMI/console status display and boot-report `status.json` file. Status includes
+node identity, mesh neighbor count, public internet reachability, manageability,
+and a stable support code such as `EM-OK`, `EM-MESH-DOWN`, `EM-INET-DOWN`, or
+`EM-NODE-MISSING`.
+
+Gate nodes include a simple fleet list in status output so an attached display
+can show expected nodes as `OK`, `MISSING`, or `UNKNOWN`. Point nodes show only
+their own local status.
 
 ## Firmware Build Requirement
 

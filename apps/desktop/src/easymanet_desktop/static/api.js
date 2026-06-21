@@ -16,6 +16,15 @@
     if (nativeApi && nativeApi.discoverMesh && url === "/api/mesh/discover") {
       return nativeApi.discoverMesh(body);
     }
+    if (nativeApi && nativeApi.runDiagnostics && url === "/api/diagnostics/run") {
+      return nativeApi.runDiagnostics(body);
+    }
+    if (nativeApi && nativeApi.exportDiagnosticsBundle && url === "/api/diagnostics/bundle") {
+      return nativeApi.exportDiagnosticsBundle(body);
+    }
+    if (nativeApi && nativeApi.importBootReport && url === "/api/diagnostics/import-boot-report") {
+      return nativeApi.importBootReport(body);
+    }
     return fetchJson(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

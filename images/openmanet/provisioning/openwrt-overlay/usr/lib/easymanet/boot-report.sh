@@ -74,6 +74,7 @@ write_easymanet_status_json() {
         return 0
     fi
     if ! (
+        # shellcheck disable=SC2034
         PROVISION_JSON="$provision_json"
         API_PORT="${EASYMANET_API_PORT:-10411}"
         FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-1}"

@@ -814,6 +814,23 @@ def test_display_status_renders_copyable_console_text(tmp_path):
     assert "CODE" in result.stdout
 
 
+def test_status_memory_text_formats_meminfo_kib_as_mib(tmp_path):
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'. "{OVERLAY / "usr" / "lib" / "easymanet" / "status-lib.sh"}"; memory_text 1048576 262144',
+        ],
+        env=_status_env(tmp_path, _point_provision_json()),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "768/1024MiB (75%)"
+
+
 def test_boot_report_status_generation_failure_is_nonfatal(tmp_path):
     lib_dir = _copy_status_lib_dir(tmp_path)
     (lib_dir / "status-lib.sh").write_text("this is not valid shell syntax (\n")

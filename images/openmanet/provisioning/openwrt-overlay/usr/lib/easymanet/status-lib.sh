@@ -208,6 +208,20 @@ status_reset_color() {
     printf '\033[0m'
 }
 
+memory_text() {
+    mem_total="$1"
+    mem_avail="$2"
+    if [ "$mem_total" -gt 0 ] 2>/dev/null; then
+        mem_used=$((mem_total - mem_avail))
+        mem_pct="$(( mem_used * 100 / mem_total ))%"
+        mem_used_mib=$(( mem_used / 1024 ))
+        mem_total_mib=$(( mem_total / 1024 ))
+        printf '%s/%sMiB (%s)' "$mem_used_mib" "$mem_total_mib" "$mem_pct"
+    else
+        printf 'unknown'
+    fi
+}
+
 resources_text() {
     # Load average (1/5/15 min)
     load="$(awk '{print $1"/"$2"/"$3}' /proc/loadavg 2>/dev/null || true)"
@@ -223,13 +237,7 @@ resources_text() {
                 ;;
         esac
     done < /proc/meminfo 2>/dev/null || true
-    if [ "$mem_total" -gt 0 ] 2>/dev/null; then
-        mem_used=$((mem_total - mem_avail))
-        mem_pct="$(( mem_used * 100 / mem_total ))%"
-        mem_str="${mem_used}/${mem_total}MiB (${mem_pct})"
-    else
-        mem_str="unknown"
-    fi
+    mem_str="$(memory_text "$mem_total" "$mem_avail")"
 
     # Rootfs usage
     disk_pct="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,""); print $5}')"

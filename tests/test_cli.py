@@ -1,5 +1,6 @@
 """Tests for CLI helpers."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -161,6 +162,111 @@ def test_image_set_url_requires_sha256():
 
     assert result.exit_code == 1
     assert "--set-url requires --set-sha256" in result.output
+
+
+def test_diagnostics_run_command_prints_summary(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_run_diagnostics(config=""):
+        del config
+        return {"ok": True, "summary": "EasyMANET Diagnostics\nSupport code: EM-OK\n"}
+
+    monkeypatch.setattr(cli_app, "run_diagnostics", fake_run_diagnostics)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "run", "--config", "field"])
+
+    assert result.exit_code == 0
+    assert "Support code: EM-OK" in result.output
+
+
+def test_diagnostics_run_command_exits_nonzero_on_failure(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_run_diagnostics(config=""):
+        del config
+        return {
+            "ok": False,
+            "summary": "EasyMANET Diagnostics\nSupport code: EM-API-DOWN\n",
+            "errors": ["node API unavailable"],
+        }
+
+    monkeypatch.setattr(cli_app, "run_diagnostics", fake_run_diagnostics)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "run", "--config", "field"])
+
+    assert result.exit_code == 1
+    assert "EM-API-DOWN" in result.output
+    assert "node API unavailable" in result.output
+
+
+def test_diagnostics_bundle_command_prints_bundle_path(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_export_support_bundle(config=""):
+        del config
+        return {
+            "ok": True,
+            "summary": "EasyMANET Diagnostics\n",
+            "bundle_path": str(tmp_path / "EasyMANET" / "Diagnostics" / "support.zip"),
+        }
+
+    monkeypatch.setattr(cli_app, "export_support_bundle", fake_export_support_bundle)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "bundle", "--config", "field"])
+
+    assert result.exit_code == 0
+    assert str(Path(tmp_path / "EasyMANET" / "Diagnostics" / "support.zip")) in result.output
+
+
+def test_diagnostics_bundle_command_exits_nonzero_on_failure(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_export_support_bundle(config=""):
+        del config
+        return {"ok": False, "summary": "EasyMANET Diagnostics\n", "errors": ["bundle failed"]}
+
+    monkeypatch.setattr(cli_app, "export_support_bundle", fake_export_support_bundle)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "bundle", "--config", "field"])
+
+    assert result.exit_code == 1
+    assert "bundle failed" in result.output
+
+
+def test_diagnostics_import_boot_report_command_prints_imported_paths(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_import_boot_report(source):
+        return {"ok": True, "target": "/workspace/Diagnostics/imported", "imported": [source]}
+
+    monkeypatch.setattr(cli_app, "import_boot_report", fake_import_boot_report)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "import-boot-report", "--source", "/Volumes/boot"])
+
+    assert result.exit_code == 0
+    assert "/workspace/Diagnostics/imported" in result.output
+    assert "/Volumes/boot" in result.output
+
+
+def test_diagnostics_import_boot_report_command_exits_nonzero_on_failure(monkeypatch):
+    from typer.testing import CliRunner
+    import easymanet_cli.app as cli_app
+
+    def fake_import_boot_report(source):
+        del source
+        return {"ok": False, "errors": ["no boot reports found"]}
+
+    monkeypatch.setattr(cli_app, "import_boot_report", fake_import_boot_report)
+
+    result = CliRunner().invoke(cli_app.app, ["diagnostics", "import-boot-report", "--source", "/Volumes/boot"])
+
+    assert result.exit_code == 1
+    assert "no boot reports found" in result.output
 
 
 def test_flash_base_image_rejects_malformed_sha256(tmp_path, capsys):

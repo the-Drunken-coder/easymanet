@@ -117,6 +117,9 @@ configure_easymanet_api() {
         uci_commit uhttpd
         return 0
     fi
+    if [ ! -x "$api_home/v1/status" ]; then
+        echo "WARNING: EasyMANET status endpoint wrapper is missing; continuing without /v1/status" >> "$LOG_FILE"
+    fi
 
     echo "Configuring EasyMANET topology API on port $EM_EASYMANET_API_PORT..." >> "$LOG_FILE"
     uci_set uhttpd.easymanet_api=uhttpd

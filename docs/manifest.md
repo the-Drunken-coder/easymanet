@@ -179,11 +179,12 @@ nodes:
 ```
 
 With `uplink_interface: wifi`, EasyMANET joins the configured upstream Wi-Fi as
-`wan`. The desktop Mesh tab discovers nodes through the local topology API, so
-do not enable SSH solely for discovery. Treat any WAN-reachable management or
-API service as trusted-LAN only. With `uplink_interface: eth0`, EasyMANET leaves
-`eth0` on `br-lan` for wired management and does not run WAN DHCP on that
-management bridge.
+`wan`. The desktop Mesh and Diagnostics tabs discover nodes through the local
+EasyMANET API (`/v1/identity`, `/v1/neighbors`, `/v1/status`, and gate-only
+`/v1/topology`), so do not enable SSH solely for discovery. Treat any
+WAN-reachable management or API service as trusted-LAN only. With
+`uplink_interface: eth0`, EasyMANET leaves `eth0` on `br-lan` for wired
+management and does not run WAN DHCP on that management bridge.
 
 ---
 

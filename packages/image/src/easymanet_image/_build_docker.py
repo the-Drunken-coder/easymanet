@@ -212,7 +212,7 @@ mkdir -p files
 rm -rf \\
   files/etc/easymanet \\
   files/etc/init.d/easymanet-* \\
-  files/etc/uci-defaults/9[6-9]-easymanet* \\
+	  files/etc/uci-defaults/9[5-9]-easymanet* \\
   files/usr/lib/easymanet \\
   files/www/easymanet-api
 mkdir -p files/etc files/etc/uci-defaults files/usr/lib

@@ -13,6 +13,8 @@ Current first workflows:
 - Select a removable disk safely.
 - Preview, flash, and eject media through the shared CLI flash path.
 - Read boot reports and local diagnostics.
+- Run diagnostics, import offline boot reports, copy a support summary, and
+  export support bundles from the shared `Diagnostics/` workspace folder.
 
 This generated repo exists now so release and issue-reporting infrastructure can
 ship with the actual Electron app sources and packaged desktop release

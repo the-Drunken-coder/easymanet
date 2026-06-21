@@ -566,6 +566,101 @@ def test_desktop_bridge_support_bundle_reports_errors(monkeypatch, capsys):
     assert payload == {"ok": False, "errors": ["support export failed"]}
 
 
+def test_desktop_bridge_diagnostics_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "run_diagnostics",
+        lambda config="": {"ok": True, "summary": "EasyMANET Diagnostics\n", "config": config},
+    )
+
+    exit_code = bridge.main(
+        [
+            "diagnostics-run",
+            "--config",
+            "examples/three-node-field-mesh.yml",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["config"] == "examples/three-node-field-mesh.yml"
+
+
+def test_desktop_bridge_diagnostics_failure_outputs_json(monkeypatch, capsys):
+    def fail_diagnostics(config=""):
+        raise OSError(f"cannot read {config}")
+
+    monkeypatch.setattr(bridge, "run_diagnostics", fail_diagnostics)
+
+    exit_code = bridge.main(["diagnostics-run", "--config", "missing.yml"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "cannot read missing.yml" in payload["errors"][0]
+
+
+def test_desktop_bridge_diagnostics_bundle_outputs_json(tmp_path, monkeypatch, capsys):
+    bundle = tmp_path / "support.zip"
+    monkeypatch.setattr(
+        bridge,
+        "export_support_bundle",
+        lambda config="": {"ok": True, "bundle_path": str(bundle), "config": config},
+    )
+
+    exit_code = bridge.main(["diagnostics-bundle", "--config", "field"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["bundle_path"] == str(bundle)
+
+
+def test_desktop_bridge_diagnostics_bundle_failure_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "export_support_bundle",
+        lambda config="": {"ok": False, "errors": [f"bundle failed for {config}"]},
+    )
+
+    exit_code = bridge.main(["diagnostics-bundle", "--config", "field"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"] == ["bundle failed for field"]
+
+
+def test_desktop_bridge_diagnostics_import_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "import_boot_report",
+        lambda source: {"ok": True, "imported": [source]},
+    )
+
+    exit_code = bridge.main(["diagnostics-import-boot-report", "--source", "/Volumes/boot"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["imported"] == ["/Volumes/boot"]
+
+
+def test_desktop_bridge_diagnostics_import_failure_outputs_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        bridge,
+        "import_boot_report",
+        lambda source: {"ok": False, "errors": [f"no reports under {source}"]},
+    )
+
+    exit_code = bridge.main(["diagnostics-import-boot-report", "--source", "/Volumes/boot"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"] == ["no reports under /Volumes/boot"]
+
+
 def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
     calls = []
 
@@ -966,6 +1061,9 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "nativeApi.chooseConfig" in text
     assert "nativeApi.openFleetsFolder" in text
     assert "nativeApi.discoverMesh" in text
+    assert "nativeApi.runDiagnostics" in text
+    assert "nativeApi.exportDiagnosticsBundle" in text
+    assert "nativeApi.importBootReport" in text
     assert "nativeApi.flashPlan" in text
     assert "nativeApi.flash" in text
     assert "nativeApi.onFlashEvent" in text
@@ -977,10 +1075,15 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "sidebar-nav" in index.read_text()
     assert 'data-tab-target="tab-flash"' in index.read_text()
     assert 'data-tab-target="tab-mesh"' in index.read_text()
+    assert 'data-tab-target="tab-diagnostics"' in index.read_text()
     assert 'data-tab-panel' in index.read_text()
     assert "mesh-discover" in index.read_text()
     assert "mesh-scanning" in index.read_text()
     assert "mesh-radios" in index.read_text()
+    assert "diagnostics-run" in index.read_text()
+    assert "diagnostics-export" in index.read_text()
+    assert "diagnostics-import" in index.read_text()
+    assert "diagnostics-copy" in index.read_text()
     assert "mesh-ssh-user" not in index.read_text()
     assert "flash-panel" in index.read_text()
     assert "preview-flash" in index.read_text()
@@ -1132,6 +1235,9 @@ def test_electron_shell_files_exist():
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in electron_text
     assert "easymanet:mesh-discover" in electron_text
+    assert "easymanet:diagnostics-run" in electron_text
+    assert "easymanet:diagnostics-bundle" in electron_text
+    assert "easymanet:diagnostics-import-boot-report" in electron_text
     assert "easymanet:flash-plan" in electron_text
     assert "easymanet:flash" in electron_text
     assert "easymanet:flash-event" in electron_text
@@ -1142,6 +1248,9 @@ def test_electron_shell_files_exist():
     assert "resolveConfigPath" in path_utils_text
     assert "hasTraversalSegment" in path_utils_text
     assert "resolve-config" in path_utils_text
+    validation_text = (electron / "validation.js").read_text()
+    assert "Boot report source path must not contain traversal segments" in validation_text
+    assert "hasTraversalSegment(source)" in validation_text
     assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
 
     assert "flashBridgeTimeoutMs" in electron_text

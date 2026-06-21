@@ -470,6 +470,15 @@ else
     echo "WARNING: EasyMANET LED status init script not found; LED status will not start" >> "$LOG_FILE"
 fi
 
+display_status_init="$(_prefix_path /etc/init.d/easymanet-display-status)"
+if [ -x "$display_status_init" ]; then
+    echo "Enabling EasyMANET HDMI status display..." >> "$LOG_FILE"
+    "$display_status_init" enable 2>/dev/null || true
+    "$display_status_init" restart 2>/dev/null || "$display_status_init" start 2>/dev/null || true
+else
+    echo "WARNING: EasyMANET display status init script not found; HDMI status will not start" >> "$LOG_FILE"
+fi
+
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" > "$PROVISIONED_FLAG"
 echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
 echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"

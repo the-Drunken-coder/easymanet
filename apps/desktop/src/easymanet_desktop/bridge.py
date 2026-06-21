@@ -16,6 +16,7 @@ from easymanet.flash import (
     prepare_flash_workflow,
     run_flash_workflow,
 )
+from easymanet.diagnostics import export_support_bundle, import_boot_report, run_diagnostics
 from easymanet.support_bundle import create_support_bundle
 
 from .payloads import (
@@ -156,6 +157,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     support_bundle.add_argument("--output", default="")
     support_bundle.add_argument("--include-disks", action="store_true")
 
+    diagnostics_run = subparsers.add_parser("diagnostics-run")
+    diagnostics_run.add_argument("--config", default="")
+
+    diagnostics_bundle = subparsers.add_parser("diagnostics-bundle")
+    diagnostics_bundle.add_argument("--config", default="")
+
+    diagnostics_import = subparsers.add_parser("diagnostics-import-boot-report")
+    diagnostics_import.add_argument("--source", required=True)
+
     flash_plan = subparsers.add_parser("flash-plan")
     _add_flash_args(flash_plan, include_yes=False)
 
@@ -190,6 +200,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 output=args.output,
                 include_disks=args.include_disks,
             ).to_dict()
+        elif args.command == "diagnostics-run":
+            payload = run_diagnostics(config=args.config)
+        elif args.command == "diagnostics-bundle":
+            payload = export_support_bundle(config=args.config)
+        elif args.command == "diagnostics-import-boot-report":
+            payload = import_boot_report(source=args.source)
         elif args.command == "flash-plan":
             payload = flash_plan_payload(
                 config=args.config,

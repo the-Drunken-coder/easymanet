@@ -1,8 +1,15 @@
 const { clipboard, dialog, ipcMain, shell } = require("electron");
-const { flashBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
+const { diagnosticsBridgeTimeoutMs, flashBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
 const { runBridge, runBridgeStreaming } = require("./bridge-process");
 const { runFlashWithAdministratorPrivileges } = require("./elevated-flash");
-const { flashArgs, validateFlashPayload, validateMeshPayload, validatePayload } = require("./validation");
+const {
+  flashArgs,
+  validateBootReportImportPayload,
+  validateDiagnosticsPayload,
+  validateFlashPayload,
+  validateMeshPayload,
+  validatePayload,
+} = require("./validation");
 
 function registerIpc() {
   ipcMain.handle("easymanet:state", () => runBridge(["state"]));
@@ -70,6 +77,37 @@ function registerIpc() {
       args.push("--include-disks");
     }
     return runBridge(args);
+  });
+  ipcMain.handle("easymanet:diagnostics-run", async (_event, payload = {}) => {
+    const validated = await validateDiagnosticsPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const args = ["diagnostics-run"];
+    if (validated.config) {
+      args.push("--config", validated.config);
+    }
+    return runBridge(args, { timeoutMs: diagnosticsBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:diagnostics-bundle", async (_event, payload = {}) => {
+    const validated = await validateDiagnosticsPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    const args = ["diagnostics-bundle"];
+    if (validated.config) {
+      args.push("--config", validated.config);
+    }
+    return runBridge(args, { timeoutMs: diagnosticsBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:diagnostics-import-boot-report", async (_event, payload = {}) => {
+    const validated = validateBootReportImportPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    return runBridge(["diagnostics-import-boot-report", "--source", validated.source], {
+      timeoutMs: diagnosticsBridgeTimeoutMs,
+    });
   });
   ipcMain.handle("easymanet:flash", async (event, payload = {}) => {
     const validated = await validateFlashPayload(payload);

@@ -86,6 +86,16 @@ def test_markdown_link_check_rejects_paths_outside_generated_repo(tmp_path):
     assert missing_local_markdown_links(repo) == ["docs/README.md:1: ../../outside.md"]
 
 
+def test_markdown_link_check_allows_valid_local_links(tmp_path):
+    repo = tmp_path / "repo"
+    docs = repo / "docs"
+    docs.mkdir(parents=True)
+    (docs / "README.md").write_text("[valid](guide.md)\n", encoding="utf-8")
+    (docs / "guide.md").write_text("guide\n", encoding="utf-8")
+
+    assert missing_local_markdown_links(repo) == []
+
+
 def test_repo_spec_source_paths_exist_in_current_layout():
     publish = load_publish_module()
 

@@ -30,6 +30,7 @@ def load_publish_module():
 
 
 def missing_local_markdown_links(root: Path) -> list[str]:
+    root_resolved = root.resolve()
     missing: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in MARKDOWN_EXTENSIONS:
@@ -47,8 +48,14 @@ def missing_local_markdown_links(root: Path) -> list[str]:
                 target = urllib.parse.unquote(target.split("#", 1)[0])
                 if not target:
                     continue
-                if not (path.parent / target).resolve().exists():
-                    relative_path = path.relative_to(root).as_posix()
+                relative_path = path.relative_to(root).as_posix()
+                resolved = (path.parent / target).resolve()
+                try:
+                    resolved.relative_to(root_resolved)
+                except ValueError:
+                    missing.append(f"{relative_path}:{line_number}: {target}")
+                    continue
+                if not resolved.exists():
                     missing.append(f"{relative_path}:{line_number}: {target}")
     return missing
 
@@ -67,6 +74,16 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
 
 def test_publish_script_stays_decomposed():
     assert len(SCRIPT_PATH.read_text().splitlines()) < 1000
+
+
+def test_markdown_link_check_rejects_paths_outside_generated_repo(tmp_path):
+    repo = tmp_path / "repo"
+    docs = repo / "docs"
+    docs.mkdir(parents=True)
+    (docs / "README.md").write_text("[escape](../../outside.md)\n", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("outside\n", encoding="utf-8")
+
+    assert missing_local_markdown_links(repo) == ["docs/README.md:1: ../../outside.md"]
 
 
 def test_repo_spec_source_paths_exist_in_current_layout():
@@ -183,6 +200,9 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
     assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()
     assert (repo / "docs" / "flashing.md").exists()
+    desktop_flashing = (repo / "docs" / "flashing.md").read_text(encoding="utf-8")
+    assert "easymanet image build" not in desktop_flashing
+    assert "images/openmanet/provisioning/openwrt-overlay" not in desktop_flashing
     assert (repo / "tests" / "test_desktop.py").exists()
     assert not (repo / "tools" / "packaging" / "publish_product_repos.py").exists()
 

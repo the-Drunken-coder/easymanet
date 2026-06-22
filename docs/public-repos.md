@@ -41,7 +41,11 @@ Release dispatches are intentional:
 
 ```bash
 VERSION=$(python - <<'PY'
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 from pathlib import Path
 
 print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])

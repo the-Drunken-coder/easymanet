@@ -135,8 +135,8 @@ collapses three parallel representations into one.
 
 **Location:**
 - `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh`
-  (532 lines of POSIX sh; exceeds the repo's own ~300-line guideline,
-  see `docs/problems/2026-05-30-modules-exceed-line-limit.md`)
+  (532 lines of POSIX sh at this snapshot; exceeded the repo's own ~300-line
+  guideline)
 
 **Problem:** All knowledge of OpenMANET's UCI paths, service names, and
 encryption types lives in the on-device script, where debugging is

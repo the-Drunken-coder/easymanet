@@ -206,7 +206,6 @@ SURFACES = {
         description="Public local-first desktop operator console for EasyMANET.",
         source_paths=(
             ".gitignore",
-            "docs/flashing.md",
             "docs/manifest.md",
             "examples/three-node-field-mesh.yml",
             "packages/core/src/easymanet",

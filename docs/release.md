@@ -73,8 +73,9 @@ firmware version, which is independent of the EasyMANET package version:
 
 ```bash
 easymanet image build --output-dir dist/release/images
+IMAGE=dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz
 easymanet image manifest \
-  --image dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
+  --image "$IMAGE" \
   --output-dir dist/release/images
 ```
 
@@ -116,7 +117,11 @@ Only tag after every verification item above passes:
 
 ```bash
 VERSION=$(.codex-venv/bin/python - <<'PY'
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 from pathlib import Path
 
 print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])

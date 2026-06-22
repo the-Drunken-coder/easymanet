@@ -1,8 +1,8 @@
 # Release Checklist
 
-EasyMANET `0.2.0` is the first desktop-flashing release. It ships the CLI,
-image tooling, Electron desktop flash workflow, shared Documents workspace, and
-local publish/export tooling as one coordinated product.
+The EasyMANET `0.2.x` release line ships the CLI, image tooling, Electron
+desktop flash workflow, shared Documents workspace, and local publish/export
+tooling as one coordinated product.
 
 ## Version Policy
 
@@ -73,8 +73,9 @@ firmware version, which is independent of the EasyMANET package version:
 
 ```bash
 easymanet image build --output-dir dist/release/images
+IMAGE=dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz
 easymanet image manifest \
-  --image dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
+  --image "$IMAGE" \
   --output-dir dist/release/images
 ```
 
@@ -82,8 +83,8 @@ easymanet image manifest \
 
 Public image releases use two channels:
 
-- `stable`: tags like `images-v0.2.1`
-- `candidate`: tags like `images-v0.2.1-candidate.1`
+- `stable`: tags like `images-v<version>`
+- `candidate`: tags like `images-v<version>-candidate.1`
 
 Official EasyMANET image auto-downloads require a verified schema-v2
 `easymanet-image-release.json`, SHA-256 checksum, GitHub artifact attestation,
@@ -115,7 +116,18 @@ optional disk inventory, and redaction notes.
 Only tag after every verification item above passes:
 
 ```bash
-git tag -a v0.2.0 -m "EasyMANET v0.2.0"
+VERSION=$(.codex-venv/bin/python - <<'PY'
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+from pathlib import Path
+
+print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+PY
+)
+git tag -a "v${VERSION}" -m "EasyMANET v${VERSION}"
 ```
 
 Publish the wheel, Electron artifact, image artifacts, checksum files,

@@ -44,7 +44,6 @@ class SurfaceSpec:
 
 
 PRODUCT_DOC_PATHS = (
-    "docs/README.md",
     "docs/architecture.md",
     "docs/flashing.md",
     "docs/lessons-learned.md",

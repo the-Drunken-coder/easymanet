@@ -1,6 +1,8 @@
 import importlib.util
+import re
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +16,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10.
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "tools" / "packaging" / "publish_product_repos.py"
+MARKDOWN_EXTENSIONS = {".md", ".mdx", ".rst", ".adoc", ".txt"}
+MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
 def load_publish_module():
@@ -23,6 +27,37 @@ def load_publish_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def missing_local_markdown_links(root: Path) -> list[str]:
+    root_resolved = root.resolve()
+    missing: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in MARKDOWN_EXTENSIONS:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line_number, line in enumerate(text.splitlines(), 1):
+            for match in MARKDOWN_LINK.finditer(line):
+                target = match.group(1).strip()
+                if (
+                    not target
+                    or target.startswith("#")
+                    or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target)
+                ):
+                    continue
+                target = urllib.parse.unquote(target.split("#", 1)[0])
+                if not target:
+                    continue
+                relative_path = path.relative_to(root).as_posix()
+                resolved = (path.parent / target).resolve()
+                try:
+                    resolved.relative_to(root_resolved)
+                except ValueError:
+                    missing.append(f"{relative_path}:{line_number}: {target}")
+                    continue
+                if not resolved.exists():
+                    missing.append(f"{relative_path}:{line_number}: {target}")
+    return missing
 
 
 def test_cli_repo_spec_does_not_copy_image_workflow():
@@ -39,6 +74,26 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
 
 def test_publish_script_stays_decomposed():
     assert len(SCRIPT_PATH.read_text().splitlines()) < 1000
+
+
+def test_markdown_link_check_rejects_paths_outside_generated_repo(tmp_path):
+    repo = tmp_path / "repo"
+    docs = repo / "docs"
+    docs.mkdir(parents=True)
+    (docs / "README.md").write_text("[escape](../../outside.md)\n", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("outside\n", encoding="utf-8")
+
+    assert missing_local_markdown_links(repo) == ["docs/README.md:1: ../../outside.md"]
+
+
+def test_markdown_link_check_allows_valid_local_links(tmp_path):
+    repo = tmp_path / "repo"
+    docs = repo / "docs"
+    docs.mkdir(parents=True)
+    (docs / "README.md").write_text("[valid](guide.md)\n", encoding="utf-8")
+    (docs / "guide.md").write_text("guide\n", encoding="utf-8")
+
+    assert missing_local_markdown_links(repo) == []
 
 
 def test_repo_spec_source_paths_exist_in_current_layout():
@@ -77,6 +132,7 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
         repo = generated[key]
         assert not (repo / "tests" / "test_publish_product_repos.py").exists()
         assert not (repo / ".github" / "workflows" / "publish-product-repos.yml").exists()
+        assert not (repo / "docs" / "README.md").exists()
         assert not (repo / "docs" / "public-repos.md").exists()
         assert not (repo / "docs" / "problems").exists()
         assert not (repo / "docs" / "design-decisions").exists()
@@ -99,6 +155,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert (generated["images"] / "tools" / "packaging" / "cleanup_image_releases.py").exists()
     assert (generated["images"] / "tools" / "packaging" / "generate_image_release_notes.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
+    for repo in generated.values():
+        assert missing_local_markdown_links(repo) == []
 
     cli_pyproject = tomllib.loads((generated["cli"] / "pyproject.toml").read_text(encoding="utf-8"))
     assert cli_pyproject["project"]["name"] == "easymanet"
@@ -151,6 +209,10 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert not (repo / "apps" / "cli").exists()
     assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
     assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()
+    assert (repo / "docs" / "flashing.md").exists()
+    desktop_flashing = (repo / "docs" / "flashing.md").read_text(encoding="utf-8")
+    assert "easymanet image build" not in desktop_flashing
+    assert "images/openmanet/provisioning/openwrt-overlay" not in desktop_flashing
     assert (repo / "tests" / "test_desktop.py").exists()
     assert not (repo / "tools" / "packaging" / "publish_product_repos.py").exists()
 

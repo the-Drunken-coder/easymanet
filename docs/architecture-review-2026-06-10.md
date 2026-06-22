@@ -4,9 +4,11 @@ Scope: high-level design review of the full monorepo at v0.2.0
 (`HEAD` ≈ `14bd4ce`). Focus is architecture and cross-surface seams, not
 line-level bugs.
 
-Snapshot note: this review records the pre-fix `14bd4ce` architecture state;
-the PR that adds this document also addresses Issues 1-3 and several smaller
-items below.
+Historical snapshot note: this review records the pre-fix `14bd4ce`
+architecture state. Some issue descriptions below intentionally preserve what
+was true in that snapshot; use `docs/monorepo.md`, `docs/public-repos.md`, and
+the accepted design-decision records for current architecture and release
+guidance.
 
 Overall verdict: the core model is sound — the pipeline shape
 (manifest → validate → render → flash → inject → first boot), the
@@ -87,10 +89,11 @@ added to one and not the other yields inconsistent public surfaces.
 This recreates, inside the monorepo, exactly the drift risk that
 `docs/product-and-release-planning.md` warns about for public repos.
 
-**Doc rot:** `docs/monorepo.md` still says public subrepositories are
-"intentionally not configured," but the `Publish Product Repos`
-workflow can create repos, push, and dispatch releases, and the README
-links three live public repos.
+**Snapshot doc rot:** At the `14bd4ce` snapshot, `docs/monorepo.md` still said
+public subrepositories were "intentionally not configured," but the
+`Publish Product Repos` workflow could create repos, push, and dispatch
+releases, and the README linked three live public repos. Current release
+guidance lives in `docs/monorepo.md` and `docs/public-repos.md`.
 
 **Direction:** Make the surface definitions a single data structure
 consumed by both the local exporter and the publisher. Update
@@ -132,8 +135,8 @@ collapses three parallel representations into one.
 
 **Location:**
 - `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh`
-  (532 lines of POSIX sh; exceeds the repo's own ~300-line guideline,
-  see `docs/problems/2026-05-30-modules-exceed-line-limit.md`)
+  (532 lines of POSIX sh at this snapshot; exceeded the repo's own ~300-line
+  guideline)
 
 **Problem:** All knowledge of OpenMANET's UCI paths, service names, and
 encryption types lives in the on-device script, where debugging is
@@ -216,8 +219,9 @@ those rules.
 
 **Severity:** Low
 
-**Location:** `pyproject.toml:7` (`version = "0.2.0"`) and
-`packages/core/src/easymanet/__init__.py:3` (`__version__ = "0.2.0"`).
+**Snapshot location:** At `14bd4ce`, `pyproject.toml:7`
+(`version = "0.2.0"`) and `packages/core/src/easymanet/__init__.py:3`
+(`__version__ = "0.2.0"`) duplicated the release version.
 
 **Direction:** Single-source it (e.g. read the package version from
 metadata, or generate one from the other at build time). Note the

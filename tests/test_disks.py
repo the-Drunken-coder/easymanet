@@ -42,13 +42,14 @@ def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeyp
 def _macos_info_text(
     *,
     name: str = "USB DISK 3.0",
+    size: str = "64 MB",
     protocol: str = "USB",
     virtual: str = "No",
 ) -> str:
     return "\n".join(
         [
             f"Device / Media Name: {name}",
-            "Disk Size: 64 MB",
+            f"Disk Size: {size}",
             f"Protocol: {protocol}",
             "Device Location: External",
             "Removable Media: Removable",
@@ -451,26 +452,8 @@ def test_list_disks_macos_external_filters_disk_images(monkeypatch):
     }
     all_plist = {"AllDisksAndPartitions": []}
     info_text = {
-        "/dev/disk4": "\n".join(
-            [
-                "Device / Media Name: USB DISK 3.0",
-                "Disk Size: 32 GB",
-                "Protocol: USB",
-                "Device Location: External",
-                "Removable Media: Removable",
-                "Virtual: No",
-            ]
-        ),
-        "/dev/disk5": "\n".join(
-            [
-                "Device / Media Name: Disk Image",
-                "Disk Size: 64 MB",
-                "Protocol: Disk Image",
-                "Device Location: External",
-                "Removable Media: Removable",
-                "Virtual: Yes",
-            ]
-        ),
+        "/dev/disk4": _macos_info_text(name="USB DISK 3.0", size="32 GB"),
+        "/dev/disk5": _macos_info_text(name="Disk Image", protocol="Disk Image", virtual="Yes"),
     }
 
     def fake_check_output(cmd, timeout=15):
@@ -533,26 +516,8 @@ def test_list_disks_macos_all_marks_disk_images_virtual(monkeypatch):
         "AllDisksAndPartitions": [],
     }
     info_text = {
-        "/dev/disk4": "\n".join(
-            [
-                "Device / Media Name: USB DISK 3.0",
-                "Disk Size: 32 GB",
-                "Protocol: USB",
-                "Device Location: External",
-                "Removable Media: Removable",
-                "Virtual: No",
-            ]
-        ),
-        "/dev/disk5": "\n".join(
-            [
-                "Device / Media Name: Disk Image",
-                "Disk Size: 64 MB",
-                "Protocol: Disk Image",
-                "Device Location: External",
-                "Removable Media: Removable",
-                "Virtual: Yes",
-            ]
-        ),
+        "/dev/disk4": _macos_info_text(name="USB DISK 3.0", size="32 GB"),
+        "/dev/disk5": _macos_info_text(name="Disk Image", protocol="Disk Image", virtual="Yes"),
     }
 
     def fake_check_output(cmd, timeout=15):
@@ -577,15 +542,10 @@ def test_lookup_device_macos_marks_disk_images_virtual(monkeypatch):
     monkeypatch.setattr(
         macos,
         "_get_diskutil_info_text",
-        lambda _path: "\n".join(
-            [
-                "Device / Media Name: Disk Image",
-                "Disk Size: 64 MB",
-                "Protocol: Disk Image",
-                "Device Location: External",
-                "Removable Media: Removable",
-                "Virtual: Yes",
-            ]
+        lambda _path: _macos_info_text(
+            name="Disk Image",
+            protocol="Disk Image",
+            virtual="Yes",
         ),
     )
 

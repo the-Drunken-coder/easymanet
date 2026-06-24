@@ -77,7 +77,11 @@ class _DesktopHandler(BaseHTTPRequestHandler):
             self._send_json(state_payload())
             return
         if parsed.path == "/api/image-updates":
-            self._send_json(image_update_payload())
+            query = parse_qs(parsed.query)
+            check_latest = _bool_payload(
+                query.get("check_latest", query.get("check", ["0"]))[0]
+            )
+            self._send_json(image_update_payload(check_latest=check_latest))
             return
         if parsed.path == "/api/disks":
             query = parse_qs(parsed.query)

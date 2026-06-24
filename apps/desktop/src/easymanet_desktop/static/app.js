@@ -39,6 +39,7 @@ const nodeSelect = $("node-name");
 const nodeRoleChip = $("node-role");
 const validationOutput = $("validation-output");
 const imageCount = $("image-count");
+const checkImageUpdatesButton = $("check-image-updates");
 const images = $("images");
 const diskPanel = $("disk-panel");
 const disks = $("disks");
@@ -118,6 +119,9 @@ setupTabNavigation();
 
 $("refresh").addEventListener("click", () => {
   refreshAll().catch(handleRefreshError);
+});
+checkImageUpdatesButton.addEventListener("click", () => {
+  refreshImageUpdateStatus({ checkLatest: true, reportErrors: true }).catch(handleRefreshError);
 });
 fleetSelect.addEventListener("change", () => {
   selectFleetSource(fleetSelect.value);
@@ -341,7 +345,6 @@ async function loadState() {
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     renderImageState(payload.images || {});
-    refreshImageUpdateStatus();
     updateMeshFleetSource();
     updateFlashControls();
   } catch (error) {
@@ -369,11 +372,15 @@ function imageWithUpdate(target, image) {
   };
 }
 
-async function refreshImageUpdateStatus() {
+async function refreshImageUpdateStatus({ checkLatest = false, reportErrors = false } = {}) {
   const seq = state.imageUpdateSeq + 1;
   state.imageUpdateSeq = seq;
+  if (checkLatest) {
+    checkImageUpdatesButton.disabled = true;
+    checkImageUpdatesButton.textContent = "Checking...";
+  }
   try {
-    const payload = await getImageUpdates();
+    const payload = await getImageUpdates({ checkLatest });
     if (seq !== state.imageUpdateSeq) {
       return;
     }
@@ -384,10 +391,18 @@ async function refreshImageUpdateStatus() {
     renderImageState(state.images);
   } catch (error) {
     console.debug("Image update check failed", error);
+    if (reportErrors) {
+      setFlashStatus("bad", errorMessage(error));
+    }
+  } finally {
+    if (checkLatest) {
+      checkImageUpdatesButton.disabled = false;
+      checkImageUpdatesButton.textContent = "Check Updates";
+    }
   }
 }
 
-async function refreshImageSidebar() {
+async function refreshImageSidebar({ checkLatest = false } = {}) {
   if (state.imageLoadInFlight) {
     state.imageRefreshQueued = true;
     return;
@@ -399,7 +414,9 @@ async function refreshImageSidebar() {
       throw new Error(errorDetail(payload) || "Could not refresh image state");
     }
     renderImageState(payload.images || {});
-    await refreshImageUpdateStatus();
+    if (checkLatest) {
+      await refreshImageUpdateStatus({ checkLatest: true });
+    }
     updateFlashControls();
   } catch (error) {
     console.debug("Image sidebar refresh failed", error);
@@ -407,7 +424,7 @@ async function refreshImageSidebar() {
     state.imageLoadInFlight = false;
     if (state.imageRefreshQueued) {
       state.imageRefreshQueued = false;
-      refreshImageSidebar();
+      refreshImageSidebar({ checkLatest });
     }
   }
 }
@@ -425,7 +442,13 @@ async function installImageUpdate(target) {
     if (!payload.ok) {
       throw new Error(errorDetail(payload) || "Image update install failed");
     }
-    await refreshImageSidebar();
+    if (payload.image) {
+      state.images[target] = payload.image;
+    }
+    if (payload.update) {
+      state.imageUpdates[target] = payload.update;
+    }
+    await refreshImageSidebar({ checkLatest: true });
     const version = payload.version || (payload.image || {}).version || "latest";
     setFlashStatus("ok", payload.installed === false ? "Image cache is already current." : `Installed image ${version}.`);
   } finally {

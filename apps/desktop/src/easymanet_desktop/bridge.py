@@ -137,7 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("state")
-    subparsers.add_parser("image-updates")
+    image_updates = subparsers.add_parser("image-updates")
+    image_updates.add_argument("--check-latest", action="store_true")
     install_image_update = subparsers.add_parser("install-image-update")
     install_image_update.add_argument("--target", required=True)
 
@@ -185,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "state":
             payload = state_payload()
         elif args.command == "image-updates":
-            payload = image_update_payload()
+            payload = image_update_payload(check_latest=args.check_latest)
         elif args.command == "install-image-update":
             payload = install_image_update_payload(target=args.target)
         elif args.command == "disks":

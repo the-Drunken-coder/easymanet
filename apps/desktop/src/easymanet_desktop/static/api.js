@@ -7,7 +7,7 @@
       return nativeApi.getState();
     }
     if (nativeApi && nativeApi.getImageUpdates && url === "/api/image-updates") {
-      return nativeApi.getImageUpdates();
+      return getImageUpdates();
     }
     return fetchJson(url);
   }
@@ -88,8 +88,12 @@
     return getJson("/api/state");
   }
 
-  async function getImageUpdates() {
-    return getJson("/api/image-updates");
+  async function getImageUpdates(options = {}) {
+    const checkLatest = Boolean(options?.checkLatest);
+    if (nativeApi && nativeApi.getImageUpdates) {
+      return nativeApi.getImageUpdates({ checkLatest });
+    }
+    return fetchJson(`/api/image-updates${checkLatest ? "?check_latest=1" : ""}`);
   }
 
   async function getDisks(includeAll) {

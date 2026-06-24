@@ -27,6 +27,12 @@ REAL_DD_TEST = pytest.mark.skipif(
 )
 
 
+def _memory_tempfile():
+    import io
+
+    return io.BytesIO()
+
+
 def test_check_image_accepts_valid_gzip(tmp_path):
     image = tmp_path / "openmanet.img.gz"
     with gzip.open(image, "wb") as f:
@@ -500,6 +506,8 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
     def fake_write(fd, payload):
         assert fd == 42
         writes.append(bytes(payload))
+        if len(writes) == 1:
+            return len(payload) // 2
         return len(payload)
 
     def fake_close(fd):
@@ -508,18 +516,20 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
     monkeypatch.setattr("easymanet.image.os.open", fake_open)
     monkeypatch.setattr("easymanet.image.os.write", fake_write)
     monkeypatch.setattr("easymanet.image.os.close", fake_close)
 
     _write_gz_via_dd(str(image), "/dev/disk4")
 
-    assert popen_calls == [
-        (["gzip", "-dc", str(image)], {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE})
-    ]
+    assert len(popen_calls) == 1
+    assert popen_calls[0][0] == ["gzip", "-dc", str(image)]
+    assert popen_calls[0][1]["stdout"] is subprocess.PIPE
+    assert popen_calls[0][1]["stderr"] is not subprocess.DEVNULL
     assert open_calls == [("/dev/rdisk4", os.O_WRONLY)]
     assert close_calls == [42]
-    assert writes == [full_chunk, tail]
+    assert writes == [full_chunk, full_chunk[len(full_chunk) // 2 :], tail]
 
 
 def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path):
@@ -557,6 +567,7 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
     monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
     monkeypatch.setattr(
         "easymanet.image.os.write",
@@ -581,8 +592,10 @@ def test_write_gz_via_dd_reports_macos_buffered_write_failure(monkeypatch, tmp_p
             self.returncode = returncode
             self.stdout = stdout
             self.killed = False
+            self.communicated = False
 
         def communicate(self):
+            self.communicated = True
             return (b"", b"")
 
         def kill(self):
@@ -599,6 +612,7 @@ def test_write_gz_via_dd_reports_macos_buffered_write_failure(monkeypatch, tmp_p
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
     monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
     monkeypatch.setattr(
         "easymanet.image.os.write",
@@ -610,6 +624,82 @@ def test_write_gz_via_dd_reports_macos_buffered_write_failure(monkeypatch, tmp_p
         _write_gz_via_dd(str(image), "/dev/disk4")
 
     assert proc.killed is True
+    assert proc.communicated is True
+
+
+def test_write_gz_via_dd_reports_macos_buffered_close_failure(monkeypatch, tmp_path):
+    image = tmp_path / "firmware.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"payload")
+
+    import io
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = -13
+            self.stdout = io.BytesIO(b"payload")
+            self.killed = False
+            self.communicated = False
+
+        def communicate(self):
+            self.communicated = True
+            return (b"", b"")
+
+        def kill(self):
+            self.killed = True
+
+    proc = FakeProc()
+
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: proc)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
+    monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
+    monkeypatch.setattr("easymanet.image.os.write", lambda _fd, payload: len(payload))
+    monkeypatch.setattr(
+        "easymanet.image.os.close",
+        lambda _fd: (_ for _ in ()).throw(OSError("raw close failed")),
+    )
+
+    with pytest.raises(OSError, match="raw close failed"):
+        _write_gz_via_dd(str(image), "/dev/disk4")
+
+    assert proc.killed is True
+    assert proc.communicated is True
+
+
+def test_write_gz_via_dd_reports_macos_gzip_stderr(monkeypatch, tmp_path):
+    image = tmp_path / "firmware.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"payload")
+
+    import io
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 1
+            self.stdout = io.BytesIO(b"")
+
+        def communicate(self):
+            return (b"", b"")
+
+    def fake_popen(_cmd, **kwargs):
+        kwargs["stderr"].write(b"gzip: corrupt input\n")
+        kwargs["stderr"].flush()
+        return FakeProc()
+
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
+    monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
+    monkeypatch.setattr("easymanet.image.os.write", lambda _fd, payload: len(payload))
+    monkeypatch.setattr("easymanet.image.os.close", lambda _fd: None)
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        _write_gz_via_dd(str(image), "/dev/disk4")
+
+    assert "gzip: corrupt input" in exc_info.value.stderr
 
 
 def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):

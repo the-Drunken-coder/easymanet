@@ -131,6 +131,7 @@ let stateCalls = 0;
 let imageUpdateCalls = 0;
 let imageInstallCalls = 0;
 let imageInstalled = false;
+let imageUpdateChecks = [];
 let holdState = false;
 let stateResolvers = [];
 let holdMesh = false;
@@ -166,8 +167,9 @@ const nativeApi = {
     }
     return Promise.resolve(payload);
   },
-  getImageUpdates() {
+  getImageUpdates(options = {}) {
     imageUpdateCalls += 1;
+    imageUpdateChecks.push(Boolean(options.checkLatest));
     return Promise.resolve({
       ok: true,
       updates: {
@@ -190,6 +192,12 @@ const nativeApi = {
       target,
       version: "images-v0.2.7",
       image: { cached_path: "/tmp/openmanet.img.gz", version: "images-v0.2.7" },
+      update: {
+        status: "current",
+        update_available: false,
+        current_version: "images-v0.2.7",
+        latest_version: "images-v0.2.7",
+      },
     });
   },
   getDisks() {
@@ -279,7 +287,15 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   const startupImageUpdateChecked = imageUpdateCalls > 0;
   const startupImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
-  const startupImageUpdateButton = element("images").innerHTML.includes("New Image Available")
+  const startupImageUpdateButton = element("images").innerHTML.includes("Install Update")
+    && element("images").innerHTML.includes("data-image-install-target");
+  element("check-image-updates").listeners.click();
+  await flush();
+  await flush();
+  await flush();
+  const explicitImageUpdateChecked = imageUpdateCalls === 1 && imageUpdateChecks[0] === true;
+  const explicitImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
+  const explicitImageUpdateButton = element("images").innerHTML.includes("Install Update")
     && element("images").innerHTML.includes("data-image-install-target");
   context.window.EMState.images = {
     "rpi4-mm6108-spi": { cached_path: "/tmp/openmanet.img.gz", version: "images-v0.2.6" },
@@ -291,7 +307,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   };
   context.window.EMState.imageInstallTarget = "rpi4-mm6108-spi";
   context.renderImageState(context.window.EMState.images);
-  const otherImageInstallDisabled = element("images").innerHTML.includes('data-image-install-target="rpi4-mm6108-spi-alt" disabled>New Image Available');
+  const imageHtml = element("images").innerHTML;
+  const otherTargetMarker = imageHtml.includes('data-image-install-target="rpi4-mm6108-spi-alt"');
+  const otherImageInstallDisabled = otherTargetMarker
+    && /data-image-install-target="rpi4-mm6108-spi-alt"[^>]*disabled/.test(imageHtml);
   context.window.EMState.imageInstallTarget = "";
   const meshFleetDropdownPopulated = element("mesh-config-source").options.some((option) => option.value === "/tmp/EasyMANET/Fleets/field.yml")
     && element("mesh-config-source").value === "/tmp/EasyMANET/Fleets/field.yml";
@@ -308,6 +327,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await flush();
   const imageInstallTriggered = imageInstallCalls === 1;
   const imageInstallClearsNotice = !element("images").innerHTML.includes("new image available: images-v0.2.7");
+  const imageInstallUpdateStored = context.window.EMState.imageUpdates["rpi4-mm6108-spi"].status === "current"
+    && context.window.EMState.imageUpdates["rpi4-mm6108-spi"].update_available === false;
 
   const beforeDownload = stateCalls;
   context.renderFlashEvent({ event_type: "download_completed" });
@@ -358,11 +379,15 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     startupImageUpdateChecked,
     startupImageUpdateNotice,
     startupImageUpdateButton,
+    explicitImageUpdateChecked,
+    explicitImageUpdateNotice,
+    explicitImageUpdateButton,
     otherImageInstallDisabled,
     meshFleetDropdownPopulated,
     meshFleetDropdownSyncsConfig,
     imageInstallTriggered,
     imageInstallClearsNotice,
+    imageInstallUpdateStored,
     downloadCompletedRefreshesImages,
     queuedCoalesced,
     queuedStarted,
@@ -379,8 +404,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 });
 """
     node_exe = shutil.which("node")
-    if not node_exe:
-        pytest.skip("Node.js is required for desktop renderer VM tests")
+    assert node_exe, "Node.js is required for desktop renderer VM tests"
 
     result = subprocess.run(  # noqa: S603 - fixed executable and repo-local script inputs
         [node_exe, "-e", script, *map(str, scripts)],
@@ -393,14 +417,18 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
     assert payload == {
         "registeredFlashCallback": True,
-        "startupImageUpdateChecked": True,
-        "startupImageUpdateNotice": True,
-        "startupImageUpdateButton": True,
+        "startupImageUpdateChecked": False,
+        "startupImageUpdateNotice": False,
+        "startupImageUpdateButton": False,
+        "explicitImageUpdateChecked": True,
+        "explicitImageUpdateNotice": True,
+        "explicitImageUpdateButton": True,
         "otherImageInstallDisabled": True,
         "meshFleetDropdownPopulated": True,
         "meshFleetDropdownSyncsConfig": True,
         "imageInstallTriggered": True,
         "imageInstallClearsNotice": True,
+        "imageInstallUpdateStored": True,
         "downloadCompletedRefreshesImages": True,
         "queuedCoalesced": True,
         "queuedStarted": True,

@@ -65,7 +65,7 @@
       lines.push(`
         <div class="image-update-row">
           <span class="image-action">new image available: ${escapeHtml(image.latest_version || "latest")}</span>
-          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing || anyInstallRunning ? " disabled" : ""}>${installing ? "Installing..." : "New Image Available"}</button>
+          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing || anyInstallRunning ? " disabled" : ""}>${installing ? "Installing..." : "Install Update"}</button>
         </div>
       `);
     }

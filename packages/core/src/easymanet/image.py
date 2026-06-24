@@ -7,6 +7,7 @@ and clean unmount/eject.
 import os
 import shutil
 import subprocess
+import tempfile
 import zlib
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
@@ -238,32 +239,42 @@ def _write_gz_via_macos_stream(
 ) -> None:
     gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
     output_device = _stream_dd_device_path(device)
-    gzip_proc = subprocess.Popen(
-        gzip_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    assert gzip_proc.stdout is not None
-    fd: int | None = None
-    write_error: OSError | None = None
-    try:
-        fd = os.open(output_device, os.O_WRONLY)
-        _write_stream_to_fd(gzip_proc.stdout, fd, emit=emit)
-    except OSError as exc:
-        write_error = exc
-        gzip_proc.kill()
-    finally:
-        if fd is not None:
-            os.close(fd)
+    with tempfile.TemporaryFile() as gzip_stderr_file:
+        gzip_proc = subprocess.Popen(
+            gzip_cmd,
+            stdout=subprocess.PIPE,
+            stderr=gzip_stderr_file,
+        )
+        assert gzip_proc.stdout is not None
+        fd: int | None = None
+        write_error: OSError | None = None
+        close_error: OSError | None = None
+        try:
+            fd = os.open(output_device, os.O_WRONLY)
+            _write_stream_to_fd(gzip_proc.stdout, fd, emit=emit)
+        except OSError as exc:
+            write_error = exc
+            gzip_proc.kill()
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError as exc:
+                    close_error = exc
+                    gzip_proc.kill()
 
-    _stdout, gzip_stderr = gzip_proc.communicate()
+        gzip_proc.communicate()
+        gzip_stderr_file.seek(0)
+        gzip_stderr = _decode_subprocess_output(gzip_stderr_file.read())
     if write_error is not None:
         raise write_error
+    if close_error is not None:
+        raise close_error
     if gzip_proc.returncode not in (0, 2):
         raise subprocess.CalledProcessError(
             gzip_proc.returncode,
             gzip_cmd,
-            stderr=_decode_subprocess_output(gzip_stderr),
+            stderr=gzip_stderr,
         )
 
 

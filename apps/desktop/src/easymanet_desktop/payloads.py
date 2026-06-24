@@ -68,23 +68,41 @@ def state_payload() -> dict[str, Any]:
     }
 
 
-def image_update_payload() -> dict[str, Any]:
+def image_update_payload(*, check_latest: bool = False) -> dict[str, Any]:
     """Return latest-image metadata without downloading firmware."""
     state = state_payload()
     images = state.get("images", {})
     if not isinstance(images, dict):
         images = {}
     updates = {
-        str(target): image_update_entry(str(target), entry if isinstance(entry, dict) else {})
+        str(target): image_update_entry(
+            str(target),
+            entry if isinstance(entry, dict) else {},
+            check_latest=check_latest,
+        )
         for target, entry in images.items()
     }
     return {"ok": True, "updates": updates}
 
 
-def image_update_entry(target: str, entry: dict[str, Any]) -> dict[str, Any]:
+def image_update_entry(
+    target: str,
+    entry: dict[str, Any],
+    *,
+    check_latest: bool = False,
+) -> dict[str, Any]:
     current_version = str(entry.get("version") or "")
     current_sha256 = str(entry.get("cached_sha256") or entry.get("sha256") or "")
     cached_path = str(entry.get("cached_path") or "")
+    if not check_latest:
+        return {
+            "target": target,
+            "status": "cached" if cached_path else "missing",
+            "update_available": False,
+            "current_version": current_version,
+            "current_sha256": current_sha256,
+            "cached_path": cached_path,
+        }
     try:
         latest = check_latest_version(target)
     except Exception as exc:  # noqa: BLE001 - surfaced as image-status data.
@@ -112,9 +130,15 @@ def image_update_entry(target: str, entry: dict[str, Any]) -> dict[str, Any]:
     latest_version = str(latest.version or "")
     sha_mismatch = bool(current_sha256 and latest_sha256 and current_sha256 != latest_sha256)
     version_mismatch = bool(current_version and latest_version and current_version != latest_version)
+    missing_verified_metadata = bool(
+        cached_path
+        and not current_sha256
+        and not current_version
+        and (latest_sha256 or latest_version)
+    )
     update_available = sha_mismatch or (
         version_mismatch and (not current_sha256 or not latest_sha256)
-    )
+    ) or missing_verified_metadata
     status = "current"
     if not cached_path:
         status = "missing"
@@ -152,7 +176,7 @@ def install_image_update_payload(*, target: str) -> dict[str, Any]:
     if not isinstance(images, dict) or target not in images:
         return {"ok": False, "errors": [f"Unknown image target: {target}"]}
     entry = images[target] if isinstance(images[target], dict) else {}
-    update = image_update_entry(target, entry)
+    update = image_update_entry(target, entry, check_latest=True)
     if (
         update.get("status") == "current"
         and not update.get("update_available")
@@ -197,7 +221,7 @@ def install_image_update_payload(*, target: str) -> dict[str, Any]:
         "version": str(latest.version or ""),
         "sha256": str(latest.sha256 or ""),
         "image": image,
-        "update": image_update_entry(target, image),
+        "update": image_update_entry(target, image, check_latest=True),
     }
 
 

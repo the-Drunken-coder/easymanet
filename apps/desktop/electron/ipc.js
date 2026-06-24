@@ -15,7 +15,13 @@ const {
 
 function registerIpc() {
   ipcMain.handle("easymanet:state", () => runBridge(["state"]));
-  ipcMain.handle("easymanet:image-updates", () => runBridge(["image-updates"]));
+  ipcMain.handle("easymanet:image-updates", (_event, payload = {}) => {
+    const args = ["image-updates"];
+    if (booleanFlag(payload.checkLatest) || booleanFlag(payload.check_latest)) {
+      args.push("--check-latest");
+    }
+    return runBridge(args, { timeoutMs: imageBridgeTimeoutMs });
+  });
   ipcMain.handle("easymanet:image-update-install", (_event, payload = {}) => {
     const validated = validateImageTargetPayload(payload);
     if (!validated.ok) {

@@ -162,7 +162,7 @@ def test_image_update_payload_reports_newer_official_release(monkeypatch):
         ),
     )
 
-    payload = payloads.image_update_payload()
+    payload = payloads.image_update_payload(check_latest=True)
     update = payload["updates"]["rpi4-mm6108-spi"]
 
     assert payload["ok"] is True
@@ -171,6 +171,36 @@ def test_image_update_payload_reports_newer_official_release(monkeypatch):
     assert update["current_version"] == "images-v0.2.6"
     assert update["latest_version"] == "images-v0.2.7"
     assert update["latest_sha256"] == "b" * 64
+
+
+def test_image_update_payload_uses_local_state_by_default(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {
+            "ok": True,
+            "images": {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.6",
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "cached_sha256": "",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: pytest.fail("default image update payload must stay local-only"),
+    )
+
+    update = payloads.image_update_payload()["updates"]["rpi4-mm6108-spi"]
+
+    assert update["status"] == "cached"
+    assert update["update_available"] is False
+    assert update["current_version"] == "images-v0.2.6"
+    assert update["cached_path"] == "/tmp/openmanet.img.gz"
+    assert "latest_version" not in update
 
 
 def test_image_update_payload_reports_version_only_cache_as_outdated(monkeypatch):
@@ -205,10 +235,49 @@ def test_image_update_payload_reports_version_only_cache_as_outdated(monkeypatch
         ),
     )
 
-    update = payloads.image_update_payload()["updates"]["rpi4-mm6108-spi"]
+    update = payloads.image_update_payload(check_latest=True)["updates"]["rpi4-mm6108-spi"]
 
     assert update["status"] == "outdated"
     assert update["update_available"] is True
+    assert update["current_sha256"] == ""
+
+
+def test_image_update_payload_marks_unverified_cache_as_outdated(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {
+            "ok": True,
+            "images": {
+                "rpi4-mm6108-spi": {
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "cached_sha256": "",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.7",
+            url="https://example.test/openmanet.img.gz",
+            sha256="b" * 64,
+            trust_status="verification-pending",
+            source="official",
+            channel="stable",
+            release_tag="images-v0.2.7",
+            image_status="current",
+            manifest_url="https://example.test/easymanet-image-release.json",
+            warnings=(),
+        ),
+    )
+
+    update = payloads.image_update_payload(check_latest=True)["updates"]["rpi4-mm6108-spi"]
+
+    assert update["status"] == "outdated"
+    assert update["update_available"] is True
+    assert update["current_version"] == ""
     assert update["current_sha256"] == ""
 
 
@@ -307,6 +376,9 @@ def test_install_image_update_downloads_version_only_outdated_cache(monkeypatch,
 
     assert result["ok"] is True
     assert result["installed"] is True
+    assert result["version"] == "images-v0.2.7"
+    assert result["update"]["status"] == "current"
+    assert result["update"]["update_available"] is False
     assert downloads == [
         (
             "rpi4-mm6108-spi",
@@ -1388,7 +1460,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "installImageUpdate" in text
     assert 'postJson("/api/image-updates/install", { target })' in text
     assert "new image available:" in render_js.read_text()
-    assert "New Image Available" in render_js.read_text()
+    assert "Install Update" in render_js.read_text()
     assert "data-image-install-target" in render_js.read_text()
     assert 'type === "download_completed"' in text
     assert "exportSupportBundle" in text

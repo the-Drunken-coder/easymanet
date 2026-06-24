@@ -20,4 +20,4 @@ Before claiming a change is ready, run validation relevant to the touched surfac
 
 The desktop app reads and writes through the shared workspace, not a private app database. The default workspace is `~/Documents/EasyMANET`, configurable with `EASYMANET_WORKSPACE`; `Fleets/`, `Images/`, `Diagnostics/`, and `Builds/` are operator data, not repo source.
 
-When checking whether a desktop image cache is current, trust the desktop state payload and `Images/version.json` over a CLI flash dry-run placeholder. The dry-run path can still print `<auto-download for rpi4-mm6108-spi>` even when a verified official image is already cached, because it does not resolve the latest release SHA before planning.
+When checking whether a desktop image cache is current, trust the desktop state payload and `Images/version.json` over a CLI flash dry-run placeholder. The dry-run path can still print ``<auto-download for rpi4-mm6108-spi>`` even when a verified official image is already cached, because it does not resolve the latest release SHA before planning.

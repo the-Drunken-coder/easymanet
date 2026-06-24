@@ -486,6 +486,29 @@ def test_provision_wifi_gate_exposes_topology_api_on_wan(tmp_path):
     assert "restarted" in (prefix / "var" / "uhttpd-state").read_text()
 
 
+def test_provision_clears_wifi_gate_wan_api_on_non_wifi_rerun(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _copy_api_overlay(prefix)
+    _write_uhttpd_stub(prefix)
+
+    first = _run_provision(prefix, _wifi_gate_provision_json(), uci_state)
+    assert first.returncode == 0, first.stderr + first.stdout
+
+    (prefix / "etc" / "easymanet" / "provisioned").unlink()
+    second = _run_provision(prefix, _gate_provision_json(), uci_state)
+    assert second.returncode == 0, second.stderr + second.stdout
+
+    env = _harness_env(uci_state)
+    assert (
+        _uci_get(uci_state, "uhttpd.easymanet_api.listen_http", env)
+        == "10.41.254.1:10411 10.41.1.1:10411"
+    )
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env) == ""
+
+
 def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"

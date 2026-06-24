@@ -446,7 +446,7 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
     assert gzip_stdout.closed is True
 
 
-def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
+def test_write_gz_via_dd_uses_raw_padded_fullblock_device_on_macos(monkeypatch, tmp_path):
     image = tmp_path / "firmware.img.gz"
     with gzip.open(image, "wb") as handle:
         handle.write(b"payload")
@@ -483,7 +483,10 @@ def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
     assert [
         "dd",
         "of=/dev/rdisk4",
-        "bs=1m",
+        "ibs=1m",
+        "obs=1m",
+        "iflag=fullblock",
+        "conv=osync",
         "status=progress",
     ] in popen_calls
 
@@ -527,9 +530,9 @@ def test_write_gz_via_dd_reports_dd_failure_before_gzip_sigpipe(monkeypatch, tmp
         _write_gz_via_dd(str(image), "/dev/disk4")
 
     assert exc_info.value.cmd[0] == "dd"
-    assert "iflag=fullblock" not in exc_info.value.cmd
-    assert "conv=osync" not in exc_info.value.cmd
-    assert "bs=1m" in exc_info.value.cmd
+    assert "iflag=fullblock" in exc_info.value.cmd
+    assert "conv=osync" in exc_info.value.cmd
+    assert "bs=1m" not in exc_info.value.cmd
     assert "Invalid argument" in exc_info.value.stderr
 
 

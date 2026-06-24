@@ -13,7 +13,7 @@ const {
 
 const state = window.EMState;
 const { byId: $, detectMacPlatform } = window.EMDom;
-const { nativeApi, postJson, errorDetail, errorMessage, getState, getDisks } = window.EMApi;
+const { nativeApi, postJson, errorDetail, errorMessage, getState, getImageUpdates, getDisks } = window.EMApi;
 const { uniqueNodeNames, roleSshHint } = window.EMFleet;
 const { diskInventorySignature } = window.EMDisk;
 const {
@@ -179,6 +179,15 @@ disks.addEventListener("click", (event) => {
   loadDisks().catch(renderDiskError);
   updateFlashControls();
 });
+images.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-image-install-target]");
+  if (!button) {
+    return;
+  }
+  installImageUpdate(button.dataset.imageInstallTarget || "").catch((error) => {
+    setFlashStatus("bad", errorMessage(error));
+  });
+});
 document.querySelectorAll("input[name='ssh-mode']").forEach((input) => {
   input.addEventListener("change", updateFlashControls);
 });
@@ -323,6 +332,7 @@ async function loadState() {
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     renderImageState(payload.images || {});
+    refreshImageUpdateStatus();
     updateMeshFleetSource();
     updateFlashControls();
   } catch (error) {
@@ -335,7 +345,32 @@ function renderImageState(imagePayload) {
   const entries = Object.entries(imagePayload || {});
   state.images = imagePayload || {};
   imageCount.textContent = `${entries.length}`;
-  images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
+  images.innerHTML = entries
+    .map(([target, image]) => imageItem(target, imageWithUpdate(target, image)))
+    .join("");
+}
+
+function imageWithUpdate(target, image) {
+  const update = state.imageUpdates[target] || {};
+  return { ...(image || {}), ...update, installing: state.imageInstallTarget === target };
+}
+
+async function refreshImageUpdateStatus() {
+  const seq = state.imageUpdateSeq + 1;
+  state.imageUpdateSeq = seq;
+  try {
+    const payload = await getImageUpdates();
+    if (seq !== state.imageUpdateSeq) {
+      return;
+    }
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Could not check image releases");
+    }
+    state.imageUpdates = payload.updates || {};
+    renderImageState(state.images);
+  } catch (error) {
+    console.debug("Image update check failed", error);
+  }
 }
 
 async function refreshImageSidebar() {
@@ -350,6 +385,7 @@ async function refreshImageSidebar() {
       throw new Error(errorDetail(payload) || "Could not refresh image state");
     }
     renderImageState(payload.images || {});
+    await refreshImageUpdateStatus();
     updateFlashControls();
   } catch (error) {
     console.debug("Image sidebar refresh failed", error);
@@ -359,6 +395,28 @@ async function refreshImageSidebar() {
       state.imageRefreshQueued = false;
       refreshImageSidebar();
     }
+  }
+}
+
+async function installImageUpdate(target) {
+  target = String(target || "").trim();
+  if (!target || state.imageInstallTarget) {
+    return;
+  }
+  state.imageInstallTarget = target;
+  renderImageState(state.images);
+  setFlashStatus("running", `Installing latest image for ${target}...`);
+  try {
+    const payload = await postJson("/api/image-updates/install", { target });
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Image update install failed");
+    }
+    await refreshImageSidebar();
+    const version = payload.version || (payload.image || {}).version || "latest";
+    setFlashStatus("ok", payload.installed === false ? "Image cache is already current." : `Installed image ${version}.`);
+  } finally {
+    state.imageInstallTarget = "";
+    renderImageState(state.images);
   }
 }
 

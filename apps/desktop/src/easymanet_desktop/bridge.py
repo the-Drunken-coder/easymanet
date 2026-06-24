@@ -21,6 +21,8 @@ from easymanet.support_bundle import create_support_bundle
 
 from .payloads import (
     disks_payload,
+    image_update_payload,
+    install_image_update_payload,
     resolve_config_payload,
     state_payload,
     validate_payload as shared_validate_payload,
@@ -135,6 +137,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("state")
+    subparsers.add_parser("image-updates")
+    install_image_update = subparsers.add_parser("install-image-update")
+    install_image_update.add_argument("--target", required=True)
 
     disks = subparsers.add_parser("disks")
     disks.add_argument("--all", action="store_true", dest="include_all")
@@ -179,6 +184,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "state":
             payload = state_payload()
+        elif args.command == "image-updates":
+            payload = image_update_payload()
+        elif args.command == "install-image-update":
+            payload = install_image_update_payload(target=args.target)
         elif args.command == "disks":
             payload = disks_payload(include_all=args.include_all)
         elif args.command == "validate":

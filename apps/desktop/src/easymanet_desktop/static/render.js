@@ -40,6 +40,8 @@
 
   function imageItem(target, image) {
     const cached = Boolean(image.cached_path);
+    const updateAvailable = Boolean(image.update_available);
+    const installing = Boolean(image.installing);
     const trustStatus = String(image.trust_status || image.trust_status === "" ? image.trust_status : image.trustStatus || "");
     const imageStatus = String(image.image_status ?? image.imageStatus ?? "");
     const source = String(image.source ?? image.imageSource ?? "");
@@ -54,10 +56,18 @@
           ? "checksum-only custom"
           : cached ? "checksum-only" : "needs download";
     const lines = [
-      `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(cached ? "ok" : "warn", cached ? "cached" : "will download")}</div>`,
+      `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(updateAvailable ? "warn" : cached ? "ok" : "warn", updateAvailable ? "update available" : cached ? "cached" : "will download")}</div>`,
       `<div class="meta-line">${escapeHtml(image.version || "unversioned")}</div>`,
       `<div class="meta-line">${chip(trustStatus === "verified" ? "ok" : trustStatus === "untrusted" ? "bad" : cached ? "warn" : "subtle", trustLabel)}</div>`,
     ];
+    if (updateAvailable) {
+      lines.push(`
+        <div class="image-update-row">
+          <span class="image-action">new image available: ${escapeHtml(image.latest_version || "latest")}</span>
+          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing ? " disabled" : ""}>${installing ? "Installing..." : "New Image Available"}</button>
+        </div>
+      `);
+    }
     if (imageStatus === "superseded" || imageStatus === "unsafe") {
       lines.push(`<div class="meta-line image-action">warning: ${escapeHtml(imageStatus)}</div>`);
     }
@@ -88,6 +98,9 @@
       .map((item) => `<span class="disk-warning">${escapeHtml(item)}</span>`)
       .join("");
     const mounted = (disk.mounted || []).join(", ");
+    const typeChip = disk.virtual
+      ? chip("warn", "virtual")
+      : chip(disk.removable ? "ok" : "warn", disk.removable ? "removable" : "fixed");
     return `
       <button type="button" class="disk-card${selected ? " selected" : ""}" data-device="${escapeHtml(disk.device)}" aria-pressed="${selected}">
         <span class="disk-top">
@@ -99,7 +112,7 @@
         <span class="disk-model">${escapeHtml(disk.model || "Unknown model")}</span>
         <span class="disk-tags">
           ${chip("subtle", disk.size_human || "size unknown")}
-          ${chip(disk.removable ? "ok" : "warn", disk.removable ? "removable" : "fixed")}
+          ${typeChip}
         </span>
         <span class="meta-line mono trunc" title="${escapeHtml(mounted)}">${escapeHtml(mounted || "not mounted")}</span>
         ${warnings}

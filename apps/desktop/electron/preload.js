@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("easymanet", {
   getState: () => ipcRenderer.invoke("easymanet:state"),
+  getImageUpdates: () => ipcRenderer.invoke("easymanet:image-updates"),
+  installImageUpdate: (target) => ipcRenderer.invoke("easymanet:image-update-install", { target }),
   getDisks: (includeAll = false) => ipcRenderer.invoke("easymanet:disks", { includeAll }),
   validate: (payload) => ipcRenderer.invoke("easymanet:validate", payload),
   discoverMesh: (payload) => ipcRenderer.invoke("easymanet:mesh-discover", payload),

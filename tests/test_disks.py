@@ -133,6 +133,18 @@ def test_blocking_warnings_not_in_default_list():
     assert any("not in default disk list" in w for w in disk.blocking_warnings)
 
 
+def test_blocking_warnings_virtual_disk_image():
+    disk = disks.DiskInfo(
+        device="/dev/disk5",
+        size_bytes=64 * 1024**2,
+        model="Disk Image",
+        removable=True,
+        virtual=True,
+    )
+
+    assert any("Virtual disk image" in w for w in disk.blocking_warnings)
+
+
 def test_assert_flash_allowed_blocks_without_force(monkeypatch):
     disk = disks.DiskInfo(
         device="/dev/sda",
@@ -410,6 +422,124 @@ def test_lookup_device_macos_accepts_raw_disk_and_canonicalizes(monkeypatch):
     assert disk.removable is True
     assert disk.mounted == ["/Volumes/BOOT"]
     assert seen == ["/dev/disk4"]
+
+
+def test_list_disks_macos_external_filters_disk_images(monkeypatch):
+    external_plist = {
+        "AllDisksAndPartitions": [
+            {"DeviceIdentifier": "disk4", "Size": 32 * 1024**3},
+            {"DeviceIdentifier": "disk5", "Size": 64 * 1024**2},
+        ]
+    }
+    all_plist = {"AllDisksAndPartitions": []}
+    info_text = {
+        "/dev/disk4": "\n".join(
+            [
+                "Device / Media Name: USB DISK 3.0",
+                "Disk Size: 32 GB",
+                "Protocol: USB",
+                "Device Location: External",
+                "Removable Media: Removable",
+                "Virtual: No",
+            ]
+        ),
+        "/dev/disk5": "\n".join(
+            [
+                "Device / Media Name: Disk Image",
+                "Disk Size: 64 MB",
+                "Protocol: Disk Image",
+                "Device Location: External",
+                "Removable Media: Removable",
+                "Virtual: Yes",
+            ]
+        ),
+    }
+
+    def fake_check_output(cmd, timeout=15):
+        if cmd == ["diskutil", "list", "-plist", "external"]:
+            return plistlib.dumps(external_plist)
+        if cmd == ["diskutil", "list", "-plist"]:
+            return plistlib.dumps(all_plist)
+        if cmd[:2] == ["diskutil", "info"]:
+            return info_text[cmd[2]].encode()
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(macos.subprocess, "check_output", fake_check_output)
+
+    listed = macos.list_disks_macos(include_all=False)
+
+    assert [disk.device for disk in listed] == ["/dev/disk4"]
+    assert listed[0].virtual is False
+
+
+def test_list_disks_macos_all_marks_disk_images_virtual(monkeypatch):
+    all_plist = {
+        "WholeDisks": ["disk4", "disk5"],
+        "AllDisksAndPartitions": [],
+    }
+    info_text = {
+        "/dev/disk4": "\n".join(
+            [
+                "Device / Media Name: USB DISK 3.0",
+                "Disk Size: 32 GB",
+                "Protocol: USB",
+                "Device Location: External",
+                "Removable Media: Removable",
+                "Virtual: No",
+            ]
+        ),
+        "/dev/disk5": "\n".join(
+            [
+                "Device / Media Name: Disk Image",
+                "Disk Size: 64 MB",
+                "Protocol: Disk Image",
+                "Device Location: External",
+                "Removable Media: Removable",
+                "Virtual: Yes",
+            ]
+        ),
+    }
+
+    def fake_check_output(cmd, timeout=15):
+        if cmd == ["diskutil", "list", "-plist"]:
+            return plistlib.dumps(all_plist)
+        if cmd[:2] == ["diskutil", "info"]:
+            return info_text[cmd[2]].encode()
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(macos.subprocess, "check_output", fake_check_output)
+
+    listed = macos.list_disks_macos(include_all=True)
+
+    by_device = {disk.device: disk for disk in listed}
+    assert by_device["/dev/disk5"].virtual is True
+    assert any("Virtual disk image" in warning for warning in by_device["/dev/disk5"].warnings)
+
+
+def test_lookup_device_macos_marks_disk_images_virtual(monkeypatch):
+    monkeypatch.setattr(macos.os.path, "exists", lambda path: path == "/dev/disk5")
+    monkeypatch.setattr(macos, "_get_macos_all_mounts", lambda: {"disk5": ["/Volumes/boot"]})
+    monkeypatch.setattr(
+        macos,
+        "_get_diskutil_info_text",
+        lambda _path: "\n".join(
+            [
+                "Device / Media Name: Disk Image",
+                "Disk Size: 64 MB",
+                "Protocol: Disk Image",
+                "Device Location: External",
+                "Removable Media: Removable",
+                "Virtual: Yes",
+            ]
+        ),
+    )
+
+    disk = macos.lookup_device_macos("/dev/disk5")
+
+    assert disk is not None
+    assert disk.virtual is True
+    assert disk.removable is True
+    assert any("Virtual disk image" in warning for warning in disk.warnings)
 
 
 def test_get_macos_all_mounts_uses_structured_mount_points(monkeypatch):

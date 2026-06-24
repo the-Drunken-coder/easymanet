@@ -17,7 +17,13 @@ from easymanet.diagnostics import export_support_bundle, import_boot_report, run
 from easymanet.support_bundle import create_support_bundle
 
 from .mesh import mesh_discover_payload
-from .payloads import disks_payload, state_payload, validate_payload
+from .payloads import (
+    disks_payload,
+    image_update_payload,
+    install_image_update_payload,
+    state_payload,
+    validate_payload,
+)
 
 app = typer.Typer(
     name="easymanet-desktop",
@@ -70,6 +76,9 @@ class _DesktopHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/state":
             self._send_json(state_payload())
             return
+        if parsed.path == "/api/image-updates":
+            self._send_json(image_update_payload())
+            return
         if parsed.path == "/api/disks":
             query = parse_qs(parsed.query)
             include_all = query.get("all", ["0"])[0] in {"1", "true", "yes"}
@@ -86,6 +95,7 @@ class _DesktopHandler(BaseHTTPRequestHandler):
             "/api/diagnostics/run",
             "/api/diagnostics/bundle",
             "/api/diagnostics/import-boot-report",
+            "/api/image-updates/install",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -109,6 +119,10 @@ class _DesktopHandler(BaseHTTPRequestHandler):
                 self._send_json(export_support_bundle(config=str(payload.get("config", "") or "")))
             elif parsed.path == "/api/diagnostics/import-boot-report":
                 self._send_json(import_boot_report(source=str(payload.get("source", "") or "")))
+            elif parsed.path == "/api/image-updates/install":
+                self._send_json(
+                    install_image_update_payload(target=str(payload.get("target", "") or ""))
+                )
             else:
                 self._send_json(validate_payload(payload))
         except ValueError as exc:

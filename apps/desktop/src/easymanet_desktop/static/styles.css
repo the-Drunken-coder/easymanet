@@ -762,6 +762,14 @@ select:disabled {
   color: var(--warn);
 }
 
+.image-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* ---------- Disks ---------- */
 
 .disk-grid {

@@ -1,6 +1,6 @@
 const { app } = require("electron");
 const { booleanFlag } = require("./util");
-const { nodeNamePattern, sshModes } = require("./constants");
+const { imageTargetPattern, nodeNamePattern, sshModes } = require("./constants");
 const { hasTraversalSegment, resolveConfigPath } = require("./path-utils");
 const { runBridge } = require("./bridge-process");
 
@@ -120,6 +120,20 @@ function validateBootReportImportPayload(payload) {
   return { ok: true, source };
 }
 
+function validateImageTargetPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, errors: ["Image update payload must be an object"] };
+  }
+  const target = typeof payload.target === "string" ? payload.target.trim() : "";
+  if (!target) {
+    return { ok: false, errors: ["Image target is required"] };
+  }
+  if (!imageTargetPattern.test(target)) {
+    return { ok: false, errors: ["Image target contains unsupported characters"] };
+  }
+  return { ok: true, target };
+}
+
 function flashArgs(payload) {
   const args = ["--config", payload.config, "--node", payload.node, "--device", payload.device];
   if (payload.sshMode === "enable") {
@@ -135,6 +149,7 @@ module.exports = {
   validateBootReportImportPayload,
   validateDiagnosticsPayload,
   validateFlashPayload,
+  validateImageTargetPayload,
   validateMeshPayload,
   validatePayload,
 };

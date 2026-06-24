@@ -9,6 +9,8 @@ from typing import Any
 from easymanet.disks import list_disks
 from easymanet.download import (
     cache_dir,
+    check_latest_version,
+    download_image,
     get_cached_image,
     image_sha256,
     images_manifest_path,
@@ -63,6 +65,133 @@ def state_payload() -> dict[str, Any]:
         "image_cache_dir": str(cache_dir()),
         "image_manifest": str(images_manifest_path()),
         "images": images,
+    }
+
+
+def image_update_payload() -> dict[str, Any]:
+    """Return latest-image metadata without downloading firmware."""
+    state = state_payload()
+    images = state.get("images", {})
+    if not isinstance(images, dict):
+        images = {}
+    updates = {
+        str(target): image_update_entry(str(target), entry if isinstance(entry, dict) else {})
+        for target, entry in images.items()
+    }
+    return {"ok": True, "updates": updates}
+
+
+def image_update_entry(target: str, entry: dict[str, Any]) -> dict[str, Any]:
+    current_version = str(entry.get("version") or "")
+    current_sha256 = str(entry.get("cached_sha256") or entry.get("sha256") or "")
+    cached_path = str(entry.get("cached_path") or "")
+    try:
+        latest = check_latest_version(target)
+    except Exception as exc:  # noqa: BLE001 - surfaced as image-status data.
+        return {
+            "target": target,
+            "status": "unavailable",
+            "update_available": False,
+            "current_version": current_version,
+            "current_sha256": current_sha256,
+            "cached_path": cached_path,
+            "errors": [str(exc)],
+        }
+    if latest is None:
+        return {
+            "target": target,
+            "status": "unavailable",
+            "update_available": False,
+            "current_version": current_version,
+            "current_sha256": current_sha256,
+            "cached_path": cached_path,
+            "errors": ["Could not check the latest image release."],
+        }
+
+    latest_sha256 = str(latest.sha256 or "")
+    latest_version = str(latest.version or "")
+    sha_mismatch = bool(current_sha256 and latest_sha256 and current_sha256 != latest_sha256)
+    version_mismatch = bool(current_version and latest_version and current_version != latest_version)
+    update_available = sha_mismatch or (version_mismatch and not latest_sha256)
+    status = "current"
+    if not cached_path:
+        status = "missing"
+    elif update_available:
+        status = "outdated"
+
+    return {
+        "target": target,
+        "status": status,
+        "update_available": update_available,
+        "current_version": current_version,
+        "current_sha256": current_sha256,
+        "cached_path": cached_path,
+        "latest_version": latest_version,
+        "latest_url": str(latest.url or ""),
+        "latest_sha256": latest_sha256,
+        "latest_trust_status": str(getattr(latest, "trust_status", "")),
+        "latest_source": str(getattr(latest, "source", "")),
+        "latest_channel": str(getattr(latest, "channel", "")),
+        "latest_release_tag": str(getattr(latest, "release_tag", "")),
+        "latest_image_status": str(getattr(latest, "image_status", "")),
+        "latest_manifest_url": str(getattr(latest, "manifest_url", "")),
+        "warnings": [str(warning) for warning in getattr(latest, "warnings", ())],
+    }
+
+
+def install_image_update_payload(*, target: str) -> dict[str, Any]:
+    """Download and verify the latest image for a target on explicit request."""
+    target = str(target or "").strip()
+    if not target:
+        return {"ok": False, "errors": ["Image target is required."]}
+
+    state = state_payload()
+    images = state.get("images", {})
+    if not isinstance(images, dict) or target not in images:
+        return {"ok": False, "errors": [f"Unknown image target: {target}"]}
+    entry = images[target] if isinstance(images[target], dict) else {}
+    update = image_update_entry(target, entry)
+    if update.get("status") == "current" and update.get("cached_path"):
+        return {
+            "ok": True,
+            "installed": False,
+            "target": target,
+            "message": "Image cache is already current.",
+            "image": entry,
+            "update": update,
+        }
+
+    try:
+        latest = check_latest_version(target)
+        if latest is None:
+            return {"ok": False, "errors": ["Could not check the latest image release."]}
+        if not latest.sha256:
+            return {"ok": False, "errors": [f"No SHA-256 checksum found for target '{target}'."]}
+        path = download_image(
+            target,
+            latest.version,
+            latest.url,
+            latest.sha256,
+            force=True,
+            trust=latest.trust,
+        )
+    except Exception as exc:  # noqa: BLE001 - surfaced to the local UI.
+        return {"ok": False, "errors": [str(exc)]}
+
+    refreshed = state_payload()
+    refreshed_images = refreshed.get("images", {})
+    image = refreshed_images.get(target, {}) if isinstance(refreshed_images, dict) else {}
+    if not isinstance(image, dict):
+        image = {}
+    return {
+        "ok": True,
+        "installed": True,
+        "target": target,
+        "path": str(path),
+        "version": str(latest.version or ""),
+        "sha256": str(latest.sha256 or ""),
+        "image": image,
+        "update": image_update_entry(target, image),
     }
 
 
@@ -187,6 +316,7 @@ def disks_payload(*, include_all: bool) -> dict[str, Any]:
                 "model": disk.model,
                 "size_human": disk.size_human,
                 "removable": disk.removable,
+                "virtual": bool(getattr(disk, "virtual", False)),
                 "mounted": disk.mounted,
                 "warnings": disk.warnings,
             }

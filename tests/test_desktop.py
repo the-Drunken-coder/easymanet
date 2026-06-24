@@ -130,6 +130,101 @@ def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypat
     assert payload["images"]["rpi4-mm6108-spi"]["version"] == "1.6.5"
 
 
+def test_image_update_payload_reports_newer_official_release(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {
+            "ok": True,
+            "images": {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.6",
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "cached_sha256": "a" * 64,
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.7",
+            url="https://example.test/openmanet.img.gz",
+            sha256="b" * 64,
+            trust_status="verification-pending",
+            source="official",
+            channel="stable",
+            release_tag="images-v0.2.7",
+            image_status="current",
+            manifest_url="https://example.test/easymanet-image-release.json",
+            warnings=(),
+        ),
+    )
+
+    payload = payloads.image_update_payload()
+    update = payload["updates"]["rpi4-mm6108-spi"]
+
+    assert payload["ok"] is True
+    assert update["status"] == "outdated"
+    assert update["update_available"] is True
+    assert update["current_version"] == "images-v0.2.6"
+    assert update["latest_version"] == "images-v0.2.7"
+    assert update["latest_sha256"] == "b" * 64
+
+
+def test_install_image_update_downloads_latest_release(monkeypatch, tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    state = {
+        "ok": True,
+        "images": {
+            "rpi4-mm6108-spi": {
+                "version": "images-v0.2.6",
+                "cached_path": str(image),
+                "cached_sha256": "a" * 64,
+            }
+        },
+    }
+    latest = SimpleNamespace(
+        version="images-v0.2.7",
+        url="https://example.test/openmanet.img.gz",
+        sha256="b" * 64,
+        trust={"source": "official", "status": "verification-pending"},
+        trust_status="verification-pending",
+        source="official",
+        channel="stable",
+        release_tag="images-v0.2.7",
+        image_status="current",
+        manifest_url="https://example.test/easymanet-image-release.json",
+        warnings=(),
+    )
+    monkeypatch.setattr(payloads, "state_payload", lambda: state)
+    monkeypatch.setattr(payloads, "check_latest_version", lambda _target: latest)
+
+    def fake_download_image(target, version, url, sha256, *, force, trust):
+        assert target == "rpi4-mm6108-spi"
+        assert version == "images-v0.2.7"
+        assert url == latest.url
+        assert sha256 == latest.sha256
+        assert force is True
+        assert trust == latest.trust
+        state["images"]["rpi4-mm6108-spi"].update(
+            version="images-v0.2.7",
+            cached_sha256="b" * 64,
+        )
+        return image
+
+    monkeypatch.setattr(payloads, "download_image", fake_download_image)
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result["ok"] is True
+    assert result["installed"] is True
+    assert result["version"] == "images-v0.2.7"
+    assert result["update"]["status"] == "current"
+    assert result["update"]["update_available"] is False
+
+
 def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -1138,6 +1233,12 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert 'selectedDisk.textContent = "None";' in disk_error_body
     assert "renderImageState" in text
     assert "refreshImageSidebar" in text
+    assert "refreshImageUpdateStatus" in text
+    assert "installImageUpdate" in text
+    assert 'postJson("/api/image-updates/install", { target })' in text
+    assert "new image available:" in render_js.read_text()
+    assert "New Image Available" in render_js.read_text()
+    assert "data-image-install-target" in render_js.read_text()
     assert 'type === "download_completed"' in text
     assert "exportSupportBundle" in text
     assert "updateCopyFlashLogVisibility" in text
@@ -1234,6 +1335,8 @@ def test_electron_shell_files_exist():
     assert "loadFile(indexHtmlPath())" in (electron / "window.js").read_text()
     assert "contextBridge.exposeInMainWorld" in (electron / "preload.js").read_text()
     assert "easymanet:open-fleets-folder" in electron_text
+    assert "easymanet:image-updates" in electron_text
+    assert "easymanet:image-update-install" in electron_text
     assert "easymanet:mesh-discover" in electron_text
     assert "easymanet:diagnostics-run" in electron_text
     assert "easymanet:diagnostics-bundle" in electron_text
@@ -1265,6 +1368,8 @@ def test_electron_shell_files_exist():
     assert "baseImageArgs(stagedImage)" in electron_text
     assert '"prepare-flash"' in bridge_text
     assert '"prepare-flash"' in electron_text
+    assert '"install-image-update"' in bridge_text
+    assert '"install-image-update"' in electron_text
     assert '"ensure-image"' not in bridge_text
     assert "ensureCachedImageForElevatedFlash" not in electron_text
     assert '"ensure-image"' not in electron_text
@@ -1278,6 +1383,8 @@ def test_electron_shell_files_exist():
     assert 'spawn("osascript"' not in electron_text
     assert "streamEvents" not in electron_text
     assert "copyText" in (electron / "preload.js").read_text()
+    assert "getImageUpdates" in (electron / "preload.js").read_text()
+    assert "installImageUpdate" in (electron / "preload.js").read_text()
     assert "discoverMesh" in (electron / "preload.js").read_text()
     assert "onFlashEvent" in (electron / "preload.js").read_text()
     assert "EASYMANET_ELECTRON_NO_SOURCE_PATHS" in electron_text

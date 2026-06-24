@@ -128,6 +128,9 @@ radioDisable.value = "disable";
 element("mesh-scan-subnet").checked = true;
 
 let stateCalls = 0;
+let imageUpdateCalls = 0;
+let imageInstallCalls = 0;
+let imageInstalled = false;
 let holdState = false;
 let stateResolvers = [];
 let holdMesh = false;
@@ -143,7 +146,9 @@ function statePayload() {
       fleet_files: [{ name: "field.yml", relative_path: "field.yml", path: "/tmp/EasyMANET/Fleets/field.yml" }],
     },
     images: {
-      "rpi4-mm6108-spi": stateCalls > 1 ? { cached_path: "/tmp/openmanet.img.gz" } : {},
+      "rpi4-mm6108-spi": stateCalls > 1
+        ? { cached_path: "/tmp/openmanet.img.gz", version: imageInstalled ? "images-v0.2.7" : "images-v0.2.6" }
+        : {},
     },
   };
 }
@@ -159,6 +164,32 @@ const nativeApi = {
       return new Promise((resolve) => stateResolvers.push(() => resolve(payload)));
     }
     return Promise.resolve(payload);
+  },
+  getImageUpdates() {
+    imageUpdateCalls += 1;
+    return Promise.resolve({
+      ok: true,
+      updates: {
+        "rpi4-mm6108-spi": {
+          status: imageInstalled ? "current" : "outdated",
+          update_available: !imageInstalled,
+          current_version: imageInstalled ? "images-v0.2.7" : "images-v0.2.6",
+          latest_version: "images-v0.2.7",
+          latest_sha256: "b".repeat(64),
+        },
+      },
+    });
+  },
+  installImageUpdate(target) {
+    imageInstallCalls += 1;
+    imageInstalled = target === "rpi4-mm6108-spi";
+    return Promise.resolve({
+      ok: true,
+      installed: true,
+      target,
+      version: "images-v0.2.7",
+      image: { cached_path: "/tmp/openmanet.img.gz", version: "images-v0.2.7" },
+    });
   },
   getDisks() {
     return Promise.resolve({ ok: true, disks: [] });
@@ -242,6 +273,19 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await flush();
   await flush();
   await flush();
+  await flush();
+
+  const startupImageUpdateChecked = imageUpdateCalls > 0;
+  const startupImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
+  const startupImageUpdateButton = element("images").innerHTML.includes("New Image Available")
+    && element("images").innerHTML.includes("data-image-install-target");
+
+  await context.installImageUpdate("rpi4-mm6108-spi");
+  await flush();
+  await flush();
+  await flush();
+  const imageInstallTriggered = imageInstallCalls === 1;
+  const imageInstallClearsNotice = !element("images").innerHTML.includes("new image available: images-v0.2.7");
 
   const beforeDownload = stateCalls;
   context.renderFlashEvent({ event_type: "download_completed" });
@@ -284,6 +328,11 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   process.stdout.write(JSON.stringify({
     registeredFlashCallback: typeof flashCallback === "function",
+    startupImageUpdateChecked,
+    startupImageUpdateNotice,
+    startupImageUpdateButton,
+    imageInstallTriggered,
+    imageInstallClearsNotice,
     downloadCompletedRefreshesImages,
     queuedCoalesced,
     queuedStarted,
@@ -312,6 +361,11 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
     assert payload == {
         "registeredFlashCallback": True,
+        "startupImageUpdateChecked": True,
+        "startupImageUpdateNotice": True,
+        "startupImageUpdateButton": True,
+        "imageInstallTriggered": True,
+        "imageInstallClearsNotice": True,
         "downloadCompletedRefreshesImages": True,
         "queuedCoalesced": True,
         "queuedStarted": True,

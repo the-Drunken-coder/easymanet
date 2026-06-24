@@ -19,3 +19,5 @@ Keep product-surface claims honest. CLI flash capability, Electron shell capabil
 Before claiming a change is ready, run validation relevant to the touched surface. Normal Python changes should pass `pytest -q`. OpenMANET overlay script changes should also pass `sh -n` on the changed files under `images/openmanet/provisioning/openwrt-overlay/`. Electron shell changes should pass `npm --prefix apps/desktop/electron run check`. Release work should include the release checklist in `docs/release.md`.
 
 The desktop app reads and writes through the shared workspace, not a private app database. The default workspace is `~/Documents/EasyMANET`, configurable with `EASYMANET_WORKSPACE`; `Fleets/`, `Images/`, `Diagnostics/`, and `Builds/` are operator data, not repo source.
+
+When checking whether a desktop image cache is current, trust the desktop state payload and `Images/version.json` over a CLI flash dry-run placeholder. The dry-run path can still print `<auto-download for rpi4-mm6108-spi>` even when a verified official image is already cached, because it does not resolve the latest release SHA before planning.

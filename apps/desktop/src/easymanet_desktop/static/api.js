@@ -6,6 +6,9 @@
     if (nativeApi && url === "/api/state") {
       return nativeApi.getState();
     }
+    if (nativeApi && nativeApi.getImageUpdates && url === "/api/image-updates") {
+      return nativeApi.getImageUpdates();
+    }
     return fetchJson(url);
   }
 
@@ -27,6 +30,9 @@
     }
     if (nativeApi && nativeApi.importBootReport && url === "/api/diagnostics/import-boot-report") {
       return nativeApi.importBootReport(body);
+    }
+    if (nativeApi && nativeApi.installImageUpdate && url === "/api/image-updates/install") {
+      return nativeApi.installImageUpdate(body?.target || "");
     }
     return fetchJson(url, {
       method: "POST",
@@ -82,6 +88,10 @@
     return getJson("/api/state");
   }
 
+  async function getImageUpdates() {
+    return getJson("/api/image-updates");
+  }
+
   async function getDisks(includeAll) {
     if (nativeApi) {
       return nativeApi.getDisks(includeAll);
@@ -98,6 +108,7 @@
     errorDetail,
     errorMessage,
     getState,
+    getImageUpdates,
     getDisks,
   };
 })();

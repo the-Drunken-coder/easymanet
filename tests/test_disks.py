@@ -39,6 +39,24 @@ def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeyp
     ]
 
 
+def _macos_info_text(
+    *,
+    name: str = "USB DISK 3.0",
+    protocol: str = "USB",
+    virtual: str = "No",
+) -> str:
+    return "\n".join(
+        [
+            f"Device / Media Name: {name}",
+            "Disk Size: 64 MB",
+            f"Protocol: {protocol}",
+            "Device Location: External",
+            "Removable Media: Removable",
+            f"Virtual: {virtual}",
+        ]
+    )
+
+
 def test_linux_unmount_disk_falls_back_to_device_when_no_partitions(monkeypatch, linux_platform):
     calls = []
 
@@ -472,6 +490,43 @@ def test_list_disks_macos_external_filters_disk_images(monkeypatch):
     assert listed[0].virtual is False
 
 
+@pytest.mark.parametrize(
+    ("info_text", "case"),
+    [
+        (_macos_info_text(virtual="Yes"), "virtual flag"),
+        (_macos_info_text(protocol="Disk Image"), "protocol"),
+        (_macos_info_text(name="Disk Image"), "media name"),
+    ],
+)
+def test_list_disks_macos_external_filters_each_virtual_signal(monkeypatch, info_text, case):
+    external_plist = {
+        "AllDisksAndPartitions": [
+            {"DeviceIdentifier": "disk4", "Size": 32 * 1024**3},
+            {"DeviceIdentifier": "disk5", "Size": 64 * 1024**2},
+        ]
+    }
+    all_plist = {"AllDisksAndPartitions": []}
+    disk_info = {
+        "/dev/disk4": _macos_info_text(name="USB DISK 3.0", protocol="USB", virtual="No"),
+        "/dev/disk5": info_text,
+    }
+
+    def fake_check_output(cmd, timeout=15):
+        if cmd == ["diskutil", "list", "-plist", "external"]:
+            return plistlib.dumps(external_plist)
+        if cmd == ["diskutil", "list", "-plist"]:
+            return plistlib.dumps(all_plist)
+        if cmd[:2] == ["diskutil", "info"]:
+            return disk_info[cmd[2]].encode()
+        raise AssertionError((case, cmd))
+
+    monkeypatch.setattr(macos.subprocess, "check_output", fake_check_output)
+
+    listed = macos.list_disks_macos(include_all=False)
+
+    assert [disk.device for disk in listed] == ["/dev/disk4"]
+
+
 def test_list_disks_macos_all_marks_disk_images_virtual(monkeypatch):
     all_plist = {
         "WholeDisks": ["disk4", "disk5"],
@@ -539,6 +594,26 @@ def test_lookup_device_macos_marks_disk_images_virtual(monkeypatch):
     assert disk is not None
     assert disk.virtual is True
     assert disk.removable is True
+    assert any("Virtual disk image" in warning for warning in disk.warnings)
+
+
+@pytest.mark.parametrize(
+    ("info_text", "case"),
+    [
+        (_macos_info_text(virtual="Yes"), "virtual flag"),
+        (_macos_info_text(protocol="Disk Image"), "protocol"),
+        (_macos_info_text(name="Disk Image"), "media name"),
+    ],
+)
+def test_lookup_device_macos_marks_each_virtual_signal(monkeypatch, info_text, case):
+    monkeypatch.setattr(macos.os.path, "exists", lambda path: path == "/dev/disk5")
+    monkeypatch.setattr(macos, "_get_macos_all_mounts", lambda: {"disk5": ["/Volumes/boot"]})
+    monkeypatch.setattr(macos, "_get_diskutil_info_text", lambda _path: info_text)
+
+    disk = macos.lookup_device_macos("/dev/disk5")
+
+    assert disk is not None, case
+    assert disk.virtual is True
     assert any("Virtual disk image" in warning for warning in disk.warnings)
 
 

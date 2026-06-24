@@ -173,6 +173,45 @@ def test_image_update_payload_reports_newer_official_release(monkeypatch):
     assert update["latest_sha256"] == "b" * 64
 
 
+def test_image_update_payload_reports_version_only_cache_as_outdated(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {
+            "ok": True,
+            "images": {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.6",
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "cached_sha256": "",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.7",
+            url="https://example.test/openmanet.img.gz",
+            sha256="b" * 64,
+            trust_status="verification-pending",
+            source="official",
+            channel="stable",
+            release_tag="images-v0.2.7",
+            image_status="current",
+            manifest_url="https://example.test/easymanet-image-release.json",
+            warnings=(),
+        ),
+    )
+
+    update = payloads.image_update_payload()["updates"]["rpi4-mm6108-spi"]
+
+    assert update["status"] == "outdated"
+    assert update["update_available"] is True
+    assert update["current_sha256"] == ""
+
+
 def test_install_image_update_downloads_latest_release(monkeypatch, tmp_path):
     image = tmp_path / "openmanet.img.gz"
     state = {
@@ -201,7 +240,7 @@ def test_install_image_update_downloads_latest_release(monkeypatch, tmp_path):
     monkeypatch.setattr(payloads, "state_payload", lambda: state)
     monkeypatch.setattr(payloads, "check_latest_version", lambda _target: latest)
 
-    def fake_download_image(target, version, url, sha256, *, force, trust):
+    def fake_download_image(target, version, url, sha256, *, force, trust) -> Path:
         assert target == "rpi4-mm6108-spi"
         assert version == "images-v0.2.7"
         assert url == latest.url
@@ -223,6 +262,111 @@ def test_install_image_update_downloads_latest_release(monkeypatch, tmp_path):
     assert result["version"] == "images-v0.2.7"
     assert result["update"]["status"] == "current"
     assert result["update"]["update_available"] is False
+
+
+def test_install_image_update_downloads_version_only_outdated_cache(monkeypatch, tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    state = {
+        "ok": True,
+        "images": {
+            "rpi4-mm6108-spi": {
+                "version": "images-v0.2.6",
+                "cached_path": str(image),
+                "cached_sha256": "",
+            }
+        },
+    }
+    latest = SimpleNamespace(
+        version="images-v0.2.7",
+        url="https://example.test/openmanet.img.gz",
+        sha256="b" * 64,
+        trust={},
+        trust_status="verification-pending",
+        source="official",
+        channel="stable",
+        release_tag="images-v0.2.7",
+        image_status="current",
+        manifest_url="https://example.test/easymanet-image-release.json",
+        warnings=(),
+    )
+    downloads = []
+    monkeypatch.setattr(payloads, "state_payload", lambda: state)
+    monkeypatch.setattr(payloads, "check_latest_version", lambda _target: latest)
+
+    def fake_download_image(target, version, url, sha256, *, force, trust) -> Path:
+        downloads.append((target, version, url, sha256, force, trust))
+        state["images"]["rpi4-mm6108-spi"].update(
+            version="images-v0.2.7",
+            cached_sha256="b" * 64,
+        )
+        return image
+
+    monkeypatch.setattr(payloads, "download_image", fake_download_image)
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result["ok"] is True
+    assert result["installed"] is True
+    assert downloads == [
+        (
+            "rpi4-mm6108-spi",
+            "images-v0.2.7",
+            "https://example.test/openmanet.img.gz",
+            "b" * 64,
+            True,
+            {},
+        )
+    ]
+
+
+def test_install_image_update_rejects_unknown_target(monkeypatch):
+    monkeypatch.setattr(payloads, "state_payload", lambda: {"ok": True, "images": {}})
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result == {"ok": False, "errors": ["Unknown image target: rpi4-mm6108-spi"]}
+
+
+def test_install_image_update_reports_latest_lookup_failure(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {"ok": True, "images": {"rpi4-mm6108-spi": {"version": "images-v0.2.6"}}},
+    )
+    monkeypatch.setattr(payloads, "check_latest_version", lambda _target: None)
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result == {"ok": False, "errors": ["Could not check the latest image release."]}
+
+
+def test_install_image_update_requires_sha256(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {"ok": True, "images": {"rpi4-mm6108-spi": {"version": "images-v0.2.6"}}},
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.7",
+            url="https://example.test/openmanet.img.gz",
+            sha256="",
+        ),
+    )
+    monkeypatch.setattr(
+        payloads,
+        "download_image",
+        lambda *args, **kwargs: pytest.fail("download_image should not be called"),
+    )
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result == {
+        "ok": False,
+        "errors": ["No SHA-256 checksum found for target 'rpi4-mm6108-spi'."],
+    }
 
 
 def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monkeypatch):

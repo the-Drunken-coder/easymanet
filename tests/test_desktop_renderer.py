@@ -281,6 +281,18 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const startupImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
   const startupImageUpdateButton = element("images").innerHTML.includes("New Image Available")
     && element("images").innerHTML.includes("data-image-install-target");
+  context.window.EMState.images = {
+    "rpi4-mm6108-spi": { cached_path: "/tmp/openmanet.img.gz", version: "images-v0.2.6" },
+    "rpi4-mm6108-spi-alt": { cached_path: "/tmp/openmanet-alt.img.gz", version: "images-v0.2.6" },
+  };
+  context.window.EMState.imageUpdates = {
+    "rpi4-mm6108-spi": { status: "outdated", update_available: true, latest_version: "images-v0.2.7" },
+    "rpi4-mm6108-spi-alt": { status: "outdated", update_available: true, latest_version: "images-v0.2.7" },
+  };
+  context.window.EMState.imageInstallTarget = "rpi4-mm6108-spi";
+  context.renderImageState(context.window.EMState.images);
+  const otherImageInstallDisabled = element("images").innerHTML.includes('data-image-install-target="rpi4-mm6108-spi-alt" disabled>New Image Available');
+  context.window.EMState.imageInstallTarget = "";
   const meshFleetDropdownPopulated = element("mesh-config-source").options.some((option) => option.value === "/tmp/EasyMANET/Fleets/field.yml")
     && element("mesh-config-source").value === "/tmp/EasyMANET/Fleets/field.yml";
   element("mesh-config-source").value = "/tmp/EasyMANET/Fleets/field.yml";
@@ -346,6 +358,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     startupImageUpdateChecked,
     startupImageUpdateNotice,
     startupImageUpdateButton,
+    otherImageInstallDisabled,
     meshFleetDropdownPopulated,
     meshFleetDropdownSyncsConfig,
     imageInstallTriggered,
@@ -383,6 +396,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "startupImageUpdateChecked": True,
         "startupImageUpdateNotice": True,
         "startupImageUpdateButton": True,
+        "otherImageInstallDisabled": True,
         "meshFleetDropdownPopulated": True,
         "meshFleetDropdownSyncsConfig": True,
         "imageInstallTriggered": True,

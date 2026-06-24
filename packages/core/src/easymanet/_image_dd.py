@@ -33,7 +33,7 @@ def stream_dd_device_path(device: str, *, macos: bool) -> str:
 def stream_dd_block_args(*, macos: bool) -> list[str]:
     if macos:
         # gzip pipes can yield short reads; macOS raw disks reject partial output writes.
-        return ["ibs=1m", "obs=1m", "iflag=fullblock", "conv=osync"]
+        return ["ibs=1m", "obs=1m", "conv=osync"]
     return [write_block_size_arg(macos=macos)]
 
 

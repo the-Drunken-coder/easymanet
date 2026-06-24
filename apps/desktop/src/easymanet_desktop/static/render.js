@@ -42,6 +42,7 @@
     const cached = Boolean(image.cached_path);
     const updateAvailable = Boolean(image.update_available);
     const installing = Boolean(image.installing);
+    const anyInstallRunning = Boolean(image.anyInstallRunning);
     const trustStatus = String(image.trust_status || image.trust_status === "" ? image.trust_status : image.trustStatus || "");
     const imageStatus = String(image.image_status ?? image.imageStatus ?? "");
     const source = String(image.source ?? image.imageSource ?? "");
@@ -64,7 +65,7 @@
       lines.push(`
         <div class="image-update-row">
           <span class="image-action">new image available: ${escapeHtml(image.latest_version || "latest")}</span>
-          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing ? " disabled" : ""}>${installing ? "Installing..." : "New Image Available"}</button>
+          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing || anyInstallRunning ? " disabled" : ""}>${installing ? "Installing..." : "New Image Available"}</button>
         </div>
       `);
     }

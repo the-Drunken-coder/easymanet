@@ -361,7 +361,12 @@ function renderImageState(imagePayload) {
 
 function imageWithUpdate(target, image) {
   const update = state.imageUpdates[target] || {};
-  return { ...(image || {}), ...update, installing: state.imageInstallTarget === target };
+  return {
+    ...(image || {}),
+    ...update,
+    installing: state.imageInstallTarget === target,
+    anyInstallRunning: Boolean(state.imageInstallTarget),
+  };
 }
 
 async function refreshImageUpdateStatus() {
@@ -795,7 +800,7 @@ function countLabel(count, noun) {
 }
 
 function updateCopyMeshLogVisibility() {
-  copyMeshLog.disabled = !state.meshLogLines.length;
+  copyMeshLog.disabled = !nativeApi || !state.meshLogLines.length;
   copyMeshLog.textContent = "Copy Log";
 }
 

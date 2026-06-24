@@ -112,7 +112,9 @@ def image_update_entry(target: str, entry: dict[str, Any]) -> dict[str, Any]:
     latest_version = str(latest.version or "")
     sha_mismatch = bool(current_sha256 and latest_sha256 and current_sha256 != latest_sha256)
     version_mismatch = bool(current_version and latest_version and current_version != latest_version)
-    update_available = sha_mismatch or (version_mismatch and not latest_sha256)
+    update_available = sha_mismatch or (
+        version_mismatch and (not current_sha256 or not latest_sha256)
+    )
     status = "current"
     if not cached_path:
         status = "missing"
@@ -151,7 +153,11 @@ def install_image_update_payload(*, target: str) -> dict[str, Any]:
         return {"ok": False, "errors": [f"Unknown image target: {target}"]}
     entry = images[target] if isinstance(images[target], dict) else {}
     update = image_update_entry(target, entry)
-    if update.get("status") == "current" and update.get("cached_path"):
+    if (
+        update.get("status") == "current"
+        and not update.get("update_available")
+        and update.get("cached_path")
+    ):
         return {
             "ok": True,
             "installed": False,

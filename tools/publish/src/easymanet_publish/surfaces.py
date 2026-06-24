@@ -74,6 +74,7 @@ PRODUCT_TEST_PATHS = (
 
 COMMON_PRODUCT_SOURCE_PATHS = (
     ".gitignore",
+    "LICENSE",
     "pyproject.toml",
     *PRODUCT_DOC_PATHS,
     "packages/core/src/easymanet",
@@ -206,6 +207,7 @@ SURFACES = {
         description="Public local-first desktop operator console for EasyMANET.",
         source_paths=(
             ".gitignore",
+            "LICENSE",
             "docs/manifest.md",
             "examples/three-node-field-mesh.yml",
             "packages/core/src/easymanet",

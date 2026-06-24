@@ -15,6 +15,7 @@ def test_export_public_surfaces_writes_local_outputs(tmp_path):
     assert record["subrepos_configured"] is False
     for surface in ("images", "cli", "desktop"):
         assert (output / surface / "README.generated.md").exists()
+        assert (output / surface / "LICENSE").exists()
         assert (output / surface / ".github" / "workflows" / "bootstrap-release.yml").exists()
         assert surface in record["surfaces"]
 

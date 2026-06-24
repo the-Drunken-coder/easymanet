@@ -3,6 +3,7 @@
   "version": "0.2.1",
   "private": true,
   "description": "Local Electron shell for the EasyMANET operator console",
+  "license": "MIT",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

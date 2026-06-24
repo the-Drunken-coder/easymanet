@@ -206,6 +206,7 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     )
 
     assert (repo / "pyproject.toml").exists()
+    assert (repo / "LICENSE").exists()
     assert not (repo / "apps" / "cli").exists()
     assert (repo / "apps" / "desktop" / "electron" / "package.json").exists()
     assert (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").exists()

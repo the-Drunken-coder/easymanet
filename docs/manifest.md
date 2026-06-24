@@ -230,10 +230,11 @@ Priority (highest to lowest):
 - Empty `root_password_hash` does not set a root password on the node.
 - `gateway.uplink_interface: eth0` is reserved for wired management on
   `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
-- `gateway.wifi.enabled` binds the EasyMANET API to `0.0.0.0:10411` and opens
-  WAN firewall access to that API, including topology endpoints under `/v1`.
-- `gateway.wifi.enabled` with SSH enabled also opens SSH on the WAN firewall
-  zone.
+- On gate nodes, `gateway.wifi.enabled` binds the EasyMANET API to
+  `0.0.0.0:10411` and opens WAN firewall access to that API, including topology
+  endpoints under `/v1`.
+- On gate nodes, `gateway.wifi.enabled` with SSH enabled also opens SSH on the
+  WAN firewall zone.
 - EasyMANET API exposure on WAN (port 10411) is intended for trusted upstream
   Wi-Fi LANs and is sensitive on untrusted uplinks.
 - Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext

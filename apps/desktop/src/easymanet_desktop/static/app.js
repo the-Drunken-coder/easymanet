@@ -118,7 +118,7 @@ adminPasswordRow.hidden = true;
 setupTabNavigation();
 
 $("refresh").addEventListener("click", () => {
-  refreshAll().catch(handleRefreshError);
+  refreshAll({ checkLatest: true }).catch(handleRefreshError);
 });
 checkImageUpdatesButton.addEventListener("click", () => {
   refreshImageUpdateStatus({ checkLatest: true, reportErrors: true }).catch(handleRefreshError);
@@ -326,15 +326,15 @@ $("validate-form").addEventListener("submit", async (event) => {
   }
 });
 
-async function refreshAll() {
+async function refreshAll({ checkLatest = false } = {}) {
   try {
-    await Promise.all([loadState(), loadDisks()]);
+    await Promise.all([loadState({ checkLatest }), loadDisks()]);
   } catch (error) {
     handleRefreshError(error);
   }
 }
 
-async function loadState() {
+async function loadState({ checkLatest = false } = {}) {
   try {
     const payload = await getState();
     if (!payload.ok) {
@@ -345,6 +345,9 @@ async function loadState() {
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     renderImageState(payload.images || {});
+    if (checkLatest) {
+      await refreshImageUpdateStatus({ checkLatest: true });
+    }
     updateMeshFleetSource();
     updateFlashControls();
   } catch (error) {
@@ -405,6 +408,7 @@ async function refreshImageUpdateStatus({ checkLatest = false, reportErrors = fa
 async function refreshImageSidebar({ checkLatest = false } = {}) {
   if (state.imageLoadInFlight) {
     state.imageRefreshQueued = true;
+    state.imageRefreshQueuedCheckLatest = state.imageRefreshQueuedCheckLatest || checkLatest;
     return;
   }
   state.imageLoadInFlight = true;
@@ -423,8 +427,10 @@ async function refreshImageSidebar({ checkLatest = false } = {}) {
   } finally {
     state.imageLoadInFlight = false;
     if (state.imageRefreshQueued) {
+      const queuedCheckLatest = Boolean(state.imageRefreshQueuedCheckLatest);
       state.imageRefreshQueued = false;
-      refreshImageSidebar({ checkLatest });
+      state.imageRefreshQueuedCheckLatest = false;
+      refreshImageSidebar({ checkLatest: queuedCheckLatest });
     }
   }
 }
@@ -1376,4 +1382,4 @@ updateDiskMode();
 updateMeshFleetSource();
 resetMeshLog();
 updateFlashControls();
-refreshAll().catch(handleRefreshError).finally(startDiskWatcher);
+refreshAll({ checkLatest: true }).catch(handleRefreshError).finally(startDiskWatcher);

@@ -14,6 +14,7 @@
     imageInstallTarget: "",
     imageLoadInFlight: false,
     imageRefreshQueued: false,
+    imageRefreshQueuedCheckLatest: false,
     diskSignature: "",
     diskLoadInFlight: false,
     flashBusy: false,

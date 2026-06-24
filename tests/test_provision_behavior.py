@@ -463,7 +463,10 @@ def test_provision_non_wifi_gate_exposes_topology_api_on_management_and_mesh_onl
         == "10.41.254.1:10411 10.41.1.1:10411"
     )
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.name", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.proto", env) == ""
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.target", env) == ""
     assert "restarted" in (prefix / "var" / "uhttpd-state").read_text()
 
 
@@ -506,7 +509,10 @@ def test_provision_clears_wifi_gate_wan_api_on_non_wifi_rerun(tmp_path):
         == "10.41.254.1:10411 10.41.1.1:10411"
     )
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.name", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.proto", env) == ""
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.dest_port", env) == ""
+    assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.target", env) == ""
 
 
 def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):

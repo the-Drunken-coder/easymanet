@@ -293,7 +293,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await flush();
   await flush();
   await flush();
-  const explicitImageUpdateChecked = imageUpdateCalls === 1 && imageUpdateChecks[0] === true;
+  const explicitImageUpdateChecked = imageUpdateCalls === 2
+    && imageUpdateChecks[0] === true
+    && imageUpdateChecks[1] === true;
   const explicitImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
   const explicitImageUpdateButton = element("images").innerHTML.includes("Install Update")
     && element("images").innerHTML.includes("data-image-install-target");
@@ -351,6 +353,21 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await flush();
   await flush();
 
+  holdState = true;
+  const beforeQueuedCheckLatest = imageUpdateCalls;
+  context.refreshImageSidebar();
+  context.refreshImageSidebar({ checkLatest: true });
+  await flush();
+  stateResolvers.shift()();
+  await flush();
+  await flush();
+  holdState = false;
+  stateResolvers.shift()();
+  await flush();
+  await flush();
+  const queuedCheckLatestPreserved = imageUpdateCalls === beforeQueuedCheckLatest + 1
+    && imageUpdateChecks[imageUpdateChecks.length - 1] === true;
+
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
   const sshEnabledHint = element("flash-status-text").textContent.includes("SSH to root@");
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });
@@ -391,6 +408,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     downloadCompletedRefreshesImages,
     queuedCoalesced,
     queuedStarted,
+    queuedCheckLatestPreserved,
     sshEnabledHint,
     sshDisabledHint,
     meshBusy,
@@ -417,9 +435,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
     assert payload == {
         "registeredFlashCallback": True,
-        "startupImageUpdateChecked": False,
-        "startupImageUpdateNotice": False,
-        "startupImageUpdateButton": False,
+        "startupImageUpdateChecked": True,
+        "startupImageUpdateNotice": True,
+        "startupImageUpdateButton": True,
         "explicitImageUpdateChecked": True,
         "explicitImageUpdateNotice": True,
         "explicitImageUpdateButton": True,
@@ -432,6 +450,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "downloadCompletedRefreshesImages": True,
         "queuedCoalesced": True,
         "queuedStarted": True,
+        "queuedCheckLatestPreserved": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
         "meshBusy": True,

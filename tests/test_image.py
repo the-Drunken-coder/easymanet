@@ -14,6 +14,7 @@ from easymanet.image import (
     _dd_device_path,
     _reread_partition_table,
     _run_dd_with_progress,
+    _stream_dd_device_path,
     _unmount_or_raise,
     _write_gz_via_dd,
     _write_raw_via_dd,
@@ -230,6 +231,13 @@ def test_dd_device_path_uses_raw_disk_on_macos(monkeypatch):
 
     assert _dd_device_path("/dev/disk4") == "/dev/rdisk4"
     assert _dd_device_path("/tmp/disk.img") == "/tmp/disk.img"
+
+
+def test_stream_dd_device_path_uses_buffered_disk_on_macos(monkeypatch):
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+
+    assert _stream_dd_device_path("/dev/disk4") == "/dev/disk4"
+    assert _stream_dd_device_path("/dev/rdisk4") == "/dev/disk4"
 
 
 def test_dd_device_path_keeps_device_on_non_macos(monkeypatch):
@@ -527,7 +535,7 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
     assert popen_calls[0][0] == ["gzip", "-dc", str(image)]
     assert popen_calls[0][1]["stdout"] is subprocess.PIPE
     assert popen_calls[0][1]["stderr"] is not subprocess.DEVNULL
-    assert open_calls == [("/dev/rdisk4", os.O_WRONLY)]
+    assert open_calls == [("/dev/disk4", os.O_WRONLY)]
     assert close_calls == [42]
     assert writes == [full_chunk, full_chunk[len(full_chunk) // 2 :], tail]
 

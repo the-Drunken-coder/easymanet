@@ -106,6 +106,7 @@ const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const isMac = detectMacPlatform();
 const diskWatchIntervalMs = 2500;
 let diskWatchTimer = null;
+let imageUpdateButtonSeq = 0;
 
 if (!nativeApi) {
   chooseConfig.hidden = true;
@@ -378,7 +379,10 @@ function imageWithUpdate(target, image) {
 async function refreshImageUpdateStatus({ checkLatest = false, reportErrors = false } = {}) {
   const seq = state.imageUpdateSeq + 1;
   state.imageUpdateSeq = seq;
+  let buttonSeq = 0;
   if (checkLatest) {
+    imageUpdateButtonSeq = seq;
+    buttonSeq = seq;
     checkImageUpdatesButton.disabled = true;
     checkImageUpdatesButton.textContent = "Checking...";
   }
@@ -398,7 +402,7 @@ async function refreshImageUpdateStatus({ checkLatest = false, reportErrors = fa
       setFlashStatus("bad", errorMessage(error));
     }
   } finally {
-    if (checkLatest) {
+    if (checkLatest && buttonSeq === imageUpdateButtonSeq) {
       checkImageUpdatesButton.disabled = false;
       checkImageUpdatesButton.textContent = "Check Updates";
     }

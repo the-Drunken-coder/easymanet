@@ -132,6 +132,8 @@ let imageUpdateCalls = 0;
 let imageInstallCalls = 0;
 let imageInstalled = false;
 let imageUpdateChecks = [];
+let holdImageUpdates = false;
+let imageUpdateResolvers = [];
 let holdState = false;
 let stateResolvers = [];
 let holdMesh = false;
@@ -170,7 +172,7 @@ const nativeApi = {
   getImageUpdates(options = {}) {
     imageUpdateCalls += 1;
     imageUpdateChecks.push(Boolean(options.checkLatest));
-    return Promise.resolve({
+    const payload = {
       ok: true,
       updates: {
         "rpi4-mm6108-spi": {
@@ -181,7 +183,13 @@ const nativeApi = {
           latest_sha256: "b".repeat(64),
         },
       },
-    });
+    };
+    if (holdImageUpdates) {
+      return new Promise((resolve) => {
+        imageUpdateResolvers.push(() => resolve(payload));
+      });
+    }
+    return Promise.resolve(payload);
   },
   installImageUpdate(target) {
     imageInstallCalls += 1;
@@ -299,6 +307,30 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const explicitImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
   const explicitImageUpdateButton = element("images").innerHTML.includes("Install Update")
     && element("images").innerHTML.includes("data-image-install-target");
+  holdImageUpdates = true;
+  element("check-image-updates").listeners.click();
+  await flush();
+  const firstCheckShowsBusy = element("check-image-updates").disabled === true
+    && element("check-image-updates").textContent === "Checking...";
+  const newerImageUpdateCheck = context.refreshImageUpdateStatus({ checkLatest: true });
+  await flush();
+  const secondCheckShowsBusy = element("check-image-updates").disabled === true
+    && element("check-image-updates").textContent === "Checking...";
+  imageUpdateResolvers.shift()();
+  await flush();
+  await flush();
+  const staleCheckDoesNotEnableButton = element("check-image-updates").disabled === true
+    && element("check-image-updates").textContent === "Checking...";
+  holdImageUpdates = false;
+  imageUpdateResolvers.shift()();
+  await newerImageUpdateCheck;
+  await flush();
+  const latestCheckRestoresButton = element("check-image-updates").disabled === false
+    && element("check-image-updates").textContent === "Check Updates";
+  const overlappingImageUpdateButtonSequenced = firstCheckShowsBusy
+    && secondCheckShowsBusy
+    && staleCheckDoesNotEnableButton
+    && latestCheckRestoresButton;
   context.window.EMState.images = {
     "rpi4-mm6108-spi": { cached_path: "/tmp/openmanet.img.gz", version: "images-v0.2.6" },
     "rpi4-mm6108-spi-alt": { cached_path: "/tmp/openmanet-alt.img.gz", version: "images-v0.2.6" },
@@ -399,6 +431,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     explicitImageUpdateChecked,
     explicitImageUpdateNotice,
     explicitImageUpdateButton,
+    overlappingImageUpdateButtonSequenced,
     otherImageInstallDisabled,
     meshFleetDropdownPopulated,
     meshFleetDropdownSyncsConfig,
@@ -422,7 +455,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 });
 """
     node_exe = shutil.which("node")
-    assert node_exe, "Node.js is required for desktop renderer VM tests"
+    if not node_exe:
+        pytest.skip("Node.js is required for desktop renderer VM tests")
 
     result = subprocess.run(  # noqa: S603 - fixed executable and repo-local script inputs
         [node_exe, "-e", script, *map(str, scripts)],
@@ -441,6 +475,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "explicitImageUpdateChecked": True,
         "explicitImageUpdateNotice": True,
         "explicitImageUpdateButton": True,
+        "overlappingImageUpdateButtonSequenced": True,
         "otherImageInstallDisabled": True,
         "meshFleetDropdownPopulated": True,
         "meshFleetDropdownSyncsConfig": True,

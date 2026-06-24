@@ -281,6 +281,47 @@ def test_image_update_payload_marks_unverified_cache_as_outdated(monkeypatch):
     assert update["current_sha256"] == ""
 
 
+def test_image_update_payload_reports_display_only_cache_as_missing(monkeypatch):
+    monkeypatch.setattr(
+        payloads,
+        "state_payload",
+        lambda: {
+            "ok": True,
+            "images": {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.6",
+                    "cached_path": "/tmp/openmanet.img.gz",
+                    "cached_sha256": "",
+                    "cache_present": False,
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.7",
+            url="https://example.test/openmanet.img.gz",
+            sha256="b" * 64,
+            trust_status="verification-pending",
+            source="official",
+            channel="stable",
+            release_tag="images-v0.2.7",
+            image_status="current",
+            manifest_url="https://example.test/easymanet-image-release.json",
+            warnings=(),
+        ),
+    )
+
+    update = payloads.image_update_payload(check_latest=True)["updates"]["rpi4-mm6108-spi"]
+
+    assert update["status"] == "missing"
+    assert update["update_available"] is True
+    assert update["cached_path"] == "/tmp/openmanet.img.gz"
+    assert update["cache_present"] is False
+
+
 def test_install_image_update_downloads_latest_release(monkeypatch, tmp_path):
     image = tmp_path / "openmanet.img.gz"
     state = {
@@ -391,6 +432,60 @@ def test_install_image_update_downloads_version_only_outdated_cache(monkeypatch,
     ]
 
 
+def test_install_image_update_downloads_display_only_current_cache(monkeypatch, tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    state = {
+        "ok": True,
+        "images": {
+            "rpi4-mm6108-spi": {
+                "version": "images-v0.2.7",
+                "cached_path": str(image),
+                "cached_sha256": "b" * 64,
+                "cache_present": False,
+            }
+        },
+    }
+    latest = SimpleNamespace(
+        version="images-v0.2.7",
+        url="https://example.test/openmanet.img.gz",
+        sha256="b" * 64,
+        trust={},
+        trust_status="verification-pending",
+        source="official",
+        channel="stable",
+        release_tag="images-v0.2.7",
+        image_status="current",
+        manifest_url="https://example.test/easymanet-image-release.json",
+        warnings=(),
+    )
+    downloads = []
+    monkeypatch.setattr(payloads, "state_payload", lambda: state)
+    monkeypatch.setattr(payloads, "check_latest_version", lambda _target: latest)
+
+    def fake_download_image(target, version, url, sha256, *, force, trust) -> Path:
+        downloads.append((target, version, url, sha256, force, trust))
+        state["images"]["rpi4-mm6108-spi"]["cache_present"] = True
+        return image
+
+    monkeypatch.setattr(payloads, "download_image", fake_download_image)
+
+    result = payloads.install_image_update_payload(target="rpi4-mm6108-spi")
+
+    assert result["ok"] is True
+    assert result["installed"] is True
+    assert result["update"]["status"] == "current"
+    assert downloads == [
+        (
+            "rpi4-mm6108-spi",
+            "images-v0.2.7",
+            "https://example.test/openmanet.img.gz",
+            "b" * 64,
+            True,
+            {},
+        )
+    ]
+
+
 def test_install_image_update_rejects_unknown_target(monkeypatch):
     monkeypatch.setattr(payloads, "state_payload", lambda: {"ok": True, "images": {}})
 
@@ -462,6 +557,7 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
 
     assert entry["version"] == "1.6.5"
     assert entry["cached_path"] == str(image)
+    assert entry["cache_present"] is False
     assert entry["cached_size_bytes"] == len(b"firmware")
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
@@ -492,6 +588,7 @@ def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, 
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
+    assert entry["cache_present"] is False
     assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
     assert entry["cached_sha256"] == ""
 
@@ -514,6 +611,7 @@ def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeyp
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
+    assert entry["cache_present"] is True
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
@@ -536,6 +634,7 @@ def test_desktop_state_discovers_cache_for_malformed_manifest_hash(tmp_path, mon
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
     assert entry["cached_path"] == str(image)
+    assert entry["cache_present"] is False
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
@@ -561,6 +660,7 @@ def test_desktop_state_skips_hashing_large_unversioned_cache(tmp_path, monkeypat
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
+    assert entry["cache_present"] is False
     assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
     assert entry["cached_sha256"] == ""
 

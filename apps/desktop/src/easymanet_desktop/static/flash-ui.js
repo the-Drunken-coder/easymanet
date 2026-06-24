@@ -27,7 +27,7 @@
     if (!entries.length) {
       return "No image targets found";
     }
-    const missing = entries.filter(([, image]) => !image || !image.cached_path);
+    const missing = entries.filter(([, image]) => !imageCachePresent(image));
     if (!missing.length) {
       return entries.length === 1 ? "Image cache ready" : `${entries.length} image targets cached`;
     }
@@ -37,7 +37,11 @@
 
   function imagesFullyCached(images) {
     const entries = Object.values(images || {});
-    return Boolean(entries.length) && entries.every((image) => image && image.cached_path);
+    return Boolean(entries.length) && entries.every((image) => imageCachePresent(image));
+  }
+
+  function imageCachePresent(image) {
+    return Boolean(image && image.cached_path && image.cache_present !== false);
   }
 
   function planImageSummary(payload) {

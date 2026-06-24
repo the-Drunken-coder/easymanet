@@ -1,6 +1,7 @@
 """Tests for image validation before flashing."""
 
 import gzip
+import io
 import os
 import subprocess
 import sys
@@ -422,8 +423,6 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
     with image.open("ab") as handle:
         handle.write(b'{"metadata": "trailer"}')
 
-    import io
-
     class FakeProc:
         def __init__(self, returncode, stdout=None):
             self.returncode = returncode
@@ -485,6 +484,7 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
 
     full_chunk = b"a" * (1024 * 1024)
     tail = b"tail"
+
     class ShortReadStream:
         def __init__(self, chunks):
             self.chunks = list(chunks)
@@ -494,7 +494,7 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
                 return b""
             return self.chunks.pop(0)
 
-    gzip_stdout = ShortReadStream([full_chunk[:512], full_chunk[512:], tail])
+    gzip_stdout = ShortReadStream([full_chunk, tail])
     procs = [FakeProc(0, gzip_stdout)]
     popen_calls = []
     open_calls = []
@@ -507,18 +507,18 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
             return procs[0]
         raise AssertionError(f"dd should not run on macOS gzip streams: {cmd}")
 
-    def fake_open(path, flags):
+    def fake_open(path, flags) -> int:
         open_calls.append((path, flags))
         return 42
 
-    def fake_write(fd, payload):
+    def fake_write(fd, payload) -> int:
         assert fd == 42
         writes.append(bytes(payload))
         if len(writes) == 1:
             return len(payload) // 2
         return len(payload)
 
-    def fake_close(fd):
+    def fake_close(fd) -> None:
         close_calls.append(fd)
 
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
@@ -538,6 +538,7 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
     assert open_calls == [("/dev/disk4", os.O_WRONLY)]
     assert close_calls == [42]
     assert writes == [full_chunk, full_chunk[len(full_chunk) // 2 :], tail]
+    assert len(writes[-1]) < 512
 
 
 def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path):

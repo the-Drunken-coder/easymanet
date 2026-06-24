@@ -39,7 +39,7 @@
   }
 
   function imageItem(target, image) {
-    const cached = Boolean(image.cached_path);
+    const cached = Boolean(image.cached_path) && image.cache_present !== false;
     const updateAvailable = Boolean(image.update_available);
     const installing = Boolean(image.installing);
     const anyInstallRunning = Boolean(image.anyInstallRunning);

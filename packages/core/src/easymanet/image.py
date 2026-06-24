@@ -284,22 +284,13 @@ def _write_stream_to_fd(
     *,
     emit: FlashEventCallback | None = None,
 ) -> None:
-    pending = bytearray()
     total_written = 0
     while True:
         chunk = stream.read(_MACOS_GZIP_WRITE_CHUNK_BYTES)
         if not chunk:
             break
-        pending.extend(chunk)
-        while len(pending) >= _MACOS_GZIP_WRITE_CHUNK_BYTES:
-            payload = bytes(pending[:_MACOS_GZIP_WRITE_CHUNK_BYTES])
-            _write_all(fd, payload)
-            del pending[:_MACOS_GZIP_WRITE_CHUNK_BYTES]
-            total_written += len(payload)
-            _emit_dd_progress(f"{total_written} bytes transferred", emit)
-    if pending:
-        _write_all(fd, bytes(pending))
-        total_written += len(pending)
+        _write_all(fd, chunk)
+        total_written += len(chunk)
         _emit_dd_progress(f"{total_written} bytes transferred", emit)
 
 

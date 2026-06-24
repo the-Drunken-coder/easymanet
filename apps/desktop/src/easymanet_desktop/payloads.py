@@ -32,13 +32,15 @@ def state_payload() -> dict[str, Any]:
     images = configured_images()
     versions = cached_versions()
     for target, entry in images.items():
-        cached = get_cached_image(target)
+        verified_cached = get_cached_image(target)
+        display_cached = verified_cached
         cached_version = versions.get(target, {})
         known_sha256 = cached_version.get("sha256") or entry.get("sha256")
-        if not cached:
-            cached = display_cached_image(target, entry)
+        if not display_cached:
+            display_cached = display_cached_image(target, entry)
             known_sha256 = entry.get("sha256") if isinstance(entry.get("sha256"), str) else ""
-        entry["cached_path"] = str(cached) if cached else ""
+        entry["cached_path"] = str(display_cached) if display_cached else ""
+        entry["cache_present"] = bool(verified_cached)
         if cached_version.get("version") and not entry.get("version"):
             entry["version"] = cached_version["version"]
         for key in (
@@ -53,10 +55,10 @@ def state_payload() -> dict[str, Any]:
                 entry[key] = cached_version[key]
         if cached_version.get("warnings") and not entry.get("warnings"):
             entry["warnings"] = cached_version["warnings"]
-        if cached:
+        if display_cached:
             add_cached_image_details(
                 entry,
-                cached,
+                display_cached,
                 known_sha256=known_sha256,
             )
     return {
@@ -94,14 +96,16 @@ def image_update_entry(
     current_version = str(entry.get("version") or "")
     current_sha256 = str(entry.get("cached_sha256") or entry.get("sha256") or "")
     cached_path = str(entry.get("cached_path") or "")
+    cache_present = _cache_present(entry, cached_path)
     if not check_latest:
         return {
             "target": target,
-            "status": "cached" if cached_path else "missing",
+            "status": "cached" if cache_present else "missing",
             "update_available": False,
             "current_version": current_version,
             "current_sha256": current_sha256,
             "cached_path": cached_path,
+            "cache_present": cache_present,
         }
     try:
         latest = check_latest_version(target)
@@ -113,6 +117,7 @@ def image_update_entry(
             "current_version": current_version,
             "current_sha256": current_sha256,
             "cached_path": cached_path,
+            "cache_present": cache_present,
             "errors": [str(exc)],
         }
     if latest is None:
@@ -123,6 +128,7 @@ def image_update_entry(
             "current_version": current_version,
             "current_sha256": current_sha256,
             "cached_path": cached_path,
+            "cache_present": cache_present,
             "errors": ["Could not check the latest image release."],
         }
 
@@ -131,7 +137,7 @@ def image_update_entry(
     sha_mismatch = bool(current_sha256 and latest_sha256 and current_sha256 != latest_sha256)
     version_mismatch = bool(current_version and latest_version and current_version != latest_version)
     missing_verified_metadata = bool(
-        cached_path
+        cache_present
         and not current_sha256
         and not current_version
         and (latest_sha256 or latest_version)
@@ -140,7 +146,7 @@ def image_update_entry(
         version_mismatch and (not current_sha256 or not latest_sha256)
     ) or missing_verified_metadata
     status = "current"
-    if not cached_path:
+    if not cache_present:
         status = "missing"
     elif update_available:
         status = "outdated"
@@ -152,6 +158,7 @@ def image_update_entry(
         "current_version": current_version,
         "current_sha256": current_sha256,
         "cached_path": cached_path,
+        "cache_present": cache_present,
         "latest_version": latest_version,
         "latest_url": str(latest.url or ""),
         "latest_sha256": latest_sha256,
@@ -180,7 +187,7 @@ def install_image_update_payload(*, target: str) -> dict[str, Any]:
     if (
         update.get("status") == "current"
         and not update.get("update_available")
-        and update.get("cached_path")
+        and update.get("cache_present")
     ):
         return {
             "ok": True,
@@ -223,6 +230,12 @@ def install_image_update_payload(*, target: str) -> dict[str, Any]:
         "image": image,
         "update": image_update_entry(target, image, check_latest=True),
     }
+
+
+def _cache_present(entry: dict[str, Any], cached_path: str) -> bool:
+    if "cache_present" in entry:
+        return bool(entry.get("cache_present"))
+    return bool(cached_path)
 
 
 def configured_images() -> dict[str, dict[str, Any]]:

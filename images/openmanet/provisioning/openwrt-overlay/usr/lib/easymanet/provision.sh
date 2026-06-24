@@ -423,7 +423,13 @@ fi
 
 openmanetd_config="$(_prefix_path /etc/openmanetd/config.yml)"
 if [ -f "$openmanetd_config" ]; then
-    cat > "$openmanetd_config" <<EOF
+    if ! chmod 0600 "$openmanetd_config"; then
+        echo "FATAL: failed to secure /etc/openmanetd/config.yml" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+    old_umask="$(umask)"
+    umask 077
+    if ! cat > "$openmanetd_config" <<EOF
 meshNetInterface: "bat0"
 mesh:
   id: "${MESH_ID}"
@@ -437,6 +443,12 @@ node:
   role: "${NODE_ROLE}"
   ip: "${NODE_IP}"
 EOF
+    then
+        umask "$old_umask"
+        echo "FATAL: failed to write /etc/openmanetd/config.yml" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+    umask "$old_umask"
 fi
 
 network_init="$(_prefix_path /etc/init.d/network)"

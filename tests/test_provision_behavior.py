@@ -1192,6 +1192,7 @@ def test_provision_sets_openmanetd_mesh_interface_to_bat0(tmp_path):
     assert 'meshNetInterface: "bat0"' in text
     assert 'role: "point"' in text
     assert 'ip: "10.41.2.1"' in text
+    assert (config.stat().st_mode & 0o777) == 0o600
 
 
 def test_late_management_lan_repair_sources_lib_from_explicit_dir(tmp_path):

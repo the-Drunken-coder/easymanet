@@ -1,6 +1,7 @@
 """Tests for image validation before flashing."""
 
 import gzip
+import os
 import subprocess
 import sys
 
@@ -446,7 +447,7 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
     assert gzip_stdout.closed is True
 
 
-def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
+def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp_path):
     image = tmp_path / "firmware.img.gz"
     with gzip.open(image, "wb") as handle:
         handle.write(b"payload")
@@ -457,40 +458,71 @@ def test_write_gz_via_dd_uses_raw_padded_device_on_macos(monkeypatch, tmp_path):
         def __init__(self, returncode, stdout=None):
             self.returncode = returncode
             self.stdout = stdout
+            self.killed = False
 
         def communicate(self):
-            return ("", "")
+            return (b"", b"")
 
         def wait(self):
             return self.returncode
 
-    gzip_stdout = io.BytesIO(b"payload")
-    procs = [FakeProc(0, gzip_stdout), FakeProc(0)]
+        def kill(self):
+            self.killed = True
+
+    full_chunk = b"a" * (1024 * 1024)
+    tail = b"tail"
+    class ShortReadStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+
+        def read(self, _size):
+            if not self.chunks:
+                return b""
+            return self.chunks.pop(0)
+
+    gzip_stdout = ShortReadStream([full_chunk[:512], full_chunk[512:], tail])
+    procs = [FakeProc(0, gzip_stdout)]
     popen_calls = []
+    open_calls = []
+    close_calls = []
+    writes = []
 
     def fake_popen(cmd, **kwargs):
-        popen_calls.append(cmd)
+        popen_calls.append((cmd, kwargs))
         if cmd[0] == "gzip":
             return procs[0]
-        return procs[1]
+        raise AssertionError(f"dd should not run on macOS gzip streams: {cmd}")
+
+    def fake_open(path, flags):
+        open_calls.append((path, flags))
+        return 42
+
+    def fake_write(fd, payload):
+        assert fd == 42
+        writes.append(bytes(payload))
+        return len(payload)
+
+    def fake_close(fd):
+        close_calls.append(fd)
 
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.os.open", fake_open)
+    monkeypatch.setattr("easymanet.image.os.write", fake_write)
+    monkeypatch.setattr("easymanet.image.os.close", fake_close)
 
     _write_gz_via_dd(str(image), "/dev/disk4")
 
-    assert [
-        "dd",
-        "of=/dev/rdisk4",
-        "ibs=1m",
-        "obs=1m",
-        "conv=osync",
-        "status=progress",
-    ] in popen_calls
+    assert popen_calls == [
+        (["gzip", "-dc", str(image)], {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE})
+    ]
+    assert open_calls == [("/dev/rdisk4", os.O_WRONLY)]
+    assert close_calls == [42]
+    assert writes == [full_chunk, tail]
 
 
-def test_write_gz_via_dd_reports_dd_failure_before_gzip_sigpipe(monkeypatch, tmp_path):
+def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path):
     image = tmp_path / "firmware.img.gz"
     with gzip.open(image, "wb") as handle:
         handle.write(b"payload")
@@ -498,41 +530,86 @@ def test_write_gz_via_dd_reports_dd_failure_before_gzip_sigpipe(monkeypatch, tmp
     import io
 
     class FakeProc:
-        def __init__(self, returncode, stdout=None, stderr=None):
+        def __init__(self, returncode, stdout=None):
             self.returncode = returncode
             self.stdout = stdout
-            self.stderr = stderr
+            self.killed = False
 
         def communicate(self):
-            stderr = self.stderr.getvalue() if self.stderr else ""
-            return ("", stderr)
+            return (b"", b"gzip: trailing garbage ignored\n")
 
         def wait(self):
             return self.returncode
 
+        def kill(self):
+            self.killed = True
+
     gzip_stdout = io.BytesIO(b"payload")
-    procs = [
-        FakeProc(-13, stdout=gzip_stdout),
-        FakeProc(1, stderr=io.StringIO("dd: /dev/rdisk4: Invalid argument\n")),
-    ]
+    procs = [FakeProc(2, stdout=gzip_stdout)]
 
     def fake_popen(cmd, **_kwargs):
         if cmd[0] == "gzip":
             return procs[0]
-        return procs[1]
+        raise AssertionError(f"dd should not run on macOS gzip streams: {cmd}")
+
+    writes = []
 
     monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
+    monkeypatch.setattr(
+        "easymanet.image.os.write",
+        lambda _fd, payload: writes.append(bytes(payload)) or len(payload),
+    )
+    monkeypatch.setattr("easymanet.image.os.close", lambda _fd: None)
 
-    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+    _write_gz_via_dd(str(image), "/dev/disk4")
+
+    assert writes == [b"payload"]
+
+
+def test_write_gz_via_dd_reports_macos_buffered_write_failure(monkeypatch, tmp_path):
+    image = tmp_path / "firmware.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"payload")
+
+    import io
+
+    class FakeProc:
+        def __init__(self, returncode, stdout=None):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.killed = False
+
+        def communicate(self):
+            return (b"", b"")
+
+        def kill(self):
+            self.killed = True
+
+    gzip_stdout = io.BytesIO(b"payload")
+    proc = FakeProc(-13, stdout=gzip_stdout)
+
+    def fake_popen(cmd, **_kwargs):
+        if cmd[0] == "gzip":
+            return proc
+        raise AssertionError(f"dd should not run on macOS gzip streams: {cmd}")
+
+    monkeypatch.setattr("easymanet.image.is_macos", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.os.open", lambda _path, _flags: 42)
+    monkeypatch.setattr(
+        "easymanet.image.os.write",
+        lambda _fd, _payload: (_ for _ in ()).throw(OSError("raw write failed")),
+    )
+    monkeypatch.setattr("easymanet.image.os.close", lambda _fd: None)
+
+    with pytest.raises(OSError, match="raw write failed"):
         _write_gz_via_dd(str(image), "/dev/disk4")
 
-    assert exc_info.value.cmd[0] == "dd"
-    assert "iflag=fullblock" not in exc_info.value.cmd
-    assert "conv=osync" in exc_info.value.cmd
-    assert "bs=1m" not in exc_info.value.cmd
-    assert "Invalid argument" in exc_info.value.stderr
+    assert proc.killed is True
 
 
 def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):

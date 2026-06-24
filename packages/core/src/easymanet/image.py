@@ -38,6 +38,7 @@ class FlashError(Exception):
 
 
 FlashEventCallback = Callable[[dict[str, Any]], None]
+_MACOS_GZIP_WRITE_CHUNK_BYTES = 1024 * 1024
 
 
 def _emit_event(
@@ -192,6 +193,10 @@ def _write_gz_via_dd(
     *,
     emit: FlashEventCallback | None = None,
 ) -> None:
+    if is_macos():
+        _write_gz_via_macos_stream(image_path, device, emit=emit)
+        return
+
     gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
     output_device = _stream_dd_device_path(device)
     dd_cmd = [
@@ -223,6 +228,83 @@ def _write_gz_via_dd(
     # ("trailing garbage ignored"); payload integrity is validated by _check_gzip_payload.
     if gzip_return not in (0, 2):
         raise subprocess.CalledProcessError(gzip_return, gzip_cmd)
+
+
+def _write_gz_via_macos_stream(
+    image_path: str,
+    device: str,
+    *,
+    emit: FlashEventCallback | None = None,
+) -> None:
+    gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
+    output_device = _stream_dd_device_path(device)
+    gzip_proc = subprocess.Popen(
+        gzip_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert gzip_proc.stdout is not None
+    fd: int | None = None
+    write_error: OSError | None = None
+    try:
+        fd = os.open(output_device, os.O_WRONLY)
+        _write_stream_to_fd(gzip_proc.stdout, fd, emit=emit)
+    except OSError as exc:
+        write_error = exc
+        gzip_proc.kill()
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+    _stdout, gzip_stderr = gzip_proc.communicate()
+    if write_error is not None:
+        raise write_error
+    if gzip_proc.returncode not in (0, 2):
+        raise subprocess.CalledProcessError(
+            gzip_proc.returncode,
+            gzip_cmd,
+            stderr=_decode_subprocess_output(gzip_stderr),
+        )
+
+
+def _write_stream_to_fd(
+    stream: Any,
+    fd: int,
+    *,
+    emit: FlashEventCallback | None = None,
+) -> None:
+    pending = bytearray()
+    total_written = 0
+    while True:
+        chunk = stream.read(_MACOS_GZIP_WRITE_CHUNK_BYTES)
+        if not chunk:
+            break
+        pending.extend(chunk)
+        while len(pending) >= _MACOS_GZIP_WRITE_CHUNK_BYTES:
+            payload = bytes(pending[:_MACOS_GZIP_WRITE_CHUNK_BYTES])
+            _write_all(fd, payload)
+            del pending[:_MACOS_GZIP_WRITE_CHUNK_BYTES]
+            total_written += len(payload)
+            _emit_dd_progress(f"{total_written} bytes transferred", emit)
+    if pending:
+        _write_all(fd, bytes(pending))
+        total_written += len(pending)
+        _emit_dd_progress(f"{total_written} bytes transferred", emit)
+
+
+def _write_all(fd: int, payload: bytes) -> None:
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written == 0:
+            raise OSError("write returned 0 bytes")
+        view = view[written:]
+
+
+def _decode_subprocess_output(output: Any) -> str:
+    if isinstance(output, bytes):
+        return output.decode(errors="replace")
+    return str(output or "")
 
 
 _OVERLAY_WIPE_SECTOR_BYTES = 512

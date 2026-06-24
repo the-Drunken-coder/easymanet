@@ -1173,8 +1173,11 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert 'data-tab-target="tab-diagnostics"' in index.read_text()
     assert 'data-tab-panel' in index.read_text()
     assert "mesh-discover" in index.read_text()
+    assert '<select id="mesh-config-source"' in index.read_text()
     assert "mesh-scanning" in index.read_text()
     assert "mesh-radios" in index.read_text()
+    assert "mesh-output" in index.read_text()
+    assert "copy-mesh-log" in index.read_text()
     assert "diagnostics-run" in index.read_text()
     assert "diagnostics-export" in index.read_text()
     assert "diagnostics-import" in index.read_text()
@@ -1201,6 +1204,10 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "discoverMesh" in text
     assert "renderMeshDiscovery" in text
     assert "resetMeshDiscovery" in text
+    assert "selectFleetSource" in text
+    assert "syncFleetSelectElement" in text
+    assert "appendMeshLog" in text
+    assert "meshLogLines" in text
     assert "partial results" in text
     assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
     assert "meshScanning.hidden = !busy" in text

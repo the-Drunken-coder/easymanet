@@ -136,6 +136,7 @@ let stateResolvers = [];
 let holdMesh = false;
 let resolveMesh = null;
 let flashCallback = null;
+let copiedTexts = [];
 
 function statePayload() {
   return {
@@ -222,7 +223,8 @@ const nativeApi = {
   flash() {
     return Promise.resolve({ ok: true });
   },
-  copyText() {
+  copyText(text) {
+    copiedTexts.push(text);
     return Promise.resolve({ ok: true });
   },
 };
@@ -279,6 +281,14 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const startupImageUpdateNotice = element("images").innerHTML.includes("new image available: images-v0.2.7");
   const startupImageUpdateButton = element("images").innerHTML.includes("New Image Available")
     && element("images").innerHTML.includes("data-image-install-target");
+  const meshFleetDropdownPopulated = element("mesh-config-source").options.some((option) => option.value === "/tmp/EasyMANET/Fleets/field.yml")
+    && element("mesh-config-source").value === "/tmp/EasyMANET/Fleets/field.yml";
+  element("mesh-config-source").value = "/tmp/EasyMANET/Fleets/field.yml";
+  element("mesh-config-source").listeners.change();
+  await flush();
+  await flush();
+  const meshFleetDropdownSyncsConfig = element("config-path").value === "/tmp/EasyMANET/Fleets/field.yml"
+    && element("fleet-select").value === "/tmp/EasyMANET/Fleets/field.yml";
 
   await context.installImageUpdate("rpi4-mm6108-spi");
   await flush();
@@ -325,12 +335,19 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && element("mesh-discover").disabled === false
     && element("mesh-scanning").hidden === true
     && !("aria-busy" in element("mesh-radios").attributes);
+  const meshLogAvailable = element("copy-mesh-log").disabled === false
+    && context.window.EMState.meshLogLines.some((line) => line.includes("Scan started."))
+    && context.window.EMState.meshLogLines.some((line) => line.includes("Scan complete: 0 nodes"));
+  await element("copy-mesh-log").listeners.click();
+  const meshLogCopied = copiedTexts.some((text) => text.includes("Scan started.") && text.includes("Scan complete: 0 nodes"));
 
   process.stdout.write(JSON.stringify({
     registeredFlashCallback: typeof flashCallback === "function",
     startupImageUpdateChecked,
     startupImageUpdateNotice,
     startupImageUpdateButton,
+    meshFleetDropdownPopulated,
+    meshFleetDropdownSyncsConfig,
     imageInstallTriggered,
     imageInstallClearsNotice,
     downloadCompletedRefreshesImages,
@@ -340,6 +357,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     sshDisabledHint,
     meshBusy,
     meshRestored,
+    meshLogAvailable,
+    meshLogCopied,
   }));
 })().catch((error) => {
   console.error(error);
@@ -364,6 +383,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "startupImageUpdateChecked": True,
         "startupImageUpdateNotice": True,
         "startupImageUpdateButton": True,
+        "meshFleetDropdownPopulated": True,
+        "meshFleetDropdownSyncsConfig": True,
         "imageInstallTriggered": True,
         "imageInstallClearsNotice": True,
         "downloadCompletedRefreshesImages": True,
@@ -373,4 +394,6 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "sshDisabledHint": True,
         "meshBusy": True,
         "meshRestored": True,
+        "meshLogAvailable": True,
+        "meshLogCopied": True,
     }

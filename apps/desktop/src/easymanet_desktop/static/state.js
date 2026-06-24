@@ -22,6 +22,7 @@
     meshHasScanned: false,
     meshNodes: [],
     meshLinks: [],
+    meshLogLines: [],
     flashSignature: "",
     planSignature: "",
     planImageSummary: "",

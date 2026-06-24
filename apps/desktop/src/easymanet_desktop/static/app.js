@@ -81,6 +81,8 @@ const meshScanningDetail = $("mesh-scanning-detail");
 const meshSummary = $("mesh-summary");
 const meshCount = $("mesh-count");
 const meshRadios = $("mesh-radios");
+const meshOutput = $("mesh-output");
+const copyMeshLog = $("copy-mesh-log");
 const diagnosticsForm = $("diagnostics-form");
 const diagnosticsStatusChip = $("diagnostics-status-chip");
 const diagnosticsConfigSource = $("diagnostics-config-source");
@@ -118,13 +120,10 @@ $("refresh").addEventListener("click", () => {
   refreshAll().catch(handleRefreshError);
 });
 fleetSelect.addEventListener("change", () => {
-  if (fleetSelect.value) {
-    configInput.value = fleetSelect.value;
-    resetMeshDiscovery();
-    updateMeshFleetSource();
-    loadNodesForSelectedFleet().catch(handleNodeLoadError);
-    updateFlashControls();
-  }
+  selectFleetSource(fleetSelect.value);
+});
+meshConfigSource.addEventListener("change", () => {
+  selectFleetSource(meshConfigSource.value);
 });
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
@@ -252,6 +251,16 @@ copyFlashLog.addEventListener("click", async () => {
   const result = await nativeApi.copyText(logText);
   if (result.ok) {
     showCopied(copyFlashLog, "Copy Log");
+  }
+});
+copyMeshLog.addEventListener("click", async () => {
+  const logText = state.meshLogLines.join("\n").trim();
+  if (!nativeApi || !logText) {
+    return;
+  }
+  const result = await nativeApi.copyText(logText);
+  if (result.ok) {
+    showCopied(copyMeshLog, "Copy Log");
   }
 });
 exportSupportBundle.addEventListener("click", async () => {
@@ -482,13 +491,15 @@ async function renderFleets(records, folder) {
   fleetFolder.title = folder || "";
   fleetEmptyPath.textContent = folder || "";
   fleetCount.textContent = `${records.length}`;
-  fleetSelect.replaceChildren();
+  resetFleetSelect(fleetSelect);
+  resetFleetSelect(meshConfigSource);
 
   if (!records.length) {
-    fleetSelect.disabled = true;
-    fleetSelect.add(new Option("No fleet files found", ""));
+    setFleetSelectEmpty(fleetSelect, "No fleet files found");
+    setFleetSelectEmpty(meshConfigSource, "No fleet files found");
     fleetEmpty.hidden = false;
     configInput.value = "";
+    updateMeshFleetSource();
     resetNodeSelect("No nodes available");
     updateFlashControls();
     return;
@@ -496,8 +507,10 @@ async function renderFleets(records, folder) {
 
   fleetEmpty.hidden = true;
   fleetSelect.disabled = false;
+  meshConfigSource.disabled = false;
   for (const record of records) {
-    fleetSelect.add(new Option(record.relative_path || record.name, record.path));
+    addFleetOption(fleetSelect, record);
+    addFleetOption(meshConfigSource, record);
   }
 
   const current = configInput.value.trim();
@@ -510,18 +523,52 @@ async function renderFleets(records, folder) {
 }
 
 function syncFleetSelect(path) {
-  if (!path || fleetSelect.disabled) {
+  if (!path) {
     return;
   }
-  const options = Array.from(fleetSelect.options);
+  syncFleetSelectElement(fleetSelect, path);
+  syncFleetSelectElement(meshConfigSource, path);
+}
+
+function resetFleetSelect(select) {
+  select.replaceChildren();
+}
+
+function setFleetSelectEmpty(select, label) {
+  select.replaceChildren();
+  select.disabled = true;
+  select.add(new Option(label, ""));
+}
+
+function addFleetOption(select, record) {
+  select.add(new Option(record.relative_path || record.name, record.path));
+}
+
+function syncFleetSelectElement(select, path) {
+  if (select.disabled) {
+    return;
+  }
+  const options = Array.from(select.options);
   if (options.some((option) => option.value === path)) {
-    fleetSelect.value = path;
+    select.value = path;
     return;
   }
   const custom = new Option("Custom path", path);
   custom.dataset.custom = "true";
-  fleetSelect.add(custom, 0);
-  fleetSelect.value = path;
+  select.add(custom, 0);
+  select.value = path;
+}
+
+function selectFleetSource(path) {
+  if (!path) {
+    return;
+  }
+  configInput.value = path;
+  syncFleetSelect(path);
+  resetMeshDiscovery();
+  updateMeshFleetSource();
+  loadNodesForSelectedFleet().catch(handleNodeLoadError);
+  updateFlashControls();
 }
 
 async function loadNodesForSelectedFleet(preferredNode = "") {
@@ -598,18 +645,26 @@ function resetNodeSelect(label) {
 
 async function discoverMesh() {
   state.meshHasScanned = true;
+  resetMeshLog();
+  const config = configInput.value.trim();
+  appendMeshLog("info", "Scan started.");
+  appendMeshLog("info", `Fleet source: ${config || "none"}`);
+  appendMeshLog("info", meshScanSubnet.checked ? "Local network scan enabled." : "Local network scan disabled.");
   setMeshBusy(true);
   meshSummary.hidden = true;
   meshRadios.setAttribute("aria-busy", "true");
   setMeshStatus("warn", "scanning");
   try {
     const response = await postJson("/api/mesh/discover", {
-      config: configInput.value.trim(),
+      config,
       scanSubnet: meshScanSubnet.checked,
     });
+    appendMeshDiscoveryResult(response);
     renderMeshDiscovery(response);
   } catch (error) {
-    renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
+    const message = errorMessage(error);
+    appendMeshLog("error", message);
+    renderMeshDiscovery({ ok: false, errors: [message], nodes: [], links: [], candidates_checked: 0 });
   } finally {
     meshRadios.removeAttribute("aria-busy");
     setMeshBusy(false);
@@ -646,6 +701,7 @@ function resetMeshDiscovery() {
   meshRadios.className = "mesh-grid";
   meshRadios.innerHTML = emptyMeshMarkup("No topology found", "Run Scan Mesh to refresh this view.");
   setMeshStatus("subtle", "idle");
+  resetMeshLog();
 }
 
 function setMeshBusy(busy) {
@@ -668,9 +724,83 @@ function setMeshStatus(tone, label) {
   meshStatusChip.className = `chip ${tone}`;
 }
 
+function resetMeshLog() {
+  state.meshLogLines = [];
+  meshOutput.replaceChildren();
+  renderMeshLogPlaceholder();
+  updateCopyMeshLogVisibility();
+}
+
+function renderMeshLogPlaceholder() {
+  const line = document.createElement("div");
+  line.className = "log-line info";
+  const stamp = document.createElement("span");
+  stamp.className = "log-time";
+  stamp.textContent = "--:--:--";
+  const body = document.createElement("span");
+  body.className = "log-msg";
+  body.textContent = "No mesh discovery activity yet.";
+  line.append(stamp, body);
+  meshOutput.appendChild(line);
+}
+
+function appendMeshLog(level, message) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return;
+  }
+  if (!state.meshLogLines.length) {
+    meshOutput.replaceChildren();
+  }
+  const tone = level === "warning" ? "warn" : level === "error" ? "bad" : level === "success" ? "ok" : "info";
+  const line = document.createElement("div");
+  line.className = `log-line ${tone}`;
+  const stamp = document.createElement("span");
+  stamp.className = "log-time";
+  stamp.textContent = new Date().toLocaleTimeString([], { hour12: false });
+  const body = document.createElement("span");
+  body.className = "log-msg";
+  body.textContent = text;
+  line.append(stamp, body);
+  const stick = meshOutput.scrollHeight - meshOutput.scrollTop - meshOutput.clientHeight < 32;
+  meshOutput.appendChild(line);
+  if (stick) {
+    meshOutput.scrollTop = meshOutput.scrollHeight;
+  }
+  const prefix = level === "warning" || level === "error" ? `${level}: ` : "";
+  state.meshLogLines.push(`${stamp.textContent} ${prefix}${text}`);
+  updateCopyMeshLogVisibility();
+}
+
+function appendMeshDiscoveryResult(payload) {
+  const nodes = payload.nodes || payload.radios || [];
+  const links = payload.links || [];
+  const checked = Number(payload.candidates_checked) || 0;
+  const summary = `${countLabel(nodes.length, "node")}, ${countLabel(links.length, "link")}, ${countLabel(checked, "candidate")} checked.`;
+  if (payload.ok) {
+    appendMeshLog(nodes.length ? "success" : "warning", `Scan complete: ${summary}`);
+  } else {
+    appendMeshLog("error", `Scan failed: ${summary}`);
+  }
+  for (const warning of payload.warnings || []) {
+    appendMeshLog("warning", warning);
+  }
+  for (const error of payload.errors || []) {
+    appendMeshLog("error", error);
+  }
+}
+
+function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function updateCopyMeshLogVisibility() {
+  copyMeshLog.disabled = !state.meshLogLines.length;
+  copyMeshLog.textContent = "Copy Log";
+}
+
 function updateMeshFleetSource() {
   const config = configInput.value.trim();
-  meshConfigSource.textContent = config || "No fleet selected";
   meshConfigSource.title = config || "";
   diagnosticsConfigSource.textContent = config || "No fleet selected";
   diagnosticsConfigSource.title = config || "";
@@ -1182,9 +1312,8 @@ function renderStateError(error) {
   fleetFolder.textContent = "";
   fleetEmptyPath.textContent = "";
   fleetCount.textContent = "0";
-  fleetSelect.replaceChildren();
-  fleetSelect.disabled = true;
-  fleetSelect.add(new Option("Workspace unavailable", ""));
+  setFleetSelectEmpty(fleetSelect, "Workspace unavailable");
+  setFleetSelectEmpty(meshConfigSource, "Workspace unavailable");
   resetNodeSelect("No nodes available");
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
@@ -1217,5 +1346,6 @@ function handleNodeLoadError(error) {
 updateRoleDefaultSsh();
 updateDiskMode();
 updateMeshFleetSource();
+resetMeshLog();
 updateFlashControls();
 refreshAll().catch(handleRefreshError).finally(startDiskWatcher);

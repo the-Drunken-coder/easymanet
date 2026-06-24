@@ -397,6 +397,14 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
         uci_set firewall.allow_ssh_wan.dest_port="22"
         uci_set firewall.allow_ssh_wan.target="ACCEPT"
     fi
+    if [ "$NODE_ROLE" = "gate" ]; then
+        uci_set firewall.allow_easymanet_api_wan=rule
+        uci_set firewall.allow_easymanet_api_wan.name="Allow-EasyMANET-API-WAN"
+        uci_set firewall.allow_easymanet_api_wan.src="wan"
+        uci_set firewall.allow_easymanet_api_wan.proto="tcp"
+        uci_set firewall.allow_easymanet_api_wan.dest_port="$EM_EASYMANET_API_PORT"
+        uci_set firewall.allow_easymanet_api_wan.target="ACCEPT"
+    fi
     uci_commit firewall
 fi
 

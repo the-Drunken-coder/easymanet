@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easymanet"
-version = "0.2.1"
+version = "0.2.2"
 description = "Zero-touch OpenMANET provisioning and imaging"
 readme = "README.md"
 requires-python = ">=3.10"

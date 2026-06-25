@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import Any
 
+from easymanet._download_integrity import valid_image_payload, verify_image_sha256
 from easymanet.disks import list_disks
 from easymanet.download import (
     cache_dir,
     check_latest_version,
     download_image,
-    get_cached_image,
     image_sha256,
     images_manifest_path,
     normalize_sha256,
@@ -32,11 +33,18 @@ def state_payload() -> dict[str, Any]:
     images = configured_images()
     versions = cached_versions()
     for target, entry in images.items():
-        verified_cached = get_cached_image(target)
-        display_cached = verified_cached
         cached_version = versions.get(target, {})
-        known_sha256 = cached_version.get("sha256") or entry.get("sha256")
-        if not display_cached:
+        verified_cached = None
+        has_verified_metadata = False
+        known_sha256 = ""
+        for expected_sha256, url in cache_metadata_candidates(cached_version, entry):
+            has_verified_metadata = True
+            verified_cached = verified_cached_image(target, expected_sha256, url=url)
+            if verified_cached:
+                known_sha256 = expected_sha256
+                break
+        display_cached = verified_cached
+        if not display_cached and not has_verified_metadata:
             display_cached = display_cached_image(target, entry)
             known_sha256 = entry.get("sha256") if isinstance(entry.get("sha256"), str) else ""
         entry["cached_path"] = str(display_cached) if display_cached else ""
@@ -236,6 +244,71 @@ def _cache_present(entry: dict[str, Any], cached_path: str) -> bool:
     if "cache_present" in entry:
         return bool(entry.get("cache_present"))
     return bool(cached_path)
+
+
+def cache_metadata_candidates(
+    cached_version: dict[str, Any],
+    entry: dict[str, Any],
+) -> list[tuple[str, str]]:
+    candidates = []
+    seen = set()
+    for source in (cached_version, entry):
+        sha256 = source.get("sha256")
+        if not isinstance(sha256, str) or not sha256:
+            continue
+        try:
+            expected_sha256 = normalize_sha256(sha256)
+        except ValueError:
+            continue
+        url = str(source.get("url") or "")
+        key = (expected_sha256, url)
+        if key in seen:
+            continue
+        candidates.append(key)
+        seen.add(key)
+    return candidates
+
+
+def verified_cached_image(target: str, expected_sha256: str, *, url: str = "") -> Path | None:
+    for path in verified_cache_candidates(target, url=url):
+        if cached_image_matches(path, expected_sha256):
+            return path
+    return None
+
+
+def verified_cache_candidates(target: str, *, url: str = "") -> list[Path]:
+    candidates = []
+    seen = set()
+    filename = url.rstrip("/").split("/")[-1] if url else ""
+    if filename:
+        path = cache_dir() / filename
+        candidates.append(path)
+        seen.add(path)
+    for path in sorted(cache_dir().glob(f"*{glob_escape(target)}*"), key=_path_mtime, reverse=True):
+        if path in seen:
+            continue
+        candidates.append(path)
+        seen.add(path)
+    return candidates
+
+
+def cached_image_matches(path: Path, expected_sha256: str) -> bool:
+    try:
+        return (
+            path.is_file()
+            and valid_image_payload(path, path.name)
+            and _image_sha256_matches(path, expected_sha256)
+        )
+    except OSError:
+        return False
+
+
+def _image_sha256_matches(path: Path, expected_sha256: str) -> bool:
+    try:
+        verify_image_sha256(path, expected_sha256)
+    except OSError:
+        return False
+    return True
 
 
 def configured_images() -> dict[str, dict[str, Any]]:

@@ -1,9 +1,10 @@
-from types import SimpleNamespace
+import gzip
 import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,7 +120,6 @@ def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypat
 
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
 
     payload = payloads.state_payload()
 
@@ -550,7 +550,6 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
     monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
 
     payload = payloads.state_payload()
     entry = payload["images"]["rpi4-mm6108-spi"]
@@ -560,6 +559,111 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cache_present"] is False
     assert entry["cached_size_bytes"] == len(b"firmware")
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+
+
+def test_desktop_state_verifies_version_metadata_cache_without_manifest(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = workspace / "Images"
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    other = cache / "backup-rpi4-mm6108-spi.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"firmware")
+    other.write_bytes(image.read_bytes())
+    other.touch()
+    expected_sha256 = hashlib.sha256(image.read_bytes()).hexdigest()
+    (cache / "version.json").write_text(
+        json.dumps(
+            {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.8",
+                    "sha256": expected_sha256,
+                    "url": f"https://example.test/{image.name}",
+                    "trust_status": "verified",
+                    "source": "official",
+                    "image_status": "current",
+                }
+            }
+        )
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_path"] == str(image)
+    assert entry["cache_present"] is True
+    assert entry["version"] == "images-v0.2.8"
+    assert entry["trust_status"] == "verified"
+    assert entry["cached_sha256"] == expected_sha256
+
+
+def test_desktop_state_uses_manifest_cache_when_version_metadata_is_stale(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = workspace / "Images"
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"firmware")
+    expected_sha256 = hashlib.sha256(image.read_bytes()).hexdigest()
+    url = f"https://example.test/{image.name}"
+    (cache / "images.json").write_text(
+        json.dumps(
+            {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.9",
+                    "sha256": expected_sha256,
+                    "url": url,
+                }
+            }
+        )
+    )
+    (cache / "version.json").write_text(
+        json.dumps(
+            {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.8",
+                    "sha256": "a" * 64,
+                    "url": url,
+                }
+            }
+        )
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert image.exists()
+    assert entry["cached_path"] == str(image)
+    assert entry["cache_present"] is True
+    assert entry["version"] == "images-v0.2.9"
+    assert entry["cached_sha256"] == expected_sha256
+
+
+def test_desktop_state_does_not_delete_cache_with_stale_version_metadata(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = workspace / "Images"
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"firmware")
+    (cache / "version.json").write_text(
+        json.dumps(
+            {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.8",
+                    "sha256": "a" * 64,
+                    "url": f"https://example.test/{image.name}",
+                }
+            }
+        )
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert image.exists()
+    assert entry["cached_path"] == ""
+    assert entry["cache_present"] is False
 
 
 def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, monkeypatch):
@@ -579,7 +683,6 @@ def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, 
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
     monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
     monkeypatch.setattr(
         payloads,
         "image_sha256",
@@ -588,9 +691,10 @@ def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, 
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
+    assert entry["cached_path"] == ""
     assert entry["cache_present"] is False
-    assert entry["cached_size_bytes"] == payloads.DISPLAY_CACHE_HASH_LIMIT_BYTES + 1
-    assert entry["cached_sha256"] == ""
+    assert "cached_size_bytes" not in entry
+    assert "cached_sha256" not in entry
 
 
 def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeypatch):
@@ -607,11 +711,10 @@ def test_desktop_state_ignores_non_string_cached_metadata_hash(tmp_path, monkeyp
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
     monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: image)
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
-    assert entry["cache_present"] is True
+    assert entry["cache_present"] is False
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
@@ -629,7 +732,6 @@ def test_desktop_state_discovers_cache_for_malformed_manifest_hash(tmp_path, mon
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: manifest)
     monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
 
     entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
 
@@ -651,7 +753,6 @@ def test_desktop_state_skips_hashing_large_unversioned_cache(tmp_path, monkeypat
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
     monkeypatch.setattr(payloads, "version_file_path", lambda: tmp_path / "missing-version.json")
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
     monkeypatch.setattr(
         payloads,
         "image_sha256",

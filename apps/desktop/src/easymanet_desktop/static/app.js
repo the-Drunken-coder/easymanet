@@ -13,7 +13,7 @@ const {
 
 const state = window.EMState;
 const { byId: $, detectMacPlatform } = window.EMDom;
-const { nativeApi, postJson, errorDetail, errorMessage, getState, getDisks } = window.EMApi;
+const { nativeApi, postJson, errorDetail, errorMessage, getState, getImageUpdates, getDisks } = window.EMApi;
 const { uniqueNodeNames, roleSshHint } = window.EMFleet;
 const { diskInventorySignature } = window.EMDisk;
 const {
@@ -39,6 +39,7 @@ const nodeSelect = $("node-name");
 const nodeRoleChip = $("node-role");
 const validationOutput = $("validation-output");
 const imageCount = $("image-count");
+const checkImageUpdatesButton = $("check-image-updates");
 const images = $("images");
 const diskPanel = $("disk-panel");
 const disks = $("disks");
@@ -81,6 +82,8 @@ const meshScanningDetail = $("mesh-scanning-detail");
 const meshSummary = $("mesh-summary");
 const meshCount = $("mesh-count");
 const meshRadios = $("mesh-radios");
+const meshOutput = $("mesh-output");
+const copyMeshLog = $("copy-mesh-log");
 const diagnosticsForm = $("diagnostics-form");
 const diagnosticsStatusChip = $("diagnostics-status-chip");
 const diagnosticsConfigSource = $("diagnostics-config-source");
@@ -103,6 +106,7 @@ const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const isMac = detectMacPlatform();
 const diskWatchIntervalMs = 2500;
 let diskWatchTimer = null;
+let imageUpdateButtonSeq = 0;
 
 if (!nativeApi) {
   chooseConfig.hidden = true;
@@ -115,16 +119,16 @@ adminPasswordRow.hidden = true;
 setupTabNavigation();
 
 $("refresh").addEventListener("click", () => {
-  refreshAll().catch(handleRefreshError);
+  refreshAll({ checkLatest: true }).catch(handleRefreshError);
+});
+checkImageUpdatesButton.addEventListener("click", () => {
+  refreshImageUpdateStatus({ checkLatest: true, reportErrors: true }).catch(handleRefreshError);
 });
 fleetSelect.addEventListener("change", () => {
-  if (fleetSelect.value) {
-    configInput.value = fleetSelect.value;
-    resetMeshDiscovery();
-    updateMeshFleetSource();
-    loadNodesForSelectedFleet().catch(handleNodeLoadError);
-    updateFlashControls();
-  }
+  selectFleetSource(fleetSelect.value);
+});
+meshConfigSource.addEventListener("change", () => {
+  selectFleetSource(meshConfigSource.value);
 });
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
@@ -178,6 +182,15 @@ disks.addEventListener("click", (event) => {
   state.diskDevice = button.dataset.device || "";
   loadDisks().catch(renderDiskError);
   updateFlashControls();
+});
+images.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-image-install-target]");
+  if (!button) {
+    return;
+  }
+  installImageUpdate(button.dataset.imageInstallTarget || "").catch((error) => {
+    setFlashStatus("bad", errorMessage(error));
+  });
 });
 document.querySelectorAll("input[name='ssh-mode']").forEach((input) => {
   input.addEventListener("change", updateFlashControls);
@@ -245,6 +258,16 @@ copyFlashLog.addEventListener("click", async () => {
     showCopied(copyFlashLog, "Copy Log");
   }
 });
+copyMeshLog.addEventListener("click", async () => {
+  const logText = state.meshLogLines.join("\n").trim();
+  if (!nativeApi || !logText) {
+    return;
+  }
+  const result = await nativeApi.copyText(logText);
+  if (result.ok) {
+    showCopied(copyMeshLog, "Copy Log");
+  }
+});
 exportSupportBundle.addEventListener("click", async () => {
   const payload = {
     config: state.configPath || configInput.value.trim(),
@@ -304,15 +327,15 @@ $("validate-form").addEventListener("submit", async (event) => {
   }
 });
 
-async function refreshAll() {
+async function refreshAll({ checkLatest = false } = {}) {
   try {
-    await Promise.all([loadState(), loadDisks()]);
+    await Promise.all([loadState({ checkLatest }), loadDisks()]);
   } catch (error) {
     handleRefreshError(error);
   }
 }
 
-async function loadState() {
+async function loadState({ checkLatest = false } = {}) {
   try {
     const payload = await getState();
     if (!payload.ok) {
@@ -323,6 +346,9 @@ async function loadState() {
     workspacePath.title = workspace.root || "";
     await renderFleets(workspace.fleet_files || [], workspace.fleets_dir || "");
     renderImageState(payload.images || {});
+    if (checkLatest) {
+      await refreshImageUpdateStatus({ checkLatest: true });
+    }
     updateMeshFleetSource();
     updateFlashControls();
   } catch (error) {
@@ -335,12 +361,58 @@ function renderImageState(imagePayload) {
   const entries = Object.entries(imagePayload || {});
   state.images = imagePayload || {};
   imageCount.textContent = `${entries.length}`;
-  images.innerHTML = entries.map(([target, image]) => imageItem(target, image)).join("");
+  images.innerHTML = entries
+    .map(([target, image]) => imageItem(target, imageWithUpdate(target, image)))
+    .join("");
 }
 
-async function refreshImageSidebar() {
+function imageWithUpdate(target, image) {
+  const update = state.imageUpdates[target] || {};
+  return {
+    ...(image || {}),
+    ...update,
+    installing: state.imageInstallTarget === target,
+    anyInstallRunning: Boolean(state.imageInstallTarget),
+  };
+}
+
+async function refreshImageUpdateStatus({ checkLatest = false, reportErrors = false } = {}) {
+  const seq = state.imageUpdateSeq + 1;
+  state.imageUpdateSeq = seq;
+  let buttonSeq = 0;
+  if (checkLatest) {
+    imageUpdateButtonSeq = seq;
+    buttonSeq = seq;
+    checkImageUpdatesButton.disabled = true;
+    checkImageUpdatesButton.textContent = "Checking...";
+  }
+  try {
+    const payload = await getImageUpdates({ checkLatest });
+    if (seq !== state.imageUpdateSeq) {
+      return;
+    }
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Could not check image releases");
+    }
+    state.imageUpdates = payload.updates || {};
+    renderImageState(state.images);
+  } catch (error) {
+    console.debug("Image update check failed", error);
+    if (reportErrors) {
+      setFlashStatus("bad", errorMessage(error));
+    }
+  } finally {
+    if (checkLatest && buttonSeq === imageUpdateButtonSeq) {
+      checkImageUpdatesButton.disabled = false;
+      checkImageUpdatesButton.textContent = "Check Updates";
+    }
+  }
+}
+
+async function refreshImageSidebar({ checkLatest = false } = {}) {
   if (state.imageLoadInFlight) {
     state.imageRefreshQueued = true;
+    state.imageRefreshQueuedCheckLatest = state.imageRefreshQueuedCheckLatest || checkLatest;
     return;
   }
   state.imageLoadInFlight = true;
@@ -350,15 +422,48 @@ async function refreshImageSidebar() {
       throw new Error(errorDetail(payload) || "Could not refresh image state");
     }
     renderImageState(payload.images || {});
+    if (checkLatest) {
+      await refreshImageUpdateStatus({ checkLatest: true });
+    }
     updateFlashControls();
   } catch (error) {
     console.debug("Image sidebar refresh failed", error);
   } finally {
     state.imageLoadInFlight = false;
     if (state.imageRefreshQueued) {
+      const queuedCheckLatest = Boolean(state.imageRefreshQueuedCheckLatest);
       state.imageRefreshQueued = false;
-      refreshImageSidebar();
+      state.imageRefreshQueuedCheckLatest = false;
+      refreshImageSidebar({ checkLatest: queuedCheckLatest });
     }
+  }
+}
+
+async function installImageUpdate(target) {
+  target = String(target || "").trim();
+  if (!target || state.imageInstallTarget) {
+    return;
+  }
+  state.imageInstallTarget = target;
+  renderImageState(state.images);
+  setFlashStatus("running", `Installing latest image for ${target}...`);
+  try {
+    const payload = await postJson("/api/image-updates/install", { target });
+    if (!payload.ok) {
+      throw new Error(errorDetail(payload) || "Image update install failed");
+    }
+    if (payload.image) {
+      state.images[target] = payload.image;
+    }
+    if (payload.update) {
+      state.imageUpdates[target] = payload.update;
+    }
+    await refreshImageSidebar({ checkLatest: true });
+    const version = payload.version || (payload.image || {}).version || "latest";
+    setFlashStatus("ok", payload.installed === false ? "Image cache is already current." : `Installed image ${version}.`);
+  } finally {
+    state.imageInstallTarget = "";
+    renderImageState(state.images);
   }
 }
 
@@ -424,13 +529,15 @@ async function renderFleets(records, folder) {
   fleetFolder.title = folder || "";
   fleetEmptyPath.textContent = folder || "";
   fleetCount.textContent = `${records.length}`;
-  fleetSelect.replaceChildren();
+  resetFleetSelect(fleetSelect);
+  resetFleetSelect(meshConfigSource);
 
   if (!records.length) {
-    fleetSelect.disabled = true;
-    fleetSelect.add(new Option("No fleet files found", ""));
+    setFleetSelectEmpty(fleetSelect, "No fleet files found");
+    setFleetSelectEmpty(meshConfigSource, "No fleet files found");
     fleetEmpty.hidden = false;
     configInput.value = "";
+    updateMeshFleetSource();
     resetNodeSelect("No nodes available");
     updateFlashControls();
     return;
@@ -438,8 +545,10 @@ async function renderFleets(records, folder) {
 
   fleetEmpty.hidden = true;
   fleetSelect.disabled = false;
+  meshConfigSource.disabled = false;
   for (const record of records) {
-    fleetSelect.add(new Option(record.relative_path || record.name, record.path));
+    addFleetOption(fleetSelect, record);
+    addFleetOption(meshConfigSource, record);
   }
 
   const current = configInput.value.trim();
@@ -452,18 +561,52 @@ async function renderFleets(records, folder) {
 }
 
 function syncFleetSelect(path) {
-  if (!path || fleetSelect.disabled) {
+  if (!path) {
     return;
   }
-  const options = Array.from(fleetSelect.options);
+  syncFleetSelectElement(fleetSelect, path);
+  syncFleetSelectElement(meshConfigSource, path);
+}
+
+function resetFleetSelect(select) {
+  select.replaceChildren();
+}
+
+function setFleetSelectEmpty(select, label) {
+  select.replaceChildren();
+  select.disabled = true;
+  select.add(new Option(label, ""));
+}
+
+function addFleetOption(select, record) {
+  select.add(new Option(record.relative_path || record.name, record.path));
+}
+
+function syncFleetSelectElement(select, path) {
+  if (select.disabled) {
+    return;
+  }
+  const options = Array.from(select.options);
   if (options.some((option) => option.value === path)) {
-    fleetSelect.value = path;
+    select.value = path;
     return;
   }
   const custom = new Option("Custom path", path);
   custom.dataset.custom = "true";
-  fleetSelect.add(custom, 0);
-  fleetSelect.value = path;
+  select.add(custom, 0);
+  select.value = path;
+}
+
+function selectFleetSource(path) {
+  if (!path) {
+    return;
+  }
+  configInput.value = path;
+  syncFleetSelect(path);
+  resetMeshDiscovery();
+  updateMeshFleetSource();
+  loadNodesForSelectedFleet().catch(handleNodeLoadError);
+  updateFlashControls();
 }
 
 async function loadNodesForSelectedFleet(preferredNode = "") {
@@ -540,18 +683,26 @@ function resetNodeSelect(label) {
 
 async function discoverMesh() {
   state.meshHasScanned = true;
+  resetMeshLog();
+  const config = configInput.value.trim();
+  appendMeshLog("info", "Scan started.");
+  appendMeshLog("info", `Fleet source: ${config || "none"}`);
+  appendMeshLog("info", meshScanSubnet.checked ? "Local network scan enabled." : "Local network scan disabled.");
   setMeshBusy(true);
   meshSummary.hidden = true;
   meshRadios.setAttribute("aria-busy", "true");
   setMeshStatus("warn", "scanning");
   try {
     const response = await postJson("/api/mesh/discover", {
-      config: configInput.value.trim(),
+      config,
       scanSubnet: meshScanSubnet.checked,
     });
+    appendMeshDiscoveryResult(response);
     renderMeshDiscovery(response);
   } catch (error) {
-    renderMeshDiscovery({ ok: false, errors: [errorMessage(error)], nodes: [], links: [], candidates_checked: 0 });
+    const message = errorMessage(error);
+    appendMeshLog("error", message);
+    renderMeshDiscovery({ ok: false, errors: [message], nodes: [], links: [], candidates_checked: 0 });
   } finally {
     meshRadios.removeAttribute("aria-busy");
     setMeshBusy(false);
@@ -588,6 +739,7 @@ function resetMeshDiscovery() {
   meshRadios.className = "mesh-grid";
   meshRadios.innerHTML = emptyMeshMarkup("No topology found", "Run Scan Mesh to refresh this view.");
   setMeshStatus("subtle", "idle");
+  resetMeshLog();
 }
 
 function setMeshBusy(busy) {
@@ -610,9 +762,83 @@ function setMeshStatus(tone, label) {
   meshStatusChip.className = `chip ${tone}`;
 }
 
+function resetMeshLog() {
+  state.meshLogLines = [];
+  meshOutput.replaceChildren();
+  renderMeshLogPlaceholder();
+  updateCopyMeshLogVisibility();
+}
+
+function renderMeshLogPlaceholder() {
+  const line = document.createElement("div");
+  line.className = "log-line info";
+  const stamp = document.createElement("span");
+  stamp.className = "log-time";
+  stamp.textContent = "--:--:--";
+  const body = document.createElement("span");
+  body.className = "log-msg";
+  body.textContent = "No mesh discovery activity yet.";
+  line.append(stamp, body);
+  meshOutput.appendChild(line);
+}
+
+function appendMeshLog(level, message) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return;
+  }
+  if (!state.meshLogLines.length) {
+    meshOutput.replaceChildren();
+  }
+  const tone = level === "warning" ? "warn" : level === "error" ? "bad" : level === "success" ? "ok" : "info";
+  const line = document.createElement("div");
+  line.className = `log-line ${tone}`;
+  const stamp = document.createElement("span");
+  stamp.className = "log-time";
+  stamp.textContent = new Date().toLocaleTimeString([], { hour12: false });
+  const body = document.createElement("span");
+  body.className = "log-msg";
+  body.textContent = text;
+  line.append(stamp, body);
+  const stick = meshOutput.scrollHeight - meshOutput.scrollTop - meshOutput.clientHeight < 32;
+  meshOutput.appendChild(line);
+  if (stick) {
+    meshOutput.scrollTop = meshOutput.scrollHeight;
+  }
+  const prefix = level === "warning" || level === "error" ? `${level}: ` : "";
+  state.meshLogLines.push(`${stamp.textContent} ${prefix}${text}`);
+  updateCopyMeshLogVisibility();
+}
+
+function appendMeshDiscoveryResult(payload) {
+  const nodes = payload.nodes || payload.radios || [];
+  const links = payload.links || [];
+  const checked = Number(payload.candidates_checked) || 0;
+  const summary = `${countLabel(nodes.length, "node")}, ${countLabel(links.length, "link")}, ${countLabel(checked, "candidate")} checked.`;
+  if (payload.ok) {
+    appendMeshLog(nodes.length ? "success" : "warning", `Scan complete: ${summary}`);
+  } else {
+    appendMeshLog("error", `Scan failed: ${summary}`);
+  }
+  for (const warning of payload.warnings || []) {
+    appendMeshLog("warning", warning);
+  }
+  for (const error of payload.errors || []) {
+    appendMeshLog("error", error);
+  }
+}
+
+function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function updateCopyMeshLogVisibility() {
+  copyMeshLog.disabled = !nativeApi || !state.meshLogLines.length;
+  copyMeshLog.textContent = "Copy Log";
+}
+
 function updateMeshFleetSource() {
   const config = configInput.value.trim();
-  meshConfigSource.textContent = config || "No fleet selected";
   meshConfigSource.title = config || "";
   diagnosticsConfigSource.textContent = config || "No fleet selected";
   diagnosticsConfigSource.title = config || "";
@@ -1124,9 +1350,8 @@ function renderStateError(error) {
   fleetFolder.textContent = "";
   fleetEmptyPath.textContent = "";
   fleetCount.textContent = "0";
-  fleetSelect.replaceChildren();
-  fleetSelect.disabled = true;
-  fleetSelect.add(new Option("Workspace unavailable", ""));
+  setFleetSelectEmpty(fleetSelect, "Workspace unavailable");
+  setFleetSelectEmpty(meshConfigSource, "Workspace unavailable");
   resetNodeSelect("No nodes available");
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
@@ -1159,5 +1384,6 @@ function handleNodeLoadError(error) {
 updateRoleDefaultSsh();
 updateDiskMode();
 updateMeshFleetSource();
+resetMeshLog();
 updateFlashControls();
-refreshAll().catch(handleRefreshError).finally(startDiskWatcher);
+refreshAll({ checkLatest: true }).catch(handleRefreshError).finally(startDiskWatcher);

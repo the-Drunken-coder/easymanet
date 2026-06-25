@@ -1,5 +1,5 @@
 const { clipboard, dialog, ipcMain, shell } = require("electron");
-const { diagnosticsBridgeTimeoutMs, flashBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
+const { diagnosticsBridgeTimeoutMs, flashBridgeTimeoutMs, imageBridgeTimeoutMs, meshBridgeTimeoutMs } = require("./constants");
 const { runBridge, runBridgeStreaming } = require("./bridge-process");
 const { runFlashWithAdministratorPrivileges } = require("./elevated-flash");
 const { booleanFlag } = require("./util");
@@ -8,12 +8,29 @@ const {
   validateBootReportImportPayload,
   validateDiagnosticsPayload,
   validateFlashPayload,
+  validateImageTargetPayload,
   validateMeshPayload,
   validatePayload,
 } = require("./validation");
 
 function registerIpc() {
   ipcMain.handle("easymanet:state", () => runBridge(["state"]));
+  ipcMain.handle("easymanet:image-updates", (_event, payload = {}) => {
+    const args = ["image-updates"];
+    if (booleanFlag(payload.checkLatest) || booleanFlag(payload.check_latest)) {
+      args.push("--check-latest");
+    }
+    return runBridge(args, { timeoutMs: imageBridgeTimeoutMs });
+  });
+  ipcMain.handle("easymanet:image-update-install", (_event, payload = {}) => {
+    const validated = validateImageTargetPayload(payload);
+    if (!validated.ok) {
+      return validated;
+    }
+    return runBridge(["install-image-update", "--target", validated.target], {
+      timeoutMs: imageBridgeTimeoutMs,
+    });
+  });
   ipcMain.handle("easymanet:disks", (_event, payload = {}) => {
     const args = ["disks"];
     if (payload.includeAll) {

@@ -138,6 +138,7 @@
                 <header class="card-head">
                   <h2>Images</h2>
                   <span class="chip subtle" id="image-count"></span>
+                  <button id="check-image-updates" class="btn ghost small" type="button">Check Updates</button>
                 </header>
                 <div class="card-body">
                   <div id="images" class="stack"></div>
@@ -267,9 +268,9 @@
                   <span class="chip subtle" id="mesh-status-chip">idle</span>
                 </header>
                 <div class="card-body">
-                  <label class="field">
+                  <label class="field" for="mesh-config-source">
                     <span class="field-label">Fleet source</span>
-                    <span class="mesh-source mono trunc" id="mesh-config-source"></span>
+                    <select id="mesh-config-source" class="mesh-source"></select>
                   </label>
                   <label class="switch mesh-scan-toggle">
                     <input id="mesh-scan-subnet" type="checkbox" checked>
@@ -277,6 +278,17 @@
                   </label>
                   <button id="mesh-discover" class="btn primary block" type="submit">Scan Mesh</button>
                   <div id="mesh-summary" class="validation" hidden></div>
+                </div>
+              </section>
+              <section class="card" id="mesh-log-panel">
+                <header class="card-head console-head">
+                  <h2>Activity log</h2>
+                  <span class="console-actions">
+                    <button id="copy-mesh-log" class="btn ghost small" type="button" disabled>Copy Log</button>
+                  </span>
+                </header>
+                <div class="card-body">
+                  <div id="mesh-output" class="console" aria-live="polite"></div>
                 </div>
               </section>
             </form>

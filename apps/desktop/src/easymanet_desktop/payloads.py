@@ -32,10 +32,22 @@ def state_payload() -> dict[str, Any]:
     images = configured_images()
     versions = cached_versions()
     for target, entry in images.items():
-        verified_cached = get_cached_image(target)
-        display_cached = verified_cached
         cached_version = versions.get(target, {})
-        known_sha256 = cached_version.get("sha256") or entry.get("sha256")
+        cached_version_sha256 = cached_version.get("sha256") or ""
+        cached_version_url = cached_version.get("url") or ""
+        if cached_version_sha256:
+            try:
+                verified_cached = get_cached_image(
+                    target,
+                    sha256=cached_version_sha256,
+                    url=cached_version_url or None,
+                )
+            except (OSError, ValueError):
+                verified_cached = None
+        else:
+            verified_cached = get_cached_image(target)
+        display_cached = verified_cached
+        known_sha256 = cached_version_sha256 or entry.get("sha256")
         if not display_cached:
             display_cached = display_cached_image(target, entry)
             known_sha256 = entry.get("sha256") if isinstance(entry.get("sha256"), str) else ""

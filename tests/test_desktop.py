@@ -1,9 +1,10 @@
-from types import SimpleNamespace
+import gzip
 import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -562,6 +563,39 @@ def test_desktop_state_reports_cached_image_hash_without_manifest(tmp_path, monk
     assert entry["cached_sha256"] == hashlib.sha256(b"firmware").hexdigest()
 
 
+def test_desktop_state_verifies_version_metadata_cache_without_manifest(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
+    ensure_workspace()
+    cache = workspace / "Images"
+    image = cache / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"firmware")
+    expected_sha256 = hashlib.sha256(image.read_bytes()).hexdigest()
+    (cache / "version.json").write_text(
+        json.dumps(
+            {
+                "rpi4-mm6108-spi": {
+                    "version": "images-v0.2.8",
+                    "sha256": expected_sha256,
+                    "url": f"https://example.test/{image.name}",
+                    "trust_status": "verified",
+                    "source": "official",
+                    "image_status": "current",
+                }
+            }
+        )
+    )
+
+    entry = payloads.state_payload()["images"]["rpi4-mm6108-spi"]
+
+    assert entry["cached_path"] == str(image)
+    assert entry["cache_present"] is True
+    assert entry["version"] == "images-v0.2.8"
+    assert entry["trust_status"] == "verified"
+    assert entry["cached_sha256"] == expected_sha256
+
+
 def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     monkeypatch.setenv(WORKSPACE_ENV, str(workspace))
@@ -579,7 +613,7 @@ def test_desktop_state_does_not_pair_version_hash_with_fallback_cache(tmp_path, 
     monkeypatch.setattr(payloads, "cache_dir", lambda: cache)
     monkeypatch.setattr(payloads, "images_manifest_path", lambda: tmp_path / "missing.json")
     monkeypatch.setattr(payloads, "version_file_path", lambda: version_file)
-    monkeypatch.setattr(payloads, "get_cached_image", lambda _target: None)
+    monkeypatch.setattr(payloads, "get_cached_image", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         payloads,
         "image_sha256",

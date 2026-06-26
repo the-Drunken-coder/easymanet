@@ -120,14 +120,20 @@ Do not set `dot11MeshHWMPRootMode=1`; it caused
 
 ### `/etc/config/dhcp`
 
-Mesh-side DHCP is served on the OpenMANET bridge:
+Mesh-side DHCP is served by EasyMANET gate nodes on the OpenMANET bridge.
+Point nodes still bridge client traffic onto `br-ahwlan`, but do not run
+the same DHCP pool on the flat mesh LAN:
 
 ```conf
-config dhcp 'ahwlan'
+config dhcp 'ahwlan'             # gate nodes
     option interface 'ahwlan'
     option start '351'
     option limit '16'
     option leasetime '12h'
+
+config dhcp 'ahwlan'             # point nodes
+    option interface 'ahwlan'
+    option ignore '1'
 ```
 
 ### `/etc/config/firewall`

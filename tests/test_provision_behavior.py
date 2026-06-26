@@ -373,6 +373,7 @@ def test_provision_gate_node_smoke(tmp_path):
     assert _uci_get(uci_state, "dhcp.ahwlan.start", env) == "351"
     assert _uci_get(uci_state, "dhcp.ahwlan.limit", env) == "16"
     assert _uci_get(uci_state, "dhcp.ahwlan.leasetime", env) == "12h"
+    assert _uci_get(uci_state, "dhcp.ahwlan.ignore", env) == ""
     assert _uci_get(uci_state, "mesh11sd.mesh_params.mesh_gate_announcements", env) == "1"
     assert _uci_get(uci_state, "firewall.mesh_zone.network", env) == "ahwlan"
     assert _uci_get(uci_state, "firewall.mesh_wan_forwarding.src", env) == "mesh"
@@ -401,14 +402,38 @@ def test_provision_point_node_disables_ssh(tmp_path):
     assert _uci_get(uci_state, "network.ahwlan.ipaddr", env) == "10.41.2.1"
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
     assert _uci_get(uci_state, "dhcp.ahwlan.interface", env) == "ahwlan"
-    assert _uci_get(uci_state, "dhcp.ahwlan.start", env) == "351"
-    assert _uci_get(uci_state, "dhcp.ahwlan.limit", env) == "16"
+    assert _uci_get(uci_state, "dhcp.ahwlan.ignore", env) == "1"
+    assert _uci_get(uci_state, "dhcp.ahwlan.start", env) == ""
+    assert _uci_get(uci_state, "dhcp.ahwlan.limit", env) == ""
+    assert _uci_get(uci_state, "dhcp.ahwlan.leasetime", env) == ""
     assert _uci_get(uci_state, "mesh11sd.mesh_params.mesh_gate_announcements", env) == "0"
     assert _uci_get(uci_state, "firewall.mesh_zone.network", env) == "ahwlan"
     assert _uci_get(uci_state, "firewall.mesh_wan_forwarding.src", env) == ""
 
     dropbear_state = (prefix / "var" / "dropbear-state").read_text()
     assert "disabled" in dropbear_state
+
+
+def test_provision_point_node_disables_stale_mesh_dhcp_pool(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("dhcp.ahwlan=dhcp\n")
+        state.write("dhcp.ahwlan.interface='ahwlan'\n")
+        state.write("dhcp.ahwlan.start='351'\n")
+        state.write("dhcp.ahwlan.limit='16'\n")
+        state.write("dhcp.ahwlan.leasetime='12h'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "dhcp.ahwlan.interface", env) == "ahwlan"
+    assert _uci_get(uci_state, "dhcp.ahwlan.ignore", env) == "1"
+    assert _uci_get(uci_state, "dhcp.ahwlan.start", env) == ""
+    assert _uci_get(uci_state, "dhcp.ahwlan.limit", env) == ""
+    assert _uci_get(uci_state, "dhcp.ahwlan.leasetime", env) == ""
 
 
 def test_provision_local_ap_attaches_to_openmanet_mesh_bridge(tmp_path):

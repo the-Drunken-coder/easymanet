@@ -342,9 +342,20 @@ uci -q delete dhcp.meship 2>/dev/null || true
 uci -q delete dhcp.lan 2>/dev/null || true
 uci_set dhcp."$EM_AHWLAN_IFACE"=dhcp
 uci_set dhcp."$EM_AHWLAN_IFACE".interface="$EM_AHWLAN_IFACE"
-uci_set dhcp."$EM_AHWLAN_IFACE".start="$EM_AHWLAN_DHCP_START"
-uci_set dhcp."$EM_AHWLAN_IFACE".limit="$EM_AHWLAN_DHCP_LIMIT"
-uci_set dhcp."$EM_AHWLAN_IFACE".leasetime="$EM_AHWLAN_DHCP_LEASETIME"
+# br-ahwlan is one flat mesh LAN, so only the gate serves DHCP. Point
+# nodes bridge client traffic to the gate instead of racing it with the
+# same lease pool.
+if [ "$NODE_ROLE" = "gate" ]; then
+    uci -q delete dhcp."$EM_AHWLAN_IFACE".ignore 2>/dev/null || true
+    uci_set dhcp."$EM_AHWLAN_IFACE".start="$EM_AHWLAN_DHCP_START"
+    uci_set dhcp."$EM_AHWLAN_IFACE".limit="$EM_AHWLAN_DHCP_LIMIT"
+    uci_set dhcp."$EM_AHWLAN_IFACE".leasetime="$EM_AHWLAN_DHCP_LEASETIME"
+else
+    uci_set dhcp."$EM_AHWLAN_IFACE".ignore="1"
+    uci -q delete dhcp."$EM_AHWLAN_IFACE".start 2>/dev/null || true
+    uci -q delete dhcp."$EM_AHWLAN_IFACE".limit 2>/dev/null || true
+    uci -q delete dhcp."$EM_AHWLAN_IFACE".leasetime 2>/dev/null || true
+fi
 uci_commit dhcp
 
 uci_set firewall.mesh_zone=zone

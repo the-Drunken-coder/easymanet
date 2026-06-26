@@ -2,6 +2,10 @@
 
 Prefer simple, elegant solutions over complex ones.
 
+Apply YAGNI: implement only what the current requirement needs. Avoid speculative hooks, broad frameworks, and future-facing abstractions until the repo has a concrete use for them.
+
+Apply Single-Line Coding Principles: keep each line focused on one clear action or decision. Split dense chains, multi-purpose expressions, and complicated conditionals into named steps when that makes the code easier to read.
+
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project.
 
 If you encounter something surprising, tell the developer and add the lesson here so future agents do not rediscover the same failure.

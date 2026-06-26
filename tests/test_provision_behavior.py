@@ -1372,6 +1372,99 @@ easymanet_repair_management_lan late-boot
     assert "name='br-lan'" not in uci_state.read_text()
 
 
+def test_late_management_lan_repair_restores_usb0_wan_from_stale_brlan_wan(tmp_path):
+    provision_data = _gate_provision_json()
+    provision_data["node"]["gateway"] = {
+        "enabled": True,
+        "uplink_interface": "usb0",
+    }
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(provision_data, indent=2))
+    uci_state = tmp_path / "uci-state"
+    uci_state.write_text(
+        "\n".join(
+            [
+                "network.@device[0].name='br-lan'",
+                "network.@device[0].type='bridge'",
+                "network.wan=interface",
+                "network.wan.proto='dhcp'",
+                "network.wan.device='br-lan'",
+                "network.wan.ifname='br-lan'",
+            ]
+        )
+        + "\n"
+    )
+    env = _harness_env(
+        uci_state,
+        {
+            "EASYMANET_LIB_DIR": str(NETWORK_SCRIPT.parent),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "EASYMANET_NETWORK_LOG": str(tmp_path / "network.log"),
+        },
+    )
+
+    result = _run_sh(
+        f'''
+cd "{tmp_path}"
+. "{NETWORK_SCRIPT}"
+easymanet_repair_management_lan late-boot
+''',
+        env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == "usb0"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "usb0"
+    assert _uci_get(uci_state, "network.wan.peerdns", env) == "0"
+    assert _uci_get(uci_state, "network.wan.dns", env) == "1.1.1.1 8.8.8.8"
+    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
+    assert "name='br-lan'" not in uci_state.read_text()
+
+
+def test_late_management_lan_repair_restores_wifi_wan_from_stale_brlan_wan(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_wifi_gate_provision_json(), indent=2))
+    uci_state = tmp_path / "uci-state"
+    uci_state.write_text(
+        "\n".join(
+            [
+                "network.@device[0].name='br-lan'",
+                "network.@device[0].type='bridge'",
+                "network.wan=interface",
+                "network.wan.proto='dhcp'",
+                "network.wan.device='br-lan'",
+                "network.wan.ifname='br-lan'",
+            ]
+        )
+        + "\n"
+    )
+    env = _harness_env(
+        uci_state,
+        {
+            "EASYMANET_LIB_DIR": str(NETWORK_SCRIPT.parent),
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "EASYMANET_NETWORK_LOG": str(tmp_path / "network.log"),
+        },
+    )
+
+    result = _run_sh(
+        f'''
+cd "{tmp_path}"
+. "{NETWORK_SCRIPT}"
+easymanet_repair_management_lan late-boot
+''',
+        env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == ""
+    assert _uci_get(uci_state, "network.wan.ifname", env) == ""
+    assert _uci_get(uci_state, "network.wan.peerdns", env) == "0"
+    assert _uci_get(uci_state, "network.wan.dns", env) == "1.1.1.1 8.8.8.8"
+    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
+    assert "name='br-lan'" not in uci_state.read_text()
+
+
 def test_provision_non_eth0_uplink_configures_wan(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"

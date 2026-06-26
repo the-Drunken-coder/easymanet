@@ -80,6 +80,28 @@ easymanet_ensure_ahwlan_interface() {
     uci set network."$EM_AHWLAN_IFACE".netmask="$EM_MESH_NETMASK" >> "$EASYMANET_NETWORK_LOG" 2>&1
 }
 
+easymanet_restore_gateway_wan() {
+    role="$(easymanet_json_val node role 2>/dev/null || true)"
+    [ "$role" = "gate" ] || return 0
+
+    uci set network.wan=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci set network.wan.proto="dhcp" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci set network.wan.peerdns="0" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci set network.wan.dns="$EM_UPLINK_DNS" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci -q delete network.wan6 2>/dev/null || true
+
+    if json_bool node gateway wifi enabled; then
+        uci -q delete network.wan.device 2>/dev/null || true
+        uci -q delete network.wan.ifname 2>/dev/null || true
+        return 0
+    fi
+
+    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    [ -n "$uplink" ] || uplink="eth0"
+    uci set network.wan.device="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
+    uci set network.wan.ifname="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
+}
+
 easymanet_repair_management_lan() {
     reason="${1:-manual}"
     mgmt_iface="eth0"
@@ -113,15 +135,10 @@ easymanet_repair_management_lan() {
         uci -q delete network.wan 2>/dev/null || true
         uci -q delete network.wan6 2>/dev/null || true
     fi
-    if ! easymanet_eth0_mesh_side && [ "$role" = "gate" ] && [ "$uplink" = "$mgmt_iface" ]; then
-        uci set network.wan=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci set network.wan.proto="dhcp" >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci set network.wan.device="$mgmt_iface" >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci set network.wan.ifname="$mgmt_iface" >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci set network.wan.peerdns="0" >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci set network.wan.dns="$EM_UPLINK_DNS" >> "$EASYMANET_NETWORK_LOG" 2>&1
-        uci -q delete network.wan6 2>/dev/null || true
-    fi
+
+    # If stale mesh-side WAN was removed, rebuild gateway WAN from the
+    # provision payload for eth0, non-eth0, and Wi-Fi uplink gateways.
+    easymanet_restore_gateway_wan
 
     easymanet_ensure_ahwlan_bridge
     easymanet_ensure_ahwlan_interface

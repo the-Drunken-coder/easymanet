@@ -19,6 +19,7 @@ def test_desktop_renderer_state_flows_use_bridge_payloads():
             "disk.js",
             "flash-ui.js",
             "mesh.js",
+            "diagnostics.js",
             "app.js",
         )
     ]
@@ -140,6 +141,7 @@ let holdMesh = false;
 let resolveMesh = null;
 let flashCallback = null;
 let copiedTexts = [];
+let diagnosticsCalls = [];
 
 function statePayload() {
   return {
@@ -226,6 +228,10 @@ const nativeApi = {
       });
     }
     return Promise.resolve({ ok: true, nodes: [], links: [], candidates_checked: 0 });
+  },
+  runDiagnostics(body) {
+    diagnosticsCalls.push(body);
+    return Promise.resolve({ ok: true, summary: "diagnostics summary", support_code: "ready" });
   },
   chooseConfig() {
     return Promise.resolve({ ok: true, path: "" });
@@ -423,6 +429,16 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await element("copy-mesh-log").listeners.click();
   const meshLogCopied = copiedTexts.some((text) => text.includes("Scan started.") && text.includes("Scan complete: 0 nodes"));
 
+  await element("diagnostics-form").listeners.submit({ preventDefault() {} });
+  await flush();
+  await flush();
+  const diagnosticsRunUsesSelectedFleet = diagnosticsCalls.length === 1
+    && diagnosticsCalls[0].config === "/tmp/EasyMANET/Fleets/field.yml";
+  const diagnosticsOutputRendered = element("diagnostics-output").textContent === "diagnostics summary"
+    && element("diagnostics-result").textContent === "ready";
+  await element("diagnostics-copy").listeners.click();
+  const diagnosticsSummaryCopied = copiedTexts.includes("diagnostics summary");
+
   process.stdout.write(JSON.stringify({
     registeredFlashCallback: typeof flashCallback === "function",
     startupImageUpdateChecked,
@@ -448,6 +464,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     meshRestored,
     meshLogAvailable,
     meshLogCopied,
+    diagnosticsRunUsesSelectedFleet,
+    diagnosticsOutputRendered,
+    diagnosticsSummaryCopied,
   }));
 })().catch((error) => {
   console.error(error);
@@ -492,4 +511,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "meshRestored": True,
         "meshLogAvailable": True,
         "meshLogCopied": True,
+        "diagnosticsRunUsesSelectedFleet": True,
+        "diagnosticsOutputRendered": True,
+        "diagnosticsSummaryCopied": True,
     }

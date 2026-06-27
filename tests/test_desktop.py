@@ -1553,6 +1553,7 @@ def test_desktop_static_supports_electron_and_http_modes():
         "disk.js",
         "flash-ui.js",
         "mesh.js",
+        "diagnostics.js",
         "app.js",
     ):
         assert f'src="{script}"' in index.read_text()
@@ -1565,6 +1566,7 @@ def test_desktop_static_supports_electron_and_http_modes():
             "disk.js",
             "flash-ui.js",
             "mesh.js",
+            "diagnostics.js",
             "app.js",
         )
     )

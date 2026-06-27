@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -234,6 +235,13 @@ def selected_surface_specs(product: str) -> list[SurfaceSpec]:
     if product == "all":
         return list(SURFACES.values())
     return [SURFACES[product]]
+
+
+def project_version(pyproject_path: Path) -> str:
+    match = re.search(r'^version = "([^"]+)"$', pyproject_path.read_text(), re.MULTILINE)
+    if not match:
+        raise ValueError(f"Could not find project version in {pyproject_path}")
+    return match.group(1)
 
 
 def render_surface_pyproject(surface: SurfaceSpec, version: str) -> str:

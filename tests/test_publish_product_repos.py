@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from easymanet_publish import surfaces as surface_registry
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10.
@@ -65,9 +67,9 @@ def test_cli_repo_spec_does_not_copy_image_workflow():
 
     assert ".github/workflows/build-openmanet-image.yml" not in publish.REPO_SPECS["cli"].source_paths
     assert "tests/test_publish_product_repos.py" not in publish.REPO_SPECS["cli"].source_paths
-    assert "apps/cli" not in publish.COMMON_PRODUCT_SOURCE_PATHS
-    assert "packages/image" not in publish.COMMON_PRODUCT_SOURCE_PATHS
-    for rel_path in publish.CLI_RUNTIME_SOURCE_PATHS:
+    assert "apps/cli" not in surface_registry.COMMON_PRODUCT_SOURCE_PATHS
+    assert "packages/image" not in surface_registry.COMMON_PRODUCT_SOURCE_PATHS
+    for rel_path in surface_registry.CLI_RUNTIME_SOURCE_PATHS:
         assert rel_path in publish.REPO_SPECS["cli"].source_paths
         assert rel_path in publish.REPO_SPECS["images"].source_paths
 

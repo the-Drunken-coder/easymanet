@@ -1,12 +1,14 @@
 # EasyMANET Product And Release Planning
 
-Historical planning note: this document records product and release direction
-from an earlier repo phase. The current product-surface layout source of truth
-is [`docs/monorepo.md`](monorepo.md).
+Historical snapshot: this document records product and release direction from an
+earlier repo phase. It is retained for rationale, not current authority. Use
+[`docs/monorepo.md`](monorepo.md), [`docs/public-repos.md`](public-repos.md),
+[`docs/release.md`](release.md), the root README, and tests for current behavior.
 
-This document captures the current high-level design direction for
+The preserved notes below captured the high-level design direction for
 EasyMANET after discussing how the project could grow beyond a raw image
-download and manual flashing workflow.
+download and manual flashing workflow. Treat forward-looking language here as
+historical unless current source-of-truth docs and code still agree with it.
 
 It is intentionally not an implementation plan. It does not prescribe a
 final directory layout, package structure, workflow YAML, app framework

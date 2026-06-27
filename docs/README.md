@@ -10,7 +10,7 @@ blockers that another agent or developer may need to pick up.
 | --- | --- | --- |
 | [`docs/architecture.md`](architecture.md) | End-to-end provisioning flow and component responsibilities. | "How is EasyMANET wired together?" |
 | [`docs/monorepo.md`](monorepo.md) | Private monorepo layout, product surfaces, and public export behavior. | "Where does each product surface live?" |
-| [`docs/product-and-release-planning.md`](product-and-release-planning.md) | Historical product and release planning context. | "Why did the product surfaces take this shape?" |
+| [`docs/product-and-release-planning.md`](product-and-release-planning.md) | Historical product and release planning snapshot. | "Why did the product surfaces take this shape?" |
 | [`docs/release.md`](release.md) | Version policy, release checklist, and artifact commands. | "How do we cut the first release?" |
 | [`docs/sample-fleet.md`](sample-fleet.md) | Starter fleet YAML and workspace copy command. | "What should my first fleet file look like?" |
 | [`docs/manifest.md`](manifest.md) | Reference for every field in `fleet.yml`. | "What config shape does this project accept?" |
@@ -19,7 +19,6 @@ blockers that another agent or developer may need to pick up.
 | [`docs/lessons-learned.md`](lessons-learned.md) | Recurring hardware, build, and debugging gotchas from real node work. | "What should a future session know before touching this?" |
 | [`docs/design-decisions/`](design-decisions/) | Durable architectural and implementation choices. | "What did we decide, and why?" |
 | [`docs/problems/`](problems/) | Short-lived agent-to-agent notes on active blockers. | "What is broken right now on this branch?" |
-| [`future concepts and plans/`](../future%20concepts%20and%20plans/) | Exploratory ideas and future product direction. | "What might we build later?" |
 
 Start templates:
 [`design-decisions/_EXAMPLE_DESIGN_DECISION_.md`](design-decisions/_EXAMPLE_DESIGN_DECISION_.md),
@@ -33,6 +32,9 @@ Start templates:
   `docs/design-decisions/` once the problem turns into a durable decision.
 - Move recurring operational gotchas to `docs/lessons-learned.md` after the
   same mistake or surprise appears more than once.
+- When an exploratory note becomes implemented design, move it under
+  `docs/design-decisions/` or another current docs location instead of leaving
+  it in a future-plan folder.
 
 ## Root Files
 

@@ -1105,7 +1105,9 @@ function appendLog(level, message) {
 }
 
 function updateCopyFlashLogVisibility() {
-  consoleWrap.hidden = !state.logLines.length;
+  const hasOutput = Boolean(state.logLines.length);
+  consoleWrap.hidden = !hasOutput;
+  flashPanel.classList.toggle("has-output", hasOutput);
   copyFlashLog.textContent = "Copy Log";
 }
 
@@ -1206,7 +1208,7 @@ function renderFlash(payload) {
     state.lastFlashOk = true;
     appendLog("success", "Flash complete.");
     appendLog("info", hint);
-    setFlashStatus("ok", `Flash complete. Insert the disk into ${node} and boot. ${hint}`);
+    setFlashStatus("ok", `Flash complete. Insert the disk into ${node} and boot.`);
   } else if (payload.canceled) {
     setFlashStatus("warn", "Flash canceled. The disk was not modified.");
   } else {

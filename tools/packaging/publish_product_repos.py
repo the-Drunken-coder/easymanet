@@ -7,7 +7,6 @@ import argparse
 import base64
 import json
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,12 +19,9 @@ if str(PUBLISH_SRC) not in sys.path:
     sys.path.insert(0, str(PUBLISH_SRC))
 
 from easymanet_publish.surfaces import (  # noqa: E402
-    CLI_RUNTIME_SOURCE_PATHS,
-    COMMON_PRODUCT_SOURCE_PATHS,
-    PRODUCT_DOC_PATHS,
-    PRODUCT_TEST_PATHS,
     SURFACES,
     SurfaceSpec,
+    project_version,
     render_surface_pyproject,
     selected_surface_specs,
 )
@@ -151,13 +147,6 @@ def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha:
     )
     write_text_file(repo_dir / "REPO_GENERATION.md", generation_metadata(spec, source_ref, source_sha))
     return repo_dir
-
-
-def project_version(pyproject_path: Path) -> str:
-    match = re.search(r'^version = "([^"]+)"$', pyproject_path.read_text(), re.MULTILINE)
-    if not match:
-        raise ValueError(f"Could not find project version in {pyproject_path}")
-    return match.group(1)
 
 
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:

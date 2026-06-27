@@ -1,14 +1,13 @@
 """Export generated public product surfaces without configuring subrepos."""
 
 import json
-import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .surfaces import SURFACES, SurfaceSpec, render_surface_pyproject
+from .surfaces import SURFACES, SurfaceSpec, project_version, render_surface_pyproject
 
 EXPORT_RECORD = "easymanet-public-surfaces.json"
 EXPORT_IGNORE = shutil.ignore_patterns(
@@ -102,16 +101,9 @@ def _copy_templates(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) ->
 
 
 def _write_surface_pyproject(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) -> str:
-    version = _project_version(repo_root / "pyproject.toml")
+    version = project_version(repo_root / "pyproject.toml")
     (surface_dir / "pyproject.toml").write_text(render_surface_pyproject(surface, version))
     return "pyproject.toml"
-
-
-def _project_version(pyproject: Path) -> str:
-    match = re.search(r'^version = "([^"]+)"$', pyproject.read_text(), re.MULTILINE)
-    if not match:
-        raise ValueError(f"Could not find project version in {pyproject}")
-    return match.group(1)
 
 
 def _relative_files(path: Path, root: Path) -> list[str]:

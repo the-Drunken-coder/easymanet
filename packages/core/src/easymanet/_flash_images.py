@@ -203,7 +203,7 @@ def resolve_base_image(
                 force=download,
                 emit=emit,
             )
-        if latest_source == "official" and latest_trust_status == PENDING_TRUST_STATUS:
+        if pending_official:
             latest_payload["trust_status"] = OFFICIAL_TRUST_STATUS
     except OSError as exc:
         raise FlashWorkflowError(

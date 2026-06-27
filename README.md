@@ -255,7 +255,7 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 - [Documentation Index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Monorepo Layout](docs/monorepo.md)
-- [Historical Product Planning](docs/product-and-release-planning.md)
+- [Historical Product and Release Planning](docs/product-and-release-planning.md)
 - [Release Checklist](docs/release.md)
 - [Sample Fleet](docs/sample-fleet.md)
 - [Manifest Reference](docs/manifest.md) — every config field documented

@@ -21,6 +21,7 @@ const files = [
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/index.html"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/api.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/app.js"),
+  path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/diagnostics.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/disk.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/flash-ui.js"),
   path.join(repoRoot, "apps/desktop/src/easymanet_desktop/static/fleet.js"),

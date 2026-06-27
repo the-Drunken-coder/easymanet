@@ -38,9 +38,17 @@
     return platform.includes("mac");
   }
 
+  function showCopied(button, label) {
+    button.textContent = "Copied";
+    setTimeout(() => {
+      button.textContent = label;
+    }, 1200);
+  }
+
   window.EMState = state;
   window.EMDom = {
     byId,
     detectMacPlatform,
+    showCopied,
   };
 })();

@@ -427,6 +427,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   context.renderFlash({ ok: false, canceled: true, warnings: [], errors: [] });
   const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
     && element("console-wrap").hidden === true;
+  context.renderFlashEvent({ level: "info", message: "copyable flash log" });
+  await element("copy-flash-log").listeners.click();
+  context.renderFlashEvent({ event_type: "dd_progress", bytes: 1024 });
+  const flashLogCopyFeedbackSurvivesRefresh = element("copy-flash-log").textContent === "Copied";
   context.clearPlan();
   element("flash-status").hidden = true;
   element("flash-status-text").textContent = "";
@@ -508,6 +512,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     queuedStarted,
     queuedCheckLatestPreserved,
     statusOnlyOutputActivatesLayout,
+    flashLogCopyFeedbackSurvivesRefresh,
     planPayloadTextOnly,
     sshEnabledHint,
     sshDisabledHint,
@@ -557,6 +562,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "queuedStarted": True,
         "queuedCheckLatestPreserved": True,
         "statusOnlyOutputActivatesLayout": True,
+        "flashLogCopyFeedbackSurvivesRefresh": True,
         "planPayloadTextOnly": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,

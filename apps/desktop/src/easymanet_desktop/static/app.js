@@ -1112,7 +1112,6 @@ function updateCopyFlashLogVisibility() {
   const hasLogs = Boolean(state.logLines.length);
   consoleWrap.hidden = !hasLogs;
   flashPanel.classList.toggle("has-output", hasVisibleFlashOutput());
-  copyFlashLog.textContent = "Copy Log";
 }
 
 function hasVisibleFlashOutput() {

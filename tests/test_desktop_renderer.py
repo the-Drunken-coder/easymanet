@@ -7,6 +7,7 @@ import pytest
 
 
 def test_desktop_renderer_state_flows_use_bridge_payloads():
+    """Exercise desktop renderer state transitions wired through bridge payloads."""
     root = Path(__file__).resolve().parents[1]
     static = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static"
     scripts = [

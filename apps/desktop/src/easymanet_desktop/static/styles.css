@@ -45,6 +45,7 @@ body {
     var(--bg);
   color: var(--ink);
   font: 14px/1.5 var(--sans);
+  /* Chromium-only density trim for the Electron shell and local static console. */
   zoom: var(--ui-scale);
   -webkit-font-smoothing: antialiased;
 }
@@ -1318,11 +1319,6 @@ select:disabled {
   background: var(--accent-dim);
 }
 
-#flash-panel.needs-attention .flash-review {
-  border-color: rgba(251, 191, 36, 0.32);
-  background: var(--warn-dim);
-}
-
 #flash-panel.has-output .flash-target,
 #flash-panel.has-output .flash-review {
   padding: 7px 10px;
@@ -1721,10 +1717,6 @@ select:disabled {
   border-radius: 8px;
   background: #0a0f14;
   font: 11.5px/1.55 var(--mono);
-}
-
-.flash-output-col .console {
-  max-height: clamp(110px, 18vh, 180px);
 }
 
 .log-line {

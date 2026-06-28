@@ -914,7 +914,6 @@ function updateFlashControls() {
   previewFlash.disabled = !ready || state.flashBusy;
   startFlash.disabled = !ready || needsPassword || state.flashBusy;
   flashPanel.classList.toggle("ready", ready && !needsPassword && !state.flashBusy);
-  flashPanel.classList.toggle("needs-attention", ready && needsPassword && !state.flashBusy);
   flashPanel.classList.toggle("busy", state.flashBusy);
   summaryNode.textContent = node || "—";
   selectedDisk.textContent = state.diskDevice || "None";

@@ -427,6 +427,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
     && element("console-wrap").hidden === true;
   context.clearPlan();
+  element("flash-status").hidden = true;
+  element("flash-status-text").textContent = "";
+  element("flash-progress").hidden = true;
+  element("progress-text").textContent = "";
   context.renderPlanCard({
     plan: {
       node: "<img src=x onerror=alert(1)>",
@@ -441,8 +445,12 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const planPayloadTextOnly = element("flash-panel").classList.contains("has-output")
     && planText.includes("<img src=x onerror=alert(1)>")
     && planText.includes("<script>alert(1)</script>")
+    && planText.includes("<boot>")
+    && planText.includes("<b>boot files</b>")
     && !planHtml.includes("<img src=x")
-    && !planHtml.includes("<script>");
+    && !planHtml.includes("<script>")
+    && !planHtml.includes("<boot>")
+    && !planHtml.includes("<b>boot files</b>");
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
   const sshEnabledHint = context.window.EMState.logLines.some((line) => line.includes("SSH to root@"));
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });

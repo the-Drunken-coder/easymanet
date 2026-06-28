@@ -138,9 +138,5 @@
 
   window.EMDiagnostics = {
     updateFleetSource,
-    runDiagnostics,
-    exportDiagnosticsBundle,
-    importOfflineBootReport,
-    copyDiagnosticsSummary,
   };
 })();

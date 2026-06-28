@@ -7,6 +7,7 @@ import pytest
 
 
 def test_desktop_renderer_state_flows_use_bridge_payloads():
+    """Exercise desktop renderer state transitions wired through bridge payloads."""
     root = Path(__file__).resolve().parents[1]
     static = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static"
     scripts = [
@@ -73,6 +74,9 @@ function makeElement(id = "") {
     scrollHeight: 0,
     scrollTop: 0,
     clientHeight: 100,
+    get childElementCount() {
+      return this.children.filter((child) => child && typeof child === "object").length;
+    },
     addEventListener(type, callback) {
       this.listeners[type] = callback;
     },
@@ -109,6 +113,16 @@ function makeElement(id = "") {
   };
   element.classList = makeClassList(element);
   return element;
+}
+
+function textTree(root) {
+  const childText = root.children.map((child) => textTree(child)).join("");
+  return `${root.textContent || ""}${childText}`;
+}
+
+function htmlTree(root) {
+  const childHtml = root.children.map((child) => htmlTree(child)).join("");
+  return `${root.innerHTML || ""}${childHtml}`;
 }
 
 const elements = {};
@@ -406,10 +420,53 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const queuedCheckLatestPreserved = imageUpdateCalls === beforeQueuedCheckLatest + 1
     && imageUpdateChecks[imageUpdateChecks.length - 1] === true;
 
+  context.resetConsole();
+  context.clearPlan();
+  element("flash-status").hidden = true;
+  element("flash-status-text").textContent = "";
+  context.renderFlash({ ok: false, canceled: true, warnings: [], errors: [] });
+  const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
+    && element("console-wrap").hidden === true;
+  context.renderFlashEvent({ level: "info", message: "copyable flash log" });
+  await element("copy-flash-log").listeners.click();
+  context.renderFlashEvent({ event_type: "dd_progress", bytes: 1024 });
+  const flashLogCopyFeedbackSurvivesRefresh = element("copy-flash-log").textContent === "Copied";
+  context.resetConsole();
+  context.clearPlan();
+  element("flash-status").hidden = true;
+  element("flash-status-text").textContent = "";
+  element("flash-progress").hidden = true;
+  element("progress-text").textContent = "";
+  context.renderPlanCard({
+    plan: {
+      node: "<img src=x onerror=alert(1)>",
+      device: "/dev/disk-test",
+      boot_payload: "<boot>",
+      ssh_enabled: false,
+    },
+    provision_display: "<script>alert(1)</script>",
+    dry_run_info: "<b>boot files</b>",
+  });
+  const planText = textTree(element("flash-plan"));
+  const planHtml = htmlTree(element("flash-plan"));
+  const planPayloadTextOnly = element("flash-panel").classList.contains("has-output")
+    && element("console-wrap").hidden === true
+    && planText.includes("<img src=x onerror=alert(1)>")
+    && planText.includes("<script>alert(1)</script>")
+    && planText.includes("<boot>")
+    && planText.includes("<b>boot files</b>")
+    && planText.includes("disabled")
+    && !planHtml.includes("<img src=x")
+    && !planHtml.includes("<script>")
+    && !planHtml.includes("<boot>")
+    && !planHtml.includes("<b>boot files</b>");
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
-  const sshEnabledHint = element("flash-status-text").textContent.includes("SSH to root@");
+  const sshEnabledHint = context.window.EMState.logLines.some((line) => line.includes("SSH to root@"));
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });
-  const sshDisabledHint = !element("flash-status-text").textContent.includes("SSH to root@");
+  const sshDisabledHint = !element("flash-status-text").textContent.includes("SSH to root@")
+    && context.window.EMState.logLines.some((line) =>
+      line.includes("Connect Ethernet to the node management port.")
+    );
 
   holdMesh = true;
   const meshPromise = context.discoverMesh();
@@ -458,6 +515,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     queuedCoalesced,
     queuedStarted,
     queuedCheckLatestPreserved,
+    statusOnlyOutputActivatesLayout,
+    flashLogCopyFeedbackSurvivesRefresh,
+    planPayloadTextOnly,
     sshEnabledHint,
     sshDisabledHint,
     meshBusy,
@@ -505,6 +565,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "queuedCoalesced": True,
         "queuedStarted": True,
         "queuedCheckLatestPreserved": True,
+        "statusOnlyOutputActivatesLayout": True,
+        "flashLogCopyFeedbackSurvivesRefresh": True,
+        "planPayloadTextOnly": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
         "meshBusy": True,

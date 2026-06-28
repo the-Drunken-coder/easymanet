@@ -6,7 +6,7 @@ const {
   imageItem,
   diskCard,
   validationMarkup,
-  planMarkup,
+  planCardElements,
   meshDiscoveryMarkup,
   meshTopologyView,
 } = window.EMRender;
@@ -125,13 +125,13 @@ configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
   resetNodeSelect("Update fleet path to load nodes");
   resetMeshDiscovery();
-  updateMeshFleetSource();
+  updateFleetSource();
   updateFlashControls();
 });
 configInput.addEventListener("change", () => {
   syncFleetSelect(configInput.value.trim());
   resetMeshDiscovery();
-  updateMeshFleetSource();
+  updateFleetSource();
   loadNodesForSelectedFleet().catch(handleNodeLoadError);
 });
 nodeSelect.addEventListener("change", () => {
@@ -147,7 +147,7 @@ chooseConfig.addEventListener("click", async () => {
   if (result.ok && result.path) {
     configInput.value = result.path;
     syncFleetSelect(result.path);
-    updateMeshFleetSource();
+    updateFleetSource();
     await loadNodesForSelectedFleet().catch(handleNodeLoadError);
     updateFlashControls();
   }
@@ -327,7 +327,7 @@ async function loadState({ checkLatest = false } = {}) {
     if (checkLatest) {
       await refreshImageUpdateStatus({ checkLatest: true });
     }
-    updateMeshFleetSource();
+    updateFleetSource();
     updateFlashControls();
   } catch (error) {
     console.error("State refresh failed", error);
@@ -515,7 +515,7 @@ async function renderFleets(records, folder) {
     setFleetSelectEmpty(meshConfigSource, "No fleet files found");
     fleetEmpty.hidden = false;
     configInput.value = "";
-    updateMeshFleetSource();
+    updateFleetSource();
     resetNodeSelect("No nodes available");
     updateFlashControls();
     return;
@@ -533,7 +533,7 @@ async function renderFleets(records, folder) {
   const selected = current || records[0].path;
   configInput.value = selected;
   syncFleetSelect(selected);
-  updateMeshFleetSource();
+  updateFleetSource();
   await loadNodesForSelectedFleet(state.nodeName).catch(handleNodeLoadError);
   updateFlashControls();
 }
@@ -582,7 +582,7 @@ function selectFleetSource(path) {
   configInput.value = path;
   syncFleetSelect(path);
   resetMeshDiscovery();
-  updateMeshFleetSource();
+  updateFleetSource();
   loadNodesForSelectedFleet().catch(handleNodeLoadError);
   updateFlashControls();
 }
@@ -815,7 +815,7 @@ function updateCopyMeshLogVisibility() {
   copyMeshLog.textContent = "Copy Log";
 }
 
-function updateMeshFleetSource() {
+function updateFleetSource() {
   const config = configInput.value.trim();
   meshConfigSource.title = config || "";
   diagnostics.updateFleetSource(config);
@@ -914,7 +914,6 @@ function updateFlashControls() {
   previewFlash.disabled = !ready || state.flashBusy;
   startFlash.disabled = !ready || needsPassword || state.flashBusy;
   flashPanel.classList.toggle("ready", ready && !needsPassword && !state.flashBusy);
-  flashPanel.classList.toggle("needs-attention", ready && needsPassword && !state.flashBusy);
   flashPanel.classList.toggle("busy", state.flashBusy);
   summaryNode.textContent = node || "—";
   selectedDisk.textContent = state.diskDevice || "None";
@@ -1040,6 +1039,7 @@ function setFlashStatus(tone, message) {
   flashStatus.hidden = false;
   flashStatus.className = `flash-status ${tone}`;
   flashStatusText.textContent = message;
+  updateCopyFlashLogVisibility();
 }
 
 function setProgress({ label = "", percent = null, detail = "", indeterminate = false } = {}) {
@@ -1052,22 +1052,26 @@ function setProgress({ label = "", percent = null, detail = "", indeterminate = 
     progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   }
   progressText.textContent = detail ? `${label} · ${detail}` : label;
+  updateCopyFlashLogVisibility();
 }
 
 function hideProgress() {
   flashProgress.hidden = true;
   flashProgress.classList.remove("indeterminate");
   progressFill.style.width = "0";
+  updateCopyFlashLogVisibility();
 }
 
 function renderPlanCard(payload) {
   flashPlan.hidden = false;
-  flashPlan.innerHTML = planMarkup(payload);
+  flashPlan.replaceChildren(...planCardElements(payload));
+  updateCopyFlashLogVisibility();
 }
 
 function clearPlan() {
   flashPlan.hidden = true;
-  flashPlan.innerHTML = "";
+  flashPlan.replaceChildren();
+  updateCopyFlashLogVisibility();
 }
 
 function resetConsole() {
@@ -1105,8 +1109,16 @@ function appendLog(level, message) {
 }
 
 function updateCopyFlashLogVisibility() {
-  consoleWrap.hidden = !state.logLines.length;
-  copyFlashLog.textContent = "Copy Log";
+  const hasLogs = Boolean(state.logLines.length);
+  consoleWrap.hidden = !hasLogs;
+  flashPanel.classList.toggle("has-output", hasVisibleFlashOutput());
+}
+
+function hasVisibleFlashOutput() {
+  const hasStatus = !flashStatus.hidden && Boolean(flashStatusText.textContent.trim());
+  const hasProgress = !flashProgress.hidden && Boolean(progressText.textContent.trim());
+  const hasPlan = !flashPlan.hidden && Boolean(flashPlan.childElementCount);
+  return Boolean(state.logLines.length || hasStatus || hasProgress || hasPlan);
 }
 
 function renderFlashEvent(event) {
@@ -1206,7 +1218,7 @@ function renderFlash(payload) {
     state.lastFlashOk = true;
     appendLog("success", "Flash complete.");
     appendLog("info", hint);
-    setFlashStatus("ok", `Flash complete. Insert the disk into ${node} and boot. ${hint}`);
+    setFlashStatus("ok", `Flash complete. Insert the disk into ${node} and boot.`);
   } else if (payload.canceled) {
     setFlashStatus("warn", "Flash canceled. The disk was not modified.");
   } else {
@@ -1253,7 +1265,7 @@ function handleNodeLoadError(error) {
 
 updateRoleDefaultSsh();
 updateDiskMode();
-updateMeshFleetSource();
+updateFleetSource();
 resetMeshLog();
 updateFlashControls();
 refreshAll({ checkLatest: true }).catch(handleRefreshError).finally(startDiskWatcher);

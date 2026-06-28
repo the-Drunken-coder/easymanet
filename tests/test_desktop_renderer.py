@@ -73,6 +73,9 @@ function makeElement(id = "") {
     scrollHeight: 0,
     scrollTop: 0,
     clientHeight: 100,
+    get childElementCount() {
+      return this.children.filter((child) => child && typeof child === "object").length;
+    },
     addEventListener(type, callback) {
       this.listeners[type] = callback;
     },
@@ -109,6 +112,16 @@ function makeElement(id = "") {
   };
   element.classList = makeClassList(element);
   return element;
+}
+
+function textTree(root) {
+  const childText = root.children.map((child) => textTree(child)).join("");
+  return `${root.textContent || ""}${childText}`;
+}
+
+function htmlTree(root) {
+  const childHtml = root.children.map((child) => htmlTree(child)).join("");
+  return `${root.innerHTML || ""}${childHtml}`;
 }
 
 const elements = {};
@@ -413,6 +426,23 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   context.renderFlash({ ok: false, canceled: true, warnings: [], errors: [] });
   const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
     && element("console-wrap").hidden === true;
+  context.clearPlan();
+  context.renderPlanCard({
+    plan: {
+      node: "<img src=x onerror=alert(1)>",
+      device: "/dev/disk-test",
+      boot_payload: "<boot>",
+    },
+    provision_display: "<script>alert(1)</script>",
+    dry_run_info: "<b>boot files</b>",
+  });
+  const planText = textTree(element("flash-plan"));
+  const planHtml = htmlTree(element("flash-plan"));
+  const planPayloadTextOnly = element("flash-panel").classList.contains("has-output")
+    && planText.includes("<img src=x onerror=alert(1)>")
+    && planText.includes("<script>alert(1)</script>")
+    && !planHtml.includes("<img src=x")
+    && !planHtml.includes("<script>");
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
   const sshEnabledHint = context.window.EMState.logLines.some((line) => line.includes("SSH to root@"));
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });
@@ -469,6 +499,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     queuedStarted,
     queuedCheckLatestPreserved,
     statusOnlyOutputActivatesLayout,
+    planPayloadTextOnly,
     sshEnabledHint,
     sshDisabledHint,
     meshBusy,
@@ -517,6 +548,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "queuedStarted": True,
         "queuedCheckLatestPreserved": True,
         "statusOnlyOutputActivatesLayout": True,
+        "planPayloadTextOnly": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
         "meshBusy": True,

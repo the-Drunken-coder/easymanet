@@ -144,41 +144,68 @@
     return rows.join("") || statusRow("subtle", "No result");
   }
 
-  function planRow(label, value) {
+  function planRowElement(label, value) {
     if (!value) {
-      return "";
+      return [];
     }
-    return `<div class="plan-key">${escapeHtml(label)}</div><div class="plan-val mono">${escapeHtml(value)}</div>`;
+    const key = document.createElement("div");
+    key.className = "plan-key";
+    key.textContent = label;
+
+    const planValue = document.createElement("div");
+    planValue.className = "plan-val mono";
+    planValue.textContent = value;
+
+    return [key, planValue];
   }
 
-  function planDetails(label, text) {
+  function planDetailsElement(label, text) {
     if (!text) {
-      return "";
+      return null;
     }
-    return `<details class="plan-details"><summary>${escapeHtml(label)}</summary><pre>${escapeHtml(text)}</pre></details>`;
+    const details = document.createElement("details");
+    details.className = "plan-details";
+
+    const summary = document.createElement("summary");
+    summary.textContent = label;
+
+    const pre = document.createElement("pre");
+    pre.textContent = text;
+
+    details.append(summary, pre);
+    return details;
   }
 
-  function planMarkup(payload) {
+  function planCardElements(payload) {
     const plan = payload.plan || {};
     const image = payload.image || {};
     const imagePath = image.cached_path || plan.base_image || image.url || "";
-    const rows = [
-      planRow("Node", plan.node),
-      planRow("Hostname", plan.hostname),
-      planRow("Role", plan.role),
-      planRow("Target", plan.target),
-      planRow("Device", plan.device),
-      planRow("Image", imagePath),
-      planRow("Version", image.version),
-      planRow("SSH", plan.ssh),
-      planRow("Boot payload", plan.boot_payload),
-    ].join("");
+    const head = document.createElement("div");
+    head.className = "plan-head";
+    head.textContent = "Flash plan";
+
+    const grid = document.createElement("div");
+    grid.className = "plan-grid";
+    for (const [label, value] of [
+      ["Node", plan.node],
+      ["Hostname", plan.hostname],
+      ["Role", plan.role],
+      ["Target", plan.target],
+      ["Device", plan.device],
+      ["Image", imagePath],
+      ["Version", image.version],
+      ["SSH", plan.ssh],
+      ["Boot payload", plan.boot_payload],
+    ]) {
+      grid.append(...planRowElement(label, value));
+    }
+
     return [
-      `<div class="plan-head">Flash plan</div>`,
-      `<div class="plan-grid">${rows}</div>`,
-      planDetails("Provision payload", payload.provision_display),
-      planDetails("Boot files", payload.dry_run_info),
-    ].join("");
+      head,
+      grid,
+      planDetailsElement("Provision payload", payload.provision_display),
+      planDetailsElement("Boot files", payload.dry_run_info),
+    ].filter(Boolean);
   }
 
   function meshRadioCard(radio) {
@@ -308,7 +335,7 @@
     imageItem,
     diskCard,
     validationMarkup,
-    planMarkup,
+    planCardElements,
     meshRadioCard,
     meshNodeCard,
     meshTopologyView,

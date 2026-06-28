@@ -6,7 +6,7 @@ const {
   imageItem,
   diskCard,
   validationMarkup,
-  planMarkup,
+  planCardElements,
   meshDiscoveryMarkup,
   meshTopologyView,
 } = window.EMRender;
@@ -1065,13 +1065,13 @@ function hideProgress() {
 
 function renderPlanCard(payload) {
   flashPlan.hidden = false;
-  flashPlan.innerHTML = planMarkup(payload);
+  flashPlan.replaceChildren(...planCardElements(payload));
   updateCopyFlashLogVisibility();
 }
 
 function clearPlan() {
   flashPlan.hidden = true;
-  flashPlan.innerHTML = "";
+  flashPlan.replaceChildren();
   updateCopyFlashLogVisibility();
 }
 
@@ -1119,7 +1119,7 @@ function updateCopyFlashLogVisibility() {
 function hasVisibleFlashOutput() {
   const hasStatus = !flashStatus.hidden && Boolean(flashStatusText.textContent.trim());
   const hasProgress = !flashProgress.hidden && Boolean(progressText.textContent.trim());
-  const hasPlan = !flashPlan.hidden && Boolean(flashPlan.innerHTML.trim());
+  const hasPlan = !flashPlan.hidden && Boolean(flashPlan.childElementCount);
   return Boolean(state.logLines.length || hasStatus || hasProgress || hasPlan);
 }
 

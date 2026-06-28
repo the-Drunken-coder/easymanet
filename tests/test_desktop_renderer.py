@@ -431,6 +431,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   await element("copy-flash-log").listeners.click();
   context.renderFlashEvent({ event_type: "dd_progress", bytes: 1024 });
   const flashLogCopyFeedbackSurvivesRefresh = element("copy-flash-log").textContent === "Copied";
+  context.resetConsole();
   context.clearPlan();
   element("flash-status").hidden = true;
   element("flash-status-text").textContent = "";
@@ -441,6 +442,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
       node: "<img src=x onerror=alert(1)>",
       device: "/dev/disk-test",
       boot_payload: "<boot>",
+      ssh_enabled: false,
     },
     provision_display: "<script>alert(1)</script>",
     dry_run_info: "<b>boot files</b>",
@@ -448,10 +450,12 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const planText = textTree(element("flash-plan"));
   const planHtml = htmlTree(element("flash-plan"));
   const planPayloadTextOnly = element("flash-panel").classList.contains("has-output")
+    && element("console-wrap").hidden === true
     && planText.includes("<img src=x onerror=alert(1)>")
     && planText.includes("<script>alert(1)</script>")
     && planText.includes("<boot>")
     && planText.includes("<b>boot files</b>")
+    && planText.includes("disabled")
     && !planHtml.includes("<img src=x")
     && !planHtml.includes("<script>")
     && !planHtml.includes("<boot>")

@@ -145,7 +145,7 @@
   }
 
   function planRowElement(label, value) {
-    if (!value) {
+    if (value === undefined || value === null || value === "") {
       return [];
     }
     const key = document.createElement("div");
@@ -154,9 +154,16 @@
 
     const planValue = document.createElement("div");
     planValue.className = "plan-val mono";
-    planValue.textContent = value;
+    planValue.textContent = String(value);
 
     return [key, planValue];
+  }
+
+  function planSshValue(plan) {
+    if (typeof plan.ssh_enabled === "boolean") {
+      return plan.ssh_enabled ? "enabled" : "disabled";
+    }
+    return plan.ssh;
   }
 
   function planDetailsElement(label, text) {
@@ -194,7 +201,7 @@
       ["Device", plan.device],
       ["Image", imagePath],
       ["Version", image.version],
-      ["SSH", plan.ssh],
+      ["SSH", planSshValue(plan)],
       ["Boot payload", plan.boot_payload],
     ]) {
       grid.append(...planRowElement(label, value));

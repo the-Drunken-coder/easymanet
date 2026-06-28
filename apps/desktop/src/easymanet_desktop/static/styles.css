@@ -1364,8 +1364,7 @@ select:disabled {
   gap: 7px;
 }
 
-#flash-panel.has-output .review-head,
-#flash-panel.has-output .erase-warning {
+#flash-panel.has-output .review-head {
   display: none;
 }
 

@@ -1040,6 +1040,7 @@ function setFlashStatus(tone, message) {
   flashStatus.hidden = false;
   flashStatus.className = `flash-status ${tone}`;
   flashStatusText.textContent = message;
+  updateCopyFlashLogVisibility();
 }
 
 function setProgress({ label = "", percent = null, detail = "", indeterminate = false } = {}) {
@@ -1052,22 +1053,26 @@ function setProgress({ label = "", percent = null, detail = "", indeterminate = 
     progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   }
   progressText.textContent = detail ? `${label} · ${detail}` : label;
+  updateCopyFlashLogVisibility();
 }
 
 function hideProgress() {
   flashProgress.hidden = true;
   flashProgress.classList.remove("indeterminate");
   progressFill.style.width = "0";
+  updateCopyFlashLogVisibility();
 }
 
 function renderPlanCard(payload) {
   flashPlan.hidden = false;
   flashPlan.innerHTML = planMarkup(payload);
+  updateCopyFlashLogVisibility();
 }
 
 function clearPlan() {
   flashPlan.hidden = true;
   flashPlan.innerHTML = "";
+  updateCopyFlashLogVisibility();
 }
 
 function resetConsole() {
@@ -1105,10 +1110,17 @@ function appendLog(level, message) {
 }
 
 function updateCopyFlashLogVisibility() {
-  const hasOutput = Boolean(state.logLines.length);
-  consoleWrap.hidden = !hasOutput;
-  flashPanel.classList.toggle("has-output", hasOutput);
+  const hasLogs = Boolean(state.logLines.length);
+  consoleWrap.hidden = !hasLogs;
+  flashPanel.classList.toggle("has-output", hasVisibleFlashOutput());
   copyFlashLog.textContent = "Copy Log";
+}
+
+function hasVisibleFlashOutput() {
+  const hasStatus = !flashStatus.hidden && Boolean(flashStatusText.textContent.trim());
+  const hasProgress = !flashProgress.hidden && Boolean(progressText.textContent.trim());
+  const hasPlan = !flashPlan.hidden && Boolean(flashPlan.innerHTML.trim());
+  return Boolean(state.logLines.length || hasStatus || hasProgress || hasPlan);
 }
 
 function renderFlashEvent(event) {

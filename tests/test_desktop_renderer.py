@@ -406,10 +406,20 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const queuedCheckLatestPreserved = imageUpdateCalls === beforeQueuedCheckLatest + 1
     && imageUpdateChecks[imageUpdateChecks.length - 1] === true;
 
+  context.resetConsole();
+  context.clearPlan();
+  element("flash-status").hidden = true;
+  element("flash-status-text").textContent = "";
+  context.renderFlash({ ok: false, canceled: true, warnings: [], errors: [] });
+  const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
+    && element("console-wrap").hidden === true;
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
-  const sshEnabledHint = element("flash-status-text").textContent.includes("SSH to root@");
+  const sshEnabledHint = context.window.EMState.logLines.some((line) => line.includes("SSH to root@"));
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });
-  const sshDisabledHint = !element("flash-status-text").textContent.includes("SSH to root@");
+  const sshDisabledHint = !element("flash-status-text").textContent.includes("SSH to root@")
+    && context.window.EMState.logLines.some((line) =>
+      line.includes("Connect Ethernet to the node management port.")
+    );
 
   holdMesh = true;
   const meshPromise = context.discoverMesh();
@@ -458,6 +468,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     queuedCoalesced,
     queuedStarted,
     queuedCheckLatestPreserved,
+    statusOnlyOutputActivatesLayout,
     sshEnabledHint,
     sshDisabledHint,
     meshBusy,
@@ -505,6 +516,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "queuedCoalesced": True,
         "queuedStarted": True,
         "queuedCheckLatestPreserved": True,
+        "statusOnlyOutputActivatesLayout": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
         "meshBusy": True,

@@ -294,12 +294,7 @@ body.flash-busy .appbar {
   padding: 18px 22px 32px;
 }
 
-.flash-layout {
-  grid-template-columns: minmax(330px, 410px) minmax(280px, 1fr);
-  align-items: stretch;
-  gap: 14px;
-}
-
+.flash-layout,
 .side-panel-layout {
   grid-template-columns: minmax(330px, 410px) minmax(280px, 1fr);
   align-items: stretch;
@@ -446,19 +441,22 @@ body.flash-busy .appbar {
   margin: 0;
 }
 
-.control-section {
+.control-section,
+.output-section {
   display: grid;
   gap: 12px;
   padding: 15px 0;
   border-top: 1px solid var(--line-soft);
 }
 
-.control-section:first-child {
+.control-section:first-child,
+.output-section:first-child {
   padding-top: 0;
   border-top: 0;
 }
 
-.control-section:last-child {
+.control-section:last-child,
+.output-section:last-child {
   padding-bottom: 0;
 }
 
@@ -481,22 +479,6 @@ body.flash-busy .appbar {
 .control-section-head > .chip,
 .control-section-head > .switch {
   margin-left: auto;
-}
-
-.output-section {
-  display: grid;
-  gap: 12px;
-  padding: 15px 0;
-  border-top: 1px solid var(--line-soft);
-}
-
-.output-section:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.output-section:last-child {
-  padding-bottom: 0;
 }
 
 .output-section-head {

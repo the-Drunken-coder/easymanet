@@ -23,20 +23,26 @@ Run these from the repo root:
 
 ```bash
 python tools/verify.py fast
+python tools/verify.py openwrt-sim
 python tools/verify.py package
-
-go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 \
-  .github/workflows/*.yml \
-  product_repos/templates/*/.github/workflows/*.yml
+python tools/verify.py artifact
+actionlint .github/workflows/*.yml product_repos/templates/*/.github/workflows/*.yml
 ```
 
+Install `actionlint` from a package manager or the upstream release artifact
+before the release check. Do not rely on `go run` during release verification;
+it adds module-cache and network state to a check that should be repeatable.
+
 `fast` runs the Python tests, overlay shell syntax, Electron shell check,
-overlay packaging check, and whitespace diff check. `package` installs Electron
-dependencies with `npm ci`, builds a wheel, installs it into a temporary venv,
-validates the sample fleet through the installed `easymanet` command, verifies
-removed import paths stay removed, runs the installed-wheel Electron smoke, and
-uses clean temporary Python environments so host packaging state does not leak
-into the release check.
+overlay packaging check, and whitespace diff check. `openwrt-sim` runs the
+targeted first-boot, provisioning, API, status, and LED behavior tests.
+`package` installs Electron dependencies with `npm ci`, builds a wheel, installs
+it into a temporary venv, validates the sample fleet through the installed
+`easymanet` command, verifies removed import paths stay removed, runs the
+installed-wheel Electron smoke, and uses clean temporary Python environments so
+host packaging state does not leak into the release check. `artifact` runs the
+non-hardware source, synthetic boot-payload, and read-only image-cache checks;
+pass a built image and release manifest to the same profile after image build.
 
 For firmware, flashing, provisioning, radio, or release-candidate image changes,
 run the manual hardware-in-the-loop gate against a real gate/point pair after
@@ -44,12 +50,13 @@ the non-hardware checks pass. This is a scheduled, nightly, or release-only gate
 not a per-PR requirement:
 
 ```bash
-.codex-venv/bin/python tools/hil_verify.py \
+.codex-venv/bin/python tools/verify.py hil \
   --config examples/three-node-field-mesh.yml \
   --gate-node gate01 \
   --point-node point01 \
   --gate-device /dev/disk4 \
   --point-device /dev/disk5 \
+  --point-ssh-enabled \
   --base-image dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
   --image-sha256 <sha256> \
   --allow-flash \
@@ -67,12 +74,13 @@ iperf3 throughput smoke, and writes both JSON evidence and a redacted support
 bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt` only for
 lab fixtures where flashed media is automatically booted before probing.
 
+Flashed media is sensitive until first boot completes: `provision.json` is
+written in cleartext on the boot volume until provisioning succeeds, and the
+overlay copy at `/etc/easymanet/provision.json` remains mode `0600`.
+
 Point nodes normally have SSH disabled. For a release HIL run that keeps point
 SSH disabled, pass `--point-boot-report /path/to/boot` or a
 `boot-report-latest` directory so boot-report availability can still be proven.
-
-When the standard verification entrypoint lands, `python tools/verify.py hil`
-should delegate to this command rather than duplicating hardware logic.
 
 ## Build Artifacts
 
@@ -99,7 +107,7 @@ easymanet image manifest \
   --image "$IMAGE" \
   --output-dir dist/release/images
 
-.codex-venv/bin/python tools/packaging/verify_artifacts.py \
+.codex-venv/bin/python tools/verify.py artifact \
   --artifact "$IMAGE" \
   --release-manifest dist/release/images/easymanet-image-release.json
 ```

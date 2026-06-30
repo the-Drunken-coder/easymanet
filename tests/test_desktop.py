@@ -1783,6 +1783,8 @@ def test_electron_shell_files_exist():
     electron_check_text = (electron / "scripts" / "check-electron.js").read_text()
     assert "resolveConfigPath(\"field\"" in electron_check_text
     assert "formatCommandFailure" in electron_check_text
+    assert "[fallback" in electron_check_text
+    assert "...details" in electron_check_text
     assert "failed without stdout or stderr" in electron_check_text
 
     assert "flashBridgeTimeoutMs" in electron_text

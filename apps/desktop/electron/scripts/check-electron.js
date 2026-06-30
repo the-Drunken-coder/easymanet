@@ -214,7 +214,7 @@ function formatCommandFailure(result, fallback) {
     }
   }
   if (details.length) {
-    return details.join("\n");
+    return [fallback, ...details].join("\n");
   }
   const code = result.status === null || result.status === undefined ? "unknown" : result.status;
   return `${fallback} failed without stdout or stderr (exit code ${code})`;

@@ -52,6 +52,24 @@ def test_parse_args_refuses_same_disk_aliases():
         )
 
 
+def test_parse_args_refuses_conflicting_download_modes(capsys):
+    with pytest.raises(SystemExit):
+        hil_verify.parse_args(
+            [
+                "--config",
+                "examples/three-node-field-mesh.yml",
+                "--gate-node",
+                "gate01",
+                "--point-node",
+                "point01",
+                "--download",
+                "--no-download",
+                "--dry-run",
+            ]
+        )
+    assert "--download and --no-download cannot be used together" in capsys.readouterr().err
+
+
 def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
     args = hil_verify.parse_args(
@@ -97,6 +115,7 @@ def test_role_mismatch_skips_flash(tmp_path, monkeypatch):
             "/dev/disk4",
             "--point-device",
             "/dev/disk5",
+            "--point-ssh-enabled",
             "--allow-flash",
             "--yes",
             "--wait-seconds",
@@ -309,34 +328,24 @@ def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):
     assert Path(payload["support_bundle_path"]).is_file()
 
 
-def test_boot_report_requires_path_when_ssh_is_disabled(tmp_path, monkeypatch):
-    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+def test_real_run_requires_boot_report_when_point_ssh_is_disabled(capsys):
+    with pytest.raises(SystemExit):
+        hil_verify.parse_args(
+            [
+                "--config",
+                "examples/three-node-field-mesh.yml",
+                "--gate-node",
+                "gate01",
+                "--point-node",
+                "point01",
+                "--wait-seconds",
+                "90",
+            ]
+        )
+    assert "--point-boot-report is required when point SSH checks are disabled" in capsys.readouterr().err
 
-    def fake_fetch(host, endpoint, timeout=diagnostics.HTTP_TIMEOUT_SECONDS):
-        if endpoint == "identity":
-            name = "gate01" if host == "10.41.1.1" else "point01"
-            role = "gate" if name == "gate01" else "point"
-            return _api_result(host, endpoint, {"ok": True, "node": {"name": name, "role": role, "ip": host}})
-        if endpoint == "status":
-            return _api_result(host, endpoint, {"ok": True, "support_code": "EM-OK", "mesh": {"neighbor_count": 1}})
-        if endpoint == "neighbors":
-            return _api_result(host, endpoint, {"ok": True, "neighbors": [{"mac": "aa:bb:cc:dd:ee:ff"}]})
-        if endpoint == "topology":
-            return _api_result(
-                host,
-                endpoint,
-                {
-                    "ok": True,
-                    "nodes": [
-                        {"name": "gate01", "status": "online"},
-                        {"name": "point01", "status": "online"},
-                    ],
-                    "links": [{"source": "gate01", "target": "point01", "status": "resolved"}],
-                },
-            )
-        raise AssertionError(endpoint)
 
-    monkeypatch.setattr(hil_verify, "fetch_node_api", fake_fetch)
+def test_ssh_spawn_failure_returns_structured_result():
     args = hil_verify.parse_args(
         [
             "--config",
@@ -345,18 +354,15 @@ def test_boot_report_requires_path_when_ssh_is_disabled(tmp_path, monkeypatch):
             "gate01",
             "--point-node",
             "point01",
-            "--wait-seconds",
-            "90",
+            "--dry-run",
         ]
     )
 
-    payload = hil_verify.run_hil(
-        args,
-        command_runner=lambda command, timeout: subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
-        sleep_fn=lambda seconds: None,
-        now_fn=_now,
-    )
+    def fail_spawn(_command, _timeout):
+        raise FileNotFoundError("ssh")
 
-    assert payload["ok"] is False
-    assert payload["nodes"]["point01"]["boot_report"]["source"] == "not_checked"
-    assert any(check["name"] == "point01 boot report available" and check["ok"] is False for check in payload["checks"])
+    result = hil_verify._ssh_command(args, "10.41.1.1", "true", fail_spawn)
+
+    assert result["ok"] is False
+    assert result["exit_code"] is None
+    assert "FileNotFoundError" in result["error"]

@@ -349,7 +349,7 @@ if [ "$NODE_ROLE" != "gate" ]; then
         fi
     fi
     case " $wan_device $wan_ifname " in
-        *" eth0 "*|*" br-lan "*|*" $EM_AHWLAN_BRIDGE "*)
+        *" eth0 "*|*" br-lan "*|*" $EM_AHWLAN_BRIDGE "*|*" bat0 "*|*" mesh "*|*" wlan0 "*)
             clear_point_wan=1
             ;;
     esac

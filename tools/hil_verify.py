@@ -281,6 +281,9 @@ def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace
     if args.gate_node == args.point_node:
         parser.error("--gate-node and --point-node must be different nodes.")
 
+    if args.download and args.no_download:
+        parser.error("--download and --no-download cannot be used together.")
+
     devices = [device for device in (args.gate_device, args.point_device) if device]
     device_ids = {_device_identity(device) for device in devices}
     if len(device_ids) != len(devices):
@@ -294,6 +297,11 @@ def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--wait-seconds must be between 90 and 120 for real HIL runs.")
     if args.throughput_smoke and not (args.gate_ssh_enabled and args.point_ssh_enabled):
         parser.error("--throughput-smoke requires --gate-ssh-enabled and --point-ssh-enabled.")
+    if not args.dry_run:
+        if not args.gate_ssh_enabled and not args.gate_boot_report:
+            parser.error("--gate-boot-report is required when gate SSH checks are disabled.")
+        if not args.point_ssh_enabled and not args.point_boot_report:
+            parser.error("--point-boot-report is required when point SSH checks are disabled.")
 
 
 def _load_manifest_for_result(
@@ -630,6 +638,15 @@ def _ssh_command(
             "stdout": _limit(exc.stdout or ""),
             "stderr": _limit(exc.stderr or ""),
             "error": "timeout",
+        }
+    except OSError as exc:
+        return {
+            "ok": False,
+            "command": _display_command(command),
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "error": f"{exc.__class__.__name__}: {exc}",
         }
     return {
         "ok": completed.returncode == 0,

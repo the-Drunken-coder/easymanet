@@ -51,8 +51,9 @@ risk.
   management-LAN repair.
 - Fixtures should live in one predictable test fixture directory and represent
   real captured `batctl`, `ip`, `uci`, and status outputs.
-- Until `tools/verify.py openwrt-sim` lands, run the gate directly with:
-  `python -m pytest -q tests/test_firstboot.py tests/test_provision_behavior.py tests/test_led_status.py`.
+- Run with `python tools/verify.py openwrt-sim`. The profile delegates to the
+  targeted pytest selection for first boot, provisioning behavior, and LED/status
+  behavior instead of duplicating harness logic.
 
 ### Artifact Gate
 
@@ -63,9 +64,10 @@ risk.
   or synthetic FAT fixture, and image cache metadata is read-only during state
   checks.
 - This gate should run after image builds and before publishing releases.
-- Until `python tools/verify.py artifact` lands, run the direct command:
-  `python tools/packaging/verify_artifacts.py --artifact dist/release/images/<image>.img.gz --release-manifest dist/release/images/easymanet-image-release.json`.
-  Without those two artifact arguments, the command still runs the source,
+- Run source-level artifact checks with `python tools/verify.py artifact`.
+  When a built image is available, pass the release artifact through the same
+  profile: `python tools/verify.py artifact --artifact dist/release/images/<image>.img.gz --release-manifest dist/release/images/easymanet-image-release.json`.
+  Without those two artifact arguments, the profile still runs the source,
   synthetic boot-payload, and read-only cache fixture checks.
 
 ### Desktop And CLI Workflow Gate
@@ -86,9 +88,9 @@ risk.
   support code, boot-report availability, and optional throughput smoke.
 - Output: a timestamped JSON result plus a redacted support bundle under the
   EasyMANET diagnostics workspace.
-- Practical v1 command: `python tools/hil_verify.py ...`. Until
-  `tools/verify.py` exists on the implementation branch, the future
-  `python tools/verify.py hil` profile should delegate to this command.
+- Practical v1 command: `python tools/verify.py hil ...`. The profile delegates
+  to `tools/hil_verify.py` so hardware behavior stays in one runner while the
+  top-level verification command remains consistent with the other gates.
 
 ## Test Scenarios
 

@@ -593,6 +593,12 @@ def test_provision_rerun_from_wifi_gate_to_point_clears_stale_wan_state(tmp_path
     first = _run_provision(prefix, _wifi_gate_provision_json(), uci_state)
     assert first.returncode == 0, first.stderr + first.stdout
 
+    with uci_state.open("a") as state:
+        state.write("network.wan6=interface\n")
+        state.write("network.wan6.proto='dhcpv6'\n")
+        state.write("network.wan6.device='wan0'\n")
+        state.write("network.wan6.ifname='wan0'\n")
+
     (prefix / "etc" / "easymanet" / "provisioned").unlink()
     second = _run_provision(prefix, _point_provision_json(), uci_state)
     assert second.returncode == 0, second.stderr + second.stdout
@@ -603,10 +609,40 @@ def test_provision_rerun_from_wifi_gate_to_point_clears_stale_wan_state(tmp_path
     assert _uci_get(uci_state, "network.wan.proto", env) == ""
     assert _uci_get(uci_state, "network.wan.device", env) == ""
     assert _uci_get(uci_state, "network.wan.ifname", env) == ""
+    assert _uci_get(uci_state, "network.wan6.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan6.device", env) == ""
+    assert _uci_get(uci_state, "network.wan6.ifname", env) == ""
     assert _uci_get(uci_state, "firewall.allow_ssh_wan.src", env) == ""
     assert _uci_get(uci_state, "firewall.allow_easymanet_api_wan.src", env) == ""
     assert _uci_get(uci_state, "dhcp.ahwlan.ignore", env) == "1"
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
+
+
+@pytest.mark.parametrize("mesh_side_wan", ["br-ahwlan", "bat0", "mesh", "wlan0"])
+def test_provision_point_clears_mesh_side_wan_aliases(tmp_path, mesh_side_wan):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("network.wan=interface\n")
+        state.write("network.wan.proto='dhcp'\n")
+        state.write(f"network.wan.device='{mesh_side_wan}'\n")
+        state.write(f"network.wan.ifname='{mesh_side_wan}'\n")
+        state.write("network.wan6=interface\n")
+        state.write("network.wan6.proto='dhcpv6'\n")
+        state.write(f"network.wan6.device='{mesh_side_wan}'\n")
+        state.write(f"network.wan6.ifname='{mesh_side_wan}'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.wan.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan.device", env) == ""
+    assert _uci_get(uci_state, "network.wan.ifname", env) == ""
+    assert _uci_get(uci_state, "network.wan6.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan6.device", env) == ""
+    assert _uci_get(uci_state, "network.wan6.ifname", env) == ""
 
 
 def test_provision_point_preserves_non_mesh_wan_state(tmp_path):
@@ -618,6 +654,10 @@ def test_provision_point_preserves_non_mesh_wan_state(tmp_path):
         state.write("network.wan.proto='dhcp'\n")
         state.write("network.wan.device='phy1-sta0'\n")
         state.write("network.wan.ifname='phy1-sta0'\n")
+        state.write("network.wan6=interface\n")
+        state.write("network.wan6.proto='dhcpv6'\n")
+        state.write("network.wan6.device='phy1-sta0'\n")
+        state.write("network.wan6.ifname='phy1-sta0'\n")
 
     result = _run_provision(prefix, _point_provision_json(), uci_state)
     assert result.returncode == 0, result.stderr + result.stdout
@@ -626,6 +666,9 @@ def test_provision_point_preserves_non_mesh_wan_state(tmp_path):
     assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
     assert _uci_get(uci_state, "network.wan.device", env) == "phy1-sta0"
     assert _uci_get(uci_state, "network.wan.ifname", env) == "phy1-sta0"
+    assert _uci_get(uci_state, "network.wan6.proto", env) == "dhcpv6"
+    assert _uci_get(uci_state, "network.wan6.device", env) == "phy1-sta0"
+    assert _uci_get(uci_state, "network.wan6.ifname", env) == "phy1-sta0"
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 

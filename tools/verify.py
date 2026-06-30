@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "images" / "openmanet" / "provisioning" / "openwrt-overlay"
+PROFILES = ("fast", "openwrt-sim", "package", "artifact", "hil")
 
 
 @dataclass(frozen=True)
@@ -26,18 +27,37 @@ class Step:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("fast", "package"))
+    parser.add_argument("profile", choices=PROFILES)
+    parser.add_argument(
+        "profile_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments passed to profiles that delegate to a specialized tool.",
+    )
     args = parser.parse_args(argv)
+    profile_args = normalize_profile_args(args.profile_args)
 
     if args.profile == "fast":
-        return run_fast()
+        return run_fast(profile_args)
+    if args.profile == "openwrt-sim":
+        return run_openwrt_sim(profile_args)
     if args.profile == "package":
-        return run_package()
+        return run_package(profile_args)
+    if args.profile == "artifact":
+        return run_artifact(profile_args)
+    if args.profile == "hil":
+        return run_hil(profile_args)
 
     raise AssertionError(f"unhandled profile: {args.profile}")
 
 
-def run_fast() -> int:
+def normalize_profile_args(profile_args: list[str]) -> list[str]:
+    if profile_args and profile_args[0] == "--":
+        return profile_args[1:]
+    return profile_args
+
+
+def run_fast(profile_args: list[str] | None = None) -> int:
+    ensure_no_profile_args("fast", profile_args or [])
     python = verification_python()
     steps = fast_steps(python)
     run_steps(steps)
@@ -45,7 +65,17 @@ def run_fast() -> int:
     return 0
 
 
-def run_package() -> int:
+def run_openwrt_sim(profile_args: list[str] | None = None) -> int:
+    ensure_no_profile_args("openwrt-sim", profile_args or [])
+    python = verification_python()
+    steps = openwrt_sim_steps(python)
+    run_steps(steps)
+    print("Verification profile 'openwrt-sim' passed.")
+    return 0
+
+
+def run_package(profile_args: list[str] | None = None) -> int:
+    ensure_no_profile_args("package", profile_args or [])
     package_python = package_venv_python()
     with tempfile.TemporaryDirectory(prefix="easymanet-verify-package-") as tmp:
         temp_root = Path(tmp)
@@ -55,6 +85,28 @@ def run_package() -> int:
         run_steps(steps)
     print("Verification profile 'package' passed.")
     return 0
+
+
+def run_artifact(profile_args: list[str] | None = None) -> int:
+    python = verification_python()
+    steps = artifact_steps(python, profile_args or [])
+    run_steps(steps)
+    print("Verification profile 'artifact' passed.")
+    return 0
+
+
+def run_hil(profile_args: list[str] | None = None) -> int:
+    python = verification_python()
+    steps = hil_steps(python, profile_args or [])
+    run_steps(steps)
+    print("Verification profile 'hil' passed.")
+    return 0
+
+
+def ensure_no_profile_args(profile: str, profile_args: list[str]) -> None:
+    if profile_args:
+        args = " ".join(profile_args)
+        raise SystemExit(f"Profile '{profile}' does not accept extra arguments: {args}")
 
 
 def verification_python() -> str:
@@ -99,6 +151,23 @@ def fast_steps(python: str) -> list[Step]:
     return steps
 
 
+def openwrt_sim_steps(python: str) -> list[Step]:
+    return [
+        Step(
+            "OpenWrt simulation tests",
+            [
+                python,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_firstboot.py",
+                "tests/test_provision_behavior.py",
+                "tests/test_led_status.py",
+            ],
+        )
+    ]
+
+
 def package_steps(package_python: str, runner_venv: Path, release_smoke_root: Path) -> list[Step]:
     runner_python = venv_python(runner_venv)
     return [
@@ -129,6 +198,24 @@ def package_steps(package_python: str, runner_venv: Path, release_smoke_root: Pa
                 str(release_smoke_root),
             ],
         ),
+    ]
+
+
+def artifact_steps(python: str, profile_args: list[str]) -> list[Step]:
+    return [
+        Step(
+            "Artifact verification",
+            [python, "tools/packaging/verify_artifacts.py", *profile_args],
+        )
+    ]
+
+
+def hil_steps(python: str, profile_args: list[str]) -> list[Step]:
+    return [
+        Step(
+            "Hardware-in-the-loop verification",
+            [python, "tools/hil_verify.py", *profile_args],
+        )
     ]
 
 

@@ -26,23 +26,26 @@ def write_image(path: Path, payload: bytes = b"firmware") -> None:
         handle.write(payload)
 
 
+def release_manifest_payload(verifier, artifact: Path) -> dict:
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    return {
+        "schema_version": verifier.IMAGE_RELEASE_SCHEMA_VERSION,
+        "product": verifier.IMAGE_RELEASE_PRODUCT,
+        "target": verifier.TARGET,
+        "artifact": {
+            "filename": artifact.name,
+            "size_bytes": artifact.stat().st_size,
+            "sha256": digest,
+        },
+    }
+
+
 def test_release_manifest_matches_artifact(tmp_path):
     verifier = load_verifier()
     artifact = tmp_path / "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
     write_image(artifact)
-    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     manifest = tmp_path / "easymanet-image-release.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "artifact": {
-                    "filename": artifact.name,
-                    "size_bytes": artifact.stat().st_size,
-                    "sha256": digest,
-                }
-            }
-        )
-    )
+    manifest.write_text(json.dumps(release_manifest_payload(verifier, artifact)))
 
     detail = verifier.verify_release_manifest(artifact, manifest)
 
@@ -54,17 +57,11 @@ def test_release_manifest_rejects_artifact_mismatch(tmp_path):
     artifact = tmp_path / "image.img.gz"
     write_image(artifact)
     manifest = tmp_path / "easymanet-image-release.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "artifact": {
-                    "filename": "other.img.gz",
-                    "size_bytes": artifact.stat().st_size + 1,
-                    "sha256": "0" * 64,
-                }
-            }
-        )
-    )
+    payload = release_manifest_payload(verifier, artifact)
+    payload["artifact"]["filename"] = "other.img.gz"
+    payload["artifact"]["size_bytes"] = artifact.stat().st_size + 1
+    payload["artifact"]["sha256"] = "0" * 64
+    manifest.write_text(json.dumps(payload))
 
     with pytest.raises(verifier.ArtifactVerificationError) as exc_info:
         verifier.verify_release_manifest(artifact, manifest)
@@ -72,6 +69,25 @@ def test_release_manifest_rejects_artifact_mismatch(tmp_path):
     assert "filename expected" in str(exc_info.value)
     assert "size_bytes expected" in str(exc_info.value)
     assert "sha256 expected" in str(exc_info.value)
+
+
+def test_release_manifest_rejects_metadata_mismatch(tmp_path):
+    verifier = load_verifier()
+    artifact = tmp_path / "image.img.gz"
+    write_image(artifact)
+    manifest = tmp_path / "easymanet-image-release.json"
+    payload = release_manifest_payload(verifier, artifact)
+    payload["schema_version"] = 1
+    payload["product"] = "other-product"
+    payload["target"] = "other-target"
+    manifest.write_text(json.dumps(payload))
+
+    with pytest.raises(verifier.ArtifactVerificationError) as exc_info:
+        verifier.verify_release_manifest(artifact, manifest)
+
+    assert "schema_version expected" in str(exc_info.value)
+    assert "product expected" in str(exc_info.value)
+    assert "target expected" in str(exc_info.value)
 
 
 def test_required_overlay_files_and_executable_modes_detect_drift(tmp_path):

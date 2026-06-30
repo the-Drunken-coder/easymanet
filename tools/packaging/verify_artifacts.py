@@ -38,6 +38,8 @@ from easymanet._download_integrity import (
 from easymanet.inject import stage_boot_payload
 from easymanet.manifest import load_manifest
 from easymanet_desktop.payloads import state_payload
+from easymanet_image.release import IMAGE_RELEASE_SCHEMA_VERSION
+from easymanet_image.release import IMAGE_RELEASE_PRODUCT
 
 TARGET = "rpi4-mm6108-spi"
 DEFAULT_FLEET = ROOT / "examples" / "three-node-field-mesh.yml"
@@ -120,7 +122,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         checks.append(
             (
                 "release manifest",
-                lambda: verify_release_manifest(args.artifact, args.release_manifest),
+                lambda: verify_release_manifest(
+                    args.artifact,
+                    args.release_manifest,
+                    target=args.target,
+                ),
             )
         )
     else:
@@ -168,6 +174,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_NODE,
         help="Node in --fleet used for the synthetic boot-payload fixture.",
     )
+    parser.add_argument(
+        "--target",
+        default=TARGET,
+        help="Image target expected in the release manifest.",
+    )
     return parser.parse_args(argv)
 
 
@@ -213,7 +224,12 @@ def verify_overlay_executable_modes(overlay: Path = OVERLAY) -> str:
     return f"{len(EXECUTABLE_OVERLAY_FILES)} executable modes present"
 
 
-def verify_release_manifest(artifact: Path, release_manifest: Path) -> str:
+def verify_release_manifest(
+    artifact: Path,
+    release_manifest: Path,
+    *,
+    target: str = TARGET,
+) -> str:
     artifact = artifact.expanduser().resolve()
     release_manifest = release_manifest.expanduser().resolve()
     if not artifact.is_file():
@@ -236,6 +252,17 @@ def verify_release_manifest(artifact: Path, release_manifest: Path) -> str:
     expected_size = artifact.stat().st_size
     expected_sha = image_sha256(artifact)
     errors = []
+    if payload.get("schema_version") != IMAGE_RELEASE_SCHEMA_VERSION:
+        errors.append(
+            "schema_version expected "
+            f"{IMAGE_RELEASE_SCHEMA_VERSION}, got {payload.get('schema_version')!r}"
+        )
+    if payload.get("product") != IMAGE_RELEASE_PRODUCT:
+        errors.append(
+            f"product expected {IMAGE_RELEASE_PRODUCT!r}, got {payload.get('product')!r}"
+        )
+    if payload.get("target") != target:
+        errors.append(f"target expected {target!r}, got {payload.get('target')!r}")
     if artifact_entry.get("filename") != artifact.name:
         errors.append(
             f"filename expected {artifact.name!r}, got {artifact_entry.get('filename')!r}"
@@ -254,7 +281,7 @@ def verify_release_manifest(artifact: Path, release_manifest: Path) -> str:
             errors.append(f"sha256 expected {expected_sha}, got {actual_sha}")
     if errors:
         raise ArtifactVerificationError("; ".join(errors))
-    return f"{artifact.name} matches filename, size, and SHA-256"
+    return f"{artifact.name} matches manifest metadata, size, and SHA-256"
 
 
 def verify_boot_payload_fixture(fleet: Path = DEFAULT_FLEET, node: str = DEFAULT_NODE) -> str:

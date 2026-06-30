@@ -466,7 +466,8 @@ def _run_throughput_smoke(
     server = _ssh_command(
         args,
         point.host,
-        "command -v iperf3 >/dev/null && nohup iperf3 -s -1 >/tmp/easymanet-hil-iperf3.log 2>&1 &",
+        "command -v iperf3 >/dev/null || exit 127; "
+        "nohup iperf3 -s -1 >/tmp/easymanet-hil-iperf3.log 2>&1 &",
         command_runner,
     )
     if not server["ok"]:
@@ -625,6 +626,10 @@ def _ssh_command(
         f"ConnectTimeout={args.ssh_timeout_seconds}",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
         f"{args.ssh_user}@{host}",
         remote_command,
     ]

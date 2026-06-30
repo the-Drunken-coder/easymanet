@@ -263,8 +263,15 @@ def verify_release_manifest(
         errors.append(
             f"product expected {IMAGE_RELEASE_PRODUCT!r}, got {payload.get('product')!r}"
         )
-    if payload.get("target") != target:
-        errors.append(f"target expected {target!r}, got {payload.get('target')!r}")
+    manifest_targets = [
+        value
+        for value in (payload.get("target"), artifact_entry.get("target"))
+        if value is not None
+    ]
+    if not manifest_targets:
+        errors.append(f"target expected {target!r}, got None")
+    elif any(value != target for value in manifest_targets):
+        errors.append(f"target expected {target!r}, got {manifest_targets!r}")
     if artifact_entry.get("filename") != artifact.name:
         errors.append(
             f"filename expected {artifact.name!r}, got {artifact_entry.get('filename')!r}"

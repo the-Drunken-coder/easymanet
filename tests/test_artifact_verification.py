@@ -33,6 +33,7 @@ def release_manifest_payload(verifier, artifact: Path) -> dict:
         "product": verifier.IMAGE_RELEASE_PRODUCT,
         "target": verifier.TARGET,
         "artifact": {
+            "target": verifier.TARGET,
             "filename": artifact.name,
             "size_bytes": artifact.stat().st_size,
             "sha256": digest,
@@ -87,6 +88,21 @@ def test_release_manifest_rejects_metadata_mismatch(tmp_path):
 
     assert "schema_version expected" in str(exc_info.value)
     assert "product expected" in str(exc_info.value)
+    assert "target expected" in str(exc_info.value)
+
+
+def test_release_manifest_rejects_nested_target_mismatch(tmp_path):
+    verifier = load_verifier()
+    artifact = tmp_path / "image.img.gz"
+    write_image(artifact)
+    manifest = tmp_path / "easymanet-image-release.json"
+    payload = release_manifest_payload(verifier, artifact)
+    payload["artifact"]["target"] = "other-target"
+    manifest.write_text(json.dumps(payload))
+
+    with pytest.raises(verifier.ArtifactVerificationError) as exc_info:
+        verifier.verify_release_manifest(artifact, manifest)
+
     assert "target expected" in str(exc_info.value)
 
 

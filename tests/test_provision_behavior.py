@@ -634,7 +634,10 @@ def test_provision_rerun_from_wifi_gate_to_point_clears_stale_wan_state(tmp_path
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 
-@pytest.mark.parametrize("mesh_side_wan", ["br-ahwlan", "bat0", "mesh", "wlan0"])
+@pytest.mark.parametrize(
+    "mesh_side_wan",
+    ["eth0", "br-lan", "br-ahwlan", "bat0", "mesh", "wlan0"],
+)
 def test_provision_point_clears_mesh_side_wan_aliases(tmp_path, mesh_side_wan):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
@@ -663,7 +666,7 @@ def test_provision_point_clears_mesh_side_wan_aliases(tmp_path, mesh_side_wan):
 
 @pytest.mark.parametrize(
     "mesh_side_wan6",
-    ["eth0", "br-ahwlan", "bat0", "mesh", "wlan0"],
+    ["eth0", "br-lan", "br-ahwlan", "bat0", "mesh", "wlan0"],
 )
 def test_provision_point_clears_mesh_side_wan6_without_wan(tmp_path, mesh_side_wan6):
     prefix = tmp_path / "root"

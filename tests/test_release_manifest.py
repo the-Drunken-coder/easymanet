@@ -24,6 +24,7 @@ def test_build_release_manifest_records_artifact_and_provenance(tmp_path):
     assert manifest["target"] == "rpi4-mm6108-spi"
     assert manifest["openmanet_version"] == "1.6.5"
     assert manifest["easymanet_version"] == __version__
+    assert manifest["artifact"]["target"] == "rpi4-mm6108-spi"
     assert manifest["artifact"]["filename"] == artifact.name
     assert manifest["artifact"]["sha256"] == hashlib.sha256(b"firmware").hexdigest()
     assert manifest["provenance"]["monorepo_source"] == "abc123"

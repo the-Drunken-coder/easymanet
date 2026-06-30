@@ -70,6 +70,60 @@ def test_parse_args_refuses_conflicting_download_modes(capsys):
     assert "--download and --no-download cannot be used together" in capsys.readouterr().err
 
 
+def test_parse_args_refuses_wait_outside_hil_window(capsys):
+    with pytest.raises(SystemExit):
+        hil_verify.parse_args(
+            [
+                "--config",
+                "examples/three-node-field-mesh.yml",
+                "--gate-node",
+                "gate01",
+                "--point-node",
+                "point01",
+                "--wait-seconds",
+                "30",
+            ]
+        )
+    assert "--wait-seconds must be between 90 and 120" in capsys.readouterr().err
+
+
+def test_parse_args_requires_gate_boot_report_when_gate_ssh_is_disabled(capsys):
+    with pytest.raises(SystemExit):
+        hil_verify.parse_args(
+            [
+                "--config",
+                "examples/three-node-field-mesh.yml",
+                "--gate-node",
+                "gate01",
+                "--point-node",
+                "point01",
+                "--no-gate-ssh-enabled",
+                "--point-boot-report",
+                "/tmp/point-boot",
+                "--wait-seconds",
+                "90",
+            ]
+        )
+    assert "--gate-boot-report is required when gate SSH checks are disabled" in capsys.readouterr().err
+
+
+def test_parse_args_requires_ssh_for_throughput_smoke(capsys):
+    with pytest.raises(SystemExit):
+        hil_verify.parse_args(
+            [
+                "--config",
+                "examples/three-node-field-mesh.yml",
+                "--gate-node",
+                "gate01",
+                "--point-node",
+                "point01",
+                "--throughput-smoke",
+                "--dry-run",
+            ]
+        )
+    assert "--throughput-smoke requires --gate-ssh-enabled and --point-ssh-enabled" in capsys.readouterr().err
+
+
 def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
     args = hil_verify.parse_args(
@@ -366,3 +420,66 @@ def test_ssh_spawn_failure_returns_structured_result():
     assert result["ok"] is False
     assert result["exit_code"] is None
     assert "FileNotFoundError" in result["error"]
+
+
+def test_ssh_command_uses_ephemeral_known_hosts():
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--dry-run",
+        ]
+    )
+    commands = []
+
+    def fake_command(command, timeout):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    result = hil_verify._ssh_command(args, "10.41.1.1", "true", fake_command)
+
+    assert result["ok"] is True
+    assert "UserKnownHostsFile=/dev/null" in commands[0]
+    assert "GlobalKnownHostsFile=/dev/null" in commands[0]
+
+
+def test_throughput_smoke_fails_when_iperf_server_is_missing():
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--dry-run",
+        ]
+    )
+    gate = hil_verify.NodeSpec("gate01", "gate", None, "10.41.1.1", "", True, "")
+    point = hil_verify.NodeSpec("point01", "point", None, "10.41.2.1", "", True, "")
+    commands = []
+    checks = []
+
+    def fake_command(command, timeout):
+        commands.append(command)
+        if "command -v iperf3" in command[-1]:
+            return subprocess.CompletedProcess(command, 127, stdout="", stderr="")
+        raise AssertionError("client should not run when server precheck fails")
+
+    result = hil_verify._run_throughput_smoke(
+        args,
+        gate,
+        point,
+        fake_command,
+        lambda _seconds: None,
+        checks,
+    )
+
+    assert result["ok"] is False
+    assert result["server"]["exit_code"] == 127
+    assert "|| exit 127; nohup iperf3" in commands[0][-1]
+    assert checks == [{"name": "throughput smoke", "ok": False, "detail": "exit=127"}]

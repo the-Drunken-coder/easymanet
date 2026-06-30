@@ -51,6 +51,8 @@ risk.
   management-LAN repair.
 - Fixtures should live in one predictable test fixture directory and represent
   real captured `batctl`, `ip`, `uci`, and status outputs.
+- Until `tools/verify.py openwrt-sim` lands, run the gate directly with:
+  `python -m pytest -q tests/test_firstboot.py tests/test_provision_behavior.py tests/test_led_status.py`.
 
 ### Artifact Gate
 

@@ -1831,12 +1831,16 @@ def test_electron_shell_files_exist():
 
 def test_electron_check_formats_empty_bridge_failure(tmp_path):
     root = Path(__file__).resolve().parents[1]
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for the Electron check smoke test")
+
     fake_python = tmp_path / "python"
     fake_python.write_text("#!/bin/sh\nexit 42\n")
     fake_python.chmod(0o755)
 
     result = subprocess.run(
-        ["node", str(root / "apps" / "desktop" / "electron" / "scripts" / "check-electron.js")],
+        [node, str(root / "apps" / "desktop" / "electron" / "scripts" / "check-electron.js")],
         env={**os.environ, "EASYMANET_PYTHON": str(fake_python)},
         capture_output=True,
         text=True,

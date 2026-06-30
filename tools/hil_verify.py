@@ -39,7 +39,7 @@ from easymanet.flash import FlashOptions, run_flash_workflow  # noqa: E402
 from easymanet.manifest import Manifest, ManifestError, load_manifest  # noqa: E402
 from easymanet.provision import ResolvedNode, resolve_node_model  # noqa: E402
 from easymanet.support_bundle import create_support_bundle  # noqa: E402
-from easymanet.validate import validate  # noqa: E402
+from easymanet.validate import validate, validate_ip  # noqa: E402
 from easymanet.workspace import diagnostics_dir, ensure_workspace, resolve_fleet_config  # noqa: E402
 
 
@@ -347,6 +347,11 @@ def _node_spec(
     _add_check(checks, f"{name} probe address resolved", host_ok, host or "missing IP")
     if not host_ok:
         errors.append(f"{name} needs a fleet IP or explicit --{expected_role}-ip.")
+        return None
+    host_error = validate_ip(host)
+    _add_check(checks, f"{name} probe address is IPv4", host_error is None, host_error or host)
+    if host_error:
+        errors.append(f"{name} probe address is invalid: {host_error}")
         return None
 
     return NodeSpec(

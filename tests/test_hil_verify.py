@@ -112,6 +112,46 @@ def test_role_mismatch_skips_flash(tmp_path, monkeypatch):
     assert any("gate01 must be a point node" in error for error in payload["errors"])
 
 
+def test_unsafe_ip_override_stops_before_throughput_command(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("invalid probe hosts must stop before API probes")
+
+    def fail_command(*_args, **_kwargs):
+        raise AssertionError("invalid probe hosts must stop before SSH commands")
+
+    monkeypatch.setattr(hil_verify, "fetch_node_api", fail_fetch)
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--point-ip",
+            "10.41.1.2; reboot",
+            "--point-ssh-enabled",
+            "--throughput-smoke",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(
+        args,
+        command_runner=fail_command,
+        sleep_fn=lambda seconds: None,
+        now_fn=_now,
+    )
+
+    assert payload["ok"] is False
+    assert payload["flash"] == {}
+    assert any("point01 probe address is invalid" in error for error in payload["errors"])
+    assert any(check["name"] == "point01 probe address is IPv4" and not check["ok"] for check in payload["checks"])
+
+
 def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
     events = []

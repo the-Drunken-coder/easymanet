@@ -53,6 +53,40 @@ isolated temporary venv:
 .codex-venv/bin/python tools/release_smoke.py --skip-electron
 ```
 
+For firmware, flashing, provisioning, radio, or release-candidate image changes,
+run the manual hardware-in-the-loop gate against a real gate/point pair after
+the non-hardware checks pass. This is a scheduled, nightly, or release-only gate,
+not a per-PR requirement:
+
+```bash
+.codex-venv/bin/python tools/hil_verify.py \
+  --config examples/three-node-field-mesh.yml \
+  --gate-node gate01 \
+  --point-node point01 \
+  --gate-device /dev/disk4 \
+  --point-device /dev/disk5 \
+  --base-image dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz \
+  --image-sha256 <sha256> \
+  --allow-flash \
+  --yes
+```
+
+To reuse already-flashed nodes, omit `--gate-device` and `--point-device`; pass
+`--gate-ip` or `--point-ip` only when the fleet IPs are not the active probe
+addresses. Flashing never auto-selects disks and will not write media unless a
+device, `--allow-flash`, and `--yes` are all present. The runner waits 90-120
+seconds, probes the node API, checks SSH where enabled, verifies mesh visibility
+and support codes, checks boot-report availability, optionally runs iperf3
+throughput smoke, and writes both JSON evidence and a redacted support bundle to
+the shared `Diagnostics/` workspace.
+
+Point nodes normally have SSH disabled. For a release HIL run that keeps point
+SSH disabled, pass `--point-boot-report /path/to/boot` or a
+`boot-report-latest` directory so boot-report availability can still be proven.
+
+When the standard verification entrypoint lands, `python tools/verify.py hil`
+should delegate to this command rather than duplicating hardware logic.
+
 ## Build Artifacts
 
 ```bash

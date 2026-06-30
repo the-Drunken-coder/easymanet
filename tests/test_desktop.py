@@ -1780,7 +1780,10 @@ def test_electron_shell_files_exist():
     validation_text = (electron / "validation.js").read_text()
     assert "Boot report source path must not contain traversal segments" in validation_text
     assert "hasTraversalSegment(source)" in validation_text
-    assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
+    electron_check_text = (electron / "scripts" / "check-electron.js").read_text()
+    assert "resolveConfigPath(\"field\"" in electron_check_text
+    assert "formatCommandFailure" in electron_check_text
+    assert "failed without stdout or stderr" in electron_check_text
 
     assert "flashBridgeTimeoutMs" in electron_text
     assert "runBridgeStreaming" in electron_text

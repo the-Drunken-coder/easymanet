@@ -242,6 +242,24 @@ on `flash` and `image build`.
 | `easymanet-desktop serve` | Run the browser-served fallback console |
 | `easymanet-publish export` | Generate local public product surfaces without setting up subrepos |
 
+## Developer Verification
+
+Run these from the repo root before handing off a change:
+
+```bash
+python tools/verify.py fast
+python tools/verify.py package
+```
+
+`fast` runs the normal local gate: Python tests, OpenWrt overlay shell syntax,
+Electron shell check, overlay packaging, and `git diff --check`. Set
+`EASYMANET_VERIFY_PYTHON=/path/to/venv/bin/python` when you want the Python
+checks and Electron bridge smoke to use a specific development venv.
+
+`package` builds and smokes the installed wheel through `tools/release_smoke.py`
+inside clean temporary virtual environments, with fresh build tooling installed
+so it does not depend on a host Python with `setuptools` already available.
+
 ## Architecture
 
 ```text

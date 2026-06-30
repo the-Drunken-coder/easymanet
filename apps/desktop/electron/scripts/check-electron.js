@@ -42,7 +42,7 @@ for (const file of files.filter((candidate) => candidate.endsWith(".js"))) {
     encoding: "utf8",
   });
   if (syntax.status !== 0) {
-    console.error(syntax.stderr || syntax.stdout || `Syntax check failed for ${file}`);
+    console.error(formatCommandFailure(syntax, `Syntax check failed for ${file}`));
     process.exit(syntax.status || 1);
   }
 }
@@ -64,7 +64,12 @@ const bridge = spawnBridge(["state"]);
 
 if (bridge.status !== 0) {
   cleanupWorkspace();
-  console.error(bridge.stderr || bridge.stdout);
+  console.error(
+    formatCommandFailure(
+      bridge,
+      `EasyMANET bridge check failed: ${python} -m easymanet_desktop.bridge state`,
+    ),
+  );
   process.exit(bridge.status || 1);
 }
 
@@ -115,7 +120,7 @@ resolveConfigPath("../field", { runBridge: runBridgeJson, homeDir: () => os.home
   })
   .catch((error) => {
     cleanupWorkspace();
-    console.error(error.message);
+    console.error(error && error.message ? error.message : String(error));
     process.exit(1);
   });
 
@@ -130,7 +135,15 @@ function spawnBridge(args) {
 function runBridgeJson(args) {
   const result = spawnBridge(args);
   if (result.status !== 0) {
-    return { ok: false, errors: [result.stderr || result.stdout || `bridge exited ${result.status}`] };
+    return {
+      ok: false,
+      errors: [
+        formatCommandFailure(
+          result,
+          `EasyMANET bridge command failed: ${python} -m easymanet_desktop.bridge ${args.join(" ")}`,
+        ),
+      ],
+    };
   }
   try {
     return JSON.parse(result.stdout);
@@ -187,4 +200,22 @@ function venvPython(venvRoot) {
   const binDir = process.platform === "win32" ? "Scripts" : "bin";
   const exe = process.platform === "win32" ? "python.exe" : "python";
   return path.join(venvRoot, binDir, exe);
+}
+
+function formatCommandFailure(result, fallback) {
+  const details = [];
+  if (result.error && result.error.message) {
+    details.push(result.error.message);
+  }
+  for (const stream of [result.stderr, result.stdout]) {
+    const text = String(stream || "").trim();
+    if (text) {
+      details.push(text);
+    }
+  }
+  if (details.length) {
+    return details.join("\n");
+  }
+  const code = result.status === null || result.status === undefined ? "unknown" : result.status;
+  return `${fallback} failed without stdout or stderr (exit code ${code})`;
 }

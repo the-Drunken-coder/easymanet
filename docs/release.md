@@ -22,36 +22,20 @@ tooling as one coordinated product.
 Run these from the repo root:
 
 ```bash
-EASYMANET_WORKSPACE=/tmp/easymanet-release-tests \
-  COVERAGE_FILE=/tmp/easymanet-release.coverage \
-  .codex-venv/bin/python -m pytest -q \
-  --cov=easymanet --cov-report=term-missing --cov-fail-under=50
-
-npm --prefix apps/desktop/electron ci
-npm --prefix apps/desktop/electron run check
+python tools/verify.py fast
+python tools/verify.py package
 
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 \
   .github/workflows/*.yml \
   product_repos/templates/*/.github/workflows/*.yml
-
-git diff --check
 ```
 
-Run the installed-wheel smoke. This builds a wheel, installs it into a
-temporary venv, validates the sample fleet through the installed `easymanet`
-command, verifies removed import paths stay removed, and runs the Electron
-smoke against that installed Python package:
-
-```bash
-.codex-venv/bin/python tools/release_smoke.py
-```
-
-For a faster local packaging check that skips Electron but still uses an
-isolated temporary venv:
-
-```bash
-.codex-venv/bin/python tools/release_smoke.py --skip-electron
-```
+`fast` runs the Python tests, overlay shell syntax, Electron shell check,
+overlay packaging check, and whitespace diff check. `package` builds a wheel,
+installs it into a temporary venv, validates the sample fleet through the
+installed `easymanet` command, verifies removed import paths stay removed, and
+uses clean temporary Python environments so host packaging state does not leak
+into the release check.
 
 ## Build Artifacts
 

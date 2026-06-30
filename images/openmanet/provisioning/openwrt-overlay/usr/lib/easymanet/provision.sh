@@ -340,8 +340,23 @@ uci_set network."$EM_AHWLAN_IFACE".ipaddr="$NODE_IP"
 uci_set network."$EM_AHWLAN_IFACE".netmask="$EM_MESH_NETMASK"
 uci_set network."$EM_AHWLAN_IFACE".dns="$EM_UPLINK_DNS"
 if [ "$NODE_ROLE" != "gate" ]; then
-    uci -q delete network.wan 2>/dev/null || true
-    uci -q delete network.wan6 2>/dev/null || true
+    wan_device="$(uci -q get network.wan.device || true)"
+    wan_ifname="$(uci -q get network.wan.ifname || true)"
+    clear_point_wan=0
+    if [ -z "$wan_device$wan_ifname" ]; then
+        if uci -q get network.wan.proto >/dev/null 2>&1; then
+            clear_point_wan=1
+        fi
+    fi
+    case " $wan_device $wan_ifname " in
+        *" eth0 "*|*" br-lan "*|*" $EM_AHWLAN_BRIDGE "*)
+            clear_point_wan=1
+            ;;
+    esac
+    if [ "$clear_point_wan" -eq 1 ]; then
+        uci -q delete network.wan 2>/dev/null || true
+        uci -q delete network.wan6 2>/dev/null || true
+    fi
 fi
 uci_commit network
 

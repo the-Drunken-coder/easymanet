@@ -609,6 +609,26 @@ def test_provision_rerun_from_wifi_gate_to_point_clears_stale_wan_state(tmp_path
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 
+def test_provision_point_preserves_non_mesh_wan_state(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("network.wan=interface\n")
+        state.write("network.wan.proto='dhcp'\n")
+        state.write("network.wan.device='phy1-sta0'\n")
+        state.write("network.wan.ifname='phy1-sta0'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == "phy1-sta0"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "phy1-sta0"
+    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
+
+
 def test_provision_point_exposes_topology_api_only_on_mesh_ip(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"

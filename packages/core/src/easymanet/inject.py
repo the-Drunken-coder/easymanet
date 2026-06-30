@@ -90,6 +90,11 @@ def stage_boot_payload(
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / "provision.json"
     dest_path.write_text(provision_json)
+    try:
+        dest_path.chmod(0o600)
+    except OSError:
+        # FAT/exFAT boot media may not honor POSIX permissions.
+        pass
     results = [
         ("/boot/easymanet/provision.json", True),
         ("Base image must already include EasyMANET first-boot hooks", True),

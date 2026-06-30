@@ -90,6 +90,19 @@ def test_release_manifest_rejects_metadata_mismatch(tmp_path):
     assert "target expected" in str(exc_info.value)
 
 
+def test_release_manifest_rejects_non_object_payload(tmp_path):
+    verifier = load_verifier()
+    artifact = tmp_path / "image.img.gz"
+    write_image(artifact)
+    manifest = tmp_path / "easymanet-image-release.json"
+    manifest.write_text(json.dumps([]))
+
+    with pytest.raises(verifier.ArtifactVerificationError) as exc_info:
+        verifier.verify_release_manifest(artifact, manifest)
+
+    assert "release manifest must be a JSON object" in str(exc_info.value)
+
+
 def test_required_overlay_files_and_executable_modes_detect_drift(tmp_path):
     verifier = load_verifier()
     overlay = tmp_path / "overlay"

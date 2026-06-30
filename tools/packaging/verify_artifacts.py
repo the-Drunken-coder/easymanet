@@ -245,6 +245,8 @@ def verify_release_manifest(
         payload = json.loads(release_manifest.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise ArtifactVerificationError(f"could not read release manifest: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ArtifactVerificationError("release manifest must be a JSON object")
     artifact_entry = payload.get("artifact")
     if not isinstance(artifact_entry, dict):
         raise ArtifactVerificationError("release manifest artifact field must be an object")
@@ -300,6 +302,11 @@ def verify_boot_payload_fixture(fleet: Path = DEFAULT_FLEET, node: str = DEFAULT
         if not provision_path.is_file():
             raise ArtifactVerificationError(
                 "boot payload did not write easymanet/provision.json"
+            )
+        provision_mode = stat.S_IMODE(provision_path.stat().st_mode)
+        if provision_mode != 0o600:
+            raise ArtifactVerificationError(
+                f"boot payload provision.json mode expected 0600, got {provision_mode:04o}"
             )
         try:
             provision = json.loads(provision_path.read_text())

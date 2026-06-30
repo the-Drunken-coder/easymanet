@@ -86,6 +86,9 @@ risk.
   support code, boot-report availability, and optional throughput smoke.
 - Output: a timestamped JSON result plus a redacted support bundle under the
   EasyMANET diagnostics workspace.
+- Practical v1 command: `python tools/hil_verify.py ...`. Until
+  `tools/verify.py` exists on the implementation branch, the future
+  `python tools/verify.py hil` profile should delegate to this command.
 
 ## Test Scenarios
 

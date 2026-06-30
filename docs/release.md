@@ -77,6 +77,10 @@ IMAGE=dist/release/images/openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.im
 easymanet image manifest \
   --image "$IMAGE" \
   --output-dir dist/release/images
+
+.codex-venv/bin/python tools/packaging/verify_artifacts.py \
+  --artifact "$IMAGE" \
+  --release-manifest dist/release/images/easymanet-image-release.json
 ```
 
 ## Image Trust And Channels

@@ -61,6 +61,10 @@ risk.
   or synthetic FAT fixture, and image cache metadata is read-only during state
   checks.
 - This gate should run after image builds and before publishing releases.
+- Until `python tools/verify.py artifact` lands, run the direct command:
+  `python tools/packaging/verify_artifacts.py --artifact dist/release/images/<image>.img.gz --release-manifest dist/release/images/easymanet-image-release.json`.
+  Without those two artifact arguments, the command still runs the source,
+  synthetic boot-payload, and read-only cache fixture checks.
 
 ### Desktop And CLI Workflow Gate
 

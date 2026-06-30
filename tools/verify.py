@@ -117,11 +117,14 @@ def package_steps(package_python: str, runner_venv: Path, release_smoke_root: Pa
             ],
         ),
         Step(
+            "Install Electron dependencies",
+            ["npm", "--prefix", "apps/desktop/electron", "ci"],
+        ),
+        Step(
             "Installed-wheel smoke",
             [
                 str(runner_python),
                 "tools/release_smoke.py",
-                "--skip-electron",
                 "--temp-root",
                 str(release_smoke_root),
             ],

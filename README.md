@@ -256,9 +256,11 @@ Electron shell check, overlay packaging, and `git diff --check`. Set
 `EASYMANET_VERIFY_PYTHON=/path/to/venv/bin/python` when you want the Python
 checks and Electron bridge smoke to use a specific development venv.
 
-`package` builds and smokes the installed wheel through `tools/release_smoke.py`
-inside clean temporary virtual environments, with fresh build tooling installed
-so it does not depend on a host Python with `setuptools` already available.
+`package` installs Electron dependencies with `npm ci`, then builds and smokes
+the installed wheel through `tools/release_smoke.py`, including the installed
+wheel Electron smoke. It uses clean temporary virtual environments with fresh
+build tooling so it does not depend on a host Python with `setuptools` already
+available.
 
 ## Architecture
 

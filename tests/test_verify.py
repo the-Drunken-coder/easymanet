@@ -66,6 +66,8 @@ def test_package_profile_bootstraps_release_smoke_in_temp_venv(monkeypatch):
         "setuptools>=68",
         "wheel",
     ]
-    assert commands[2][0] == runner_python
-    assert commands[2][1:3] == ["tools/release_smoke.py", "--skip-electron"]
-    assert "--temp-root" in commands[2]
+    assert commands[2] == ["npm", "--prefix", "apps/desktop/electron", "ci"]
+    assert commands[3][0] == runner_python
+    assert commands[3][1] == "tools/release_smoke.py"
+    assert "--skip-electron" not in commands[3]
+    assert "--temp-root" in commands[3]

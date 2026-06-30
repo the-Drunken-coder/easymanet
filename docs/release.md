@@ -31,9 +31,10 @@ go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 \
 ```
 
 `fast` runs the Python tests, overlay shell syntax, Electron shell check,
-overlay packaging check, and whitespace diff check. `package` builds a wheel,
-installs it into a temporary venv, validates the sample fleet through the
-installed `easymanet` command, verifies removed import paths stay removed, and
+overlay packaging check, and whitespace diff check. `package` installs Electron
+dependencies with `npm ci`, builds a wheel, installs it into a temporary venv,
+validates the sample fleet through the installed `easymanet` command, verifies
+removed import paths stay removed, runs the installed-wheel Electron smoke, and
 uses clean temporary Python environments so host packaging state does not leak
 into the release check.
 

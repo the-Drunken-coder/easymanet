@@ -75,10 +75,12 @@ To reuse already-flashed nodes, omit `--gate-device` and `--point-device`; pass
 `--gate-ip` or `--point-ip` only when the fleet IPs are not the active probe
 addresses. Flashing never auto-selects disks and will not write media unless a
 device, `--allow-flash`, and `--yes` are all present. The runner waits 90-120
-seconds, probes the node API, checks SSH where enabled, verifies mesh visibility
-and support codes, checks boot-report availability, optionally runs iperf3
-throughput smoke, and writes both JSON evidence and a redacted support bundle to
-the shared `Diagnostics/` workspace.
+seconds after the operator confirms that flashed media is inserted and the nodes
+are booting, probes the node API, checks SSH where enabled, verifies mesh
+visibility and support codes, checks boot-report availability, optionally runs
+iperf3 throughput smoke, and writes both JSON evidence and a redacted support
+bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt` only for
+lab fixtures where flashed media is automatically booted before probing.
 
 Point nodes normally have SSH disabled. For a release HIL run that keeps point
 SSH disabled, pass `--point-boot-report /path/to/boot` or a

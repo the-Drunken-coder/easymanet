@@ -55,6 +55,7 @@ MAX_CAPTURE_CHARS = 4000
 CommandRunner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
 SleepFn = Callable[[int], None]
 NowFn = Callable[[], datetime]
+InputFn = Callable[[str], str]
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Validate config, devices, and flash plans without waiting for or probing hardware.",
     )
     parser.add_argument(
+        "--skip-boot-prompt",
+        action="store_true",
+        help="Skip the post-flash boot prompt. Use only for lab fixtures that boot flashed media automatically.",
+    )
+    parser.add_argument(
         "--throughput-smoke",
         action="store_true",
         help="Run an optional iperf3 smoke test over SSH from gate to point.",
@@ -173,6 +179,7 @@ def run_hil(
     *,
     command_runner: CommandRunner | None = None,
     sleep_fn: SleepFn = time.sleep,
+    input_fn: InputFn = input,
     now_fn: NowFn | None = None,
 ) -> dict[str, Any]:
     now = (now_fn or _utc_now)()
@@ -231,12 +238,16 @@ def run_hil(
     if args.dry_run:
         warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
     elif not flash_failed and gate is not None and point is not None:
-        sleep_fn(args.wait_seconds)
-        for spec in (gate, point):
-            nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
-        topology = _probe_topology(gate, point, checks)
-        if args.throughput_smoke:
-            throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
+        ready_to_probe = True
+        if _has_device(args):
+            ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
+        if ready_to_probe:
+            sleep_fn(args.wait_seconds)
+            for spec in (gate, point):
+                nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
+            topology = _probe_topology(gate, point, checks)
+            if args.throughput_smoke:
+                throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
 
     mode = "dry-run" if args.dry_run else ("flash" if _has_device(args) else "reuse")
     ok = not errors and all(check.get("ok") is not False for check in checks)
@@ -271,7 +282,8 @@ def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--gate-node and --point-node must be different nodes.")
 
     devices = [device for device in (args.gate_device, args.point_device) if device]
-    if args.gate_device and args.point_device and args.gate_device == args.point_device:
+    device_ids = {_device_identity(device) for device in devices}
+    if len(device_ids) != len(devices):
         parser.error("--gate-device and --point-device must not be the same disk.")
     if devices and not args.dry_run:
         if not args.allow_flash:
@@ -328,6 +340,7 @@ def _node_spec(
     _add_check(checks, f"{name} role is {expected_role}", role_ok, f"fleet role={role}")
     if not role_ok:
         errors.append(f"{name} must be a {expected_role} node, got {role}.")
+        return None
 
     host = host_override.strip() or str(model.ip or "")
     host_ok = bool(host)
@@ -464,6 +477,36 @@ def _run_throughput_smoke(
         detail = f"{detail}; threshold={args.min_throughput_bps:.0f} bps"
     _add_check(checks, "throughput smoke", ok, detail)
     return {"ok": ok, "server": server, "client": client, "bits_per_second": bps}
+
+
+def _confirm_post_flash_boot(
+    args: argparse.Namespace,
+    gate: NodeSpec,
+    point: NodeSpec,
+    input_fn: InputFn,
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> bool:
+    if args.skip_boot_prompt:
+        _add_check(checks, "post-flash boot handoff confirmed", True, "skipped by --skip-boot-prompt")
+        return True
+
+    flashed = ", ".join(f"{spec.name} ({spec.device})" for spec in (gate, point) if spec.device)
+    prompt = (
+        f"Flashed media is ready for {flashed}. "
+        "Insert and boot flashed media, confirm all HIL nodes are powered, "
+        "then press Enter to start the settle wait and probes: "
+    )
+    try:
+        input_fn(prompt)
+    except EOFError:
+        message = "Post-flash boot confirmation is required before probing flashed nodes."
+        errors.append(message)
+        _add_check(checks, "post-flash boot handoff confirmed", False, message)
+        return False
+
+    _add_check(checks, "post-flash boot handoff confirmed", True, "operator confirmed")
+    return True
 
 
 def _check_identity(spec: NodeSpec, identity: ApiResult, checks: list[dict[str, Any]]) -> None:
@@ -627,6 +670,16 @@ def _ssh_flash_overrides(spec: NodeSpec) -> tuple[bool, bool]:
 
 def _has_device(args: argparse.Namespace) -> bool:
     return bool(args.gate_device or args.point_device)
+
+
+def _device_identity(device: str) -> str:
+    value = device.strip()
+    if value.startswith("/dev/rdisk"):
+        value = value.replace("/dev/rdisk", "/dev/disk", 1)
+    try:
+        return str(Path(value).resolve(strict=False))
+    except OSError:
+        return value
 
 
 def _has_resolved_link(links: Any, gate_name: str, point_name: str) -> bool:

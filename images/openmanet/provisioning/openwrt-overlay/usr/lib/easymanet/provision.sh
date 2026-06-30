@@ -342,10 +342,18 @@ uci_set network."$EM_AHWLAN_IFACE".dns="$EM_UPLINK_DNS"
 if [ "$NODE_ROLE" != "gate" ]; then
     wan_device="$(uci -q get network.wan.device || true)"
     wan_ifname="$(uci -q get network.wan.ifname || true)"
+    wan6_device="$(uci -q get network.wan6.device || true)"
+    wan6_ifname="$(uci -q get network.wan6.ifname || true)"
     clear_point_wan=0
+    clear_point_wan6=0
     if [ -z "$wan_device$wan_ifname" ]; then
         if uci -q get network.wan.proto >/dev/null 2>&1; then
             clear_point_wan=1
+        fi
+    fi
+    if [ -z "$wan6_device$wan6_ifname" ]; then
+        if uci -q get network.wan6.proto >/dev/null 2>&1; then
+            clear_point_wan6=1
         fi
     fi
     case " $wan_device $wan_ifname " in
@@ -353,8 +361,16 @@ if [ "$NODE_ROLE" != "gate" ]; then
             clear_point_wan=1
             ;;
     esac
+    case " $wan6_device $wan6_ifname " in
+        *" eth0 "*|*" br-lan "*|*" $EM_AHWLAN_BRIDGE "*|*" bat0 "*|*" mesh "*|*" wlan0 "*)
+            clear_point_wan6=1
+            ;;
+    esac
     if [ "$clear_point_wan" -eq 1 ]; then
         uci -q delete network.wan 2>/dev/null || true
+        clear_point_wan6=1
+    fi
+    if [ "$clear_point_wan6" -eq 1 ]; then
         uci -q delete network.wan6 2>/dev/null || true
     fi
 fi

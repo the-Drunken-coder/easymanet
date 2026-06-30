@@ -129,6 +129,22 @@ uci -q get 'wireless.foo\bar'
     assert result.stdout.strip() == "value1"
 
 
+def test_uci_harness_missing_get_fails(tmp_path):
+    uci_state = tmp_path / "uci-state"
+    env = _harness_env(uci_state)
+
+    result = subprocess.run(
+        ["uci", "-q", "get", "network.missing.option"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
 def _gate_provision_json() -> dict:
     return {
         "version": 1,
@@ -640,6 +656,58 @@ def test_provision_point_clears_mesh_side_wan_aliases(tmp_path, mesh_side_wan):
     assert _uci_get(uci_state, "network.wan.proto", env) == ""
     assert _uci_get(uci_state, "network.wan.device", env) == ""
     assert _uci_get(uci_state, "network.wan.ifname", env) == ""
+    assert _uci_get(uci_state, "network.wan6.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan6.device", env) == ""
+    assert _uci_get(uci_state, "network.wan6.ifname", env) == ""
+
+
+@pytest.mark.parametrize(
+    "mesh_side_wan6",
+    ["eth0", "br-ahwlan", "bat0", "mesh", "wlan0"],
+)
+def test_provision_point_clears_mesh_side_wan6_without_wan(tmp_path, mesh_side_wan6):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("network.wan6=interface\n")
+        state.write("network.wan6.proto='dhcpv6'\n")
+        state.write(f"network.wan6.device='{mesh_side_wan6}'\n")
+        state.write(f"network.wan6.ifname='{mesh_side_wan6}'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.wan.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan.device", env) == ""
+    assert _uci_get(uci_state, "network.wan.ifname", env) == ""
+    assert _uci_get(uci_state, "network.wan6.proto", env) == ""
+    assert _uci_get(uci_state, "network.wan6.device", env) == ""
+    assert _uci_get(uci_state, "network.wan6.ifname", env) == ""
+
+
+def test_provision_point_preserves_non_mesh_wan_and_clears_mesh_side_wan6(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("network.wan=interface\n")
+        state.write("network.wan.proto='dhcp'\n")
+        state.write("network.wan.device='phy1-sta0'\n")
+        state.write("network.wan.ifname='phy1-sta0'\n")
+        state.write("network.wan6=interface\n")
+        state.write("network.wan6.proto='dhcpv6'\n")
+        state.write("network.wan6.device='eth0'\n")
+        state.write("network.wan6.ifname='eth0'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "network.wan.device", env) == "phy1-sta0"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "phy1-sta0"
     assert _uci_get(uci_state, "network.wan6.proto", env) == ""
     assert _uci_get(uci_state, "network.wan6.device", env) == ""
     assert _uci_get(uci_state, "network.wan6.ifname", env) == ""

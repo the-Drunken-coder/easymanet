@@ -200,6 +200,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45" in image_release
     assert "cosign sign-blob" in image_release
     assert "generate_image_release_notes.py" in image_release
+    assert "OPENCODE_GO_API_KEY" in image_release
+    assert "OPENCODE_API_KEY" in image_release
     assert "cleanup_image_releases.py" in image_release
 
 

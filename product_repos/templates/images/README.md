@@ -37,3 +37,7 @@ user-supplied.
 
 Manual image releases can be started from the Actions tab with
 `Image Release`.
+
+AI-generated release notes use OpenCode Go when `OPENCODE_GO_API_KEY` or
+`OPENCODE_API_KEY` is configured as a repository secret. Without an AI key, the
+release workflow publishes static fallback notes.

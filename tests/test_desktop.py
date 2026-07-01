@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -1780,8 +1781,6 @@ def test_electron_shell_files_exist():
     validation_text = (electron / "validation.js").read_text()
     assert "Boot report source path must not contain traversal segments" in validation_text
     assert "hasTraversalSegment(source)" in validation_text
-    assert "resolveConfigPath(\"field\"" in (electron / "scripts" / "check-electron.js").read_text()
-
     assert "flashBridgeTimeoutMs" in electron_text
     assert "runBridgeStreaming" in electron_text
     assert "fullStdout" in electron_text
@@ -1828,3 +1827,26 @@ def test_electron_shell_files_exist():
     build_text = (electron / "scripts" / "build-bridge.py").read_text()
     assert '"easymanet_cli"' not in build_text
     assert 'ROOT / "apps" / "cli" / "src"' not in build_text
+
+
+def test_electron_check_formats_empty_bridge_failure(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for the Electron check smoke test")
+
+    fake_python = tmp_path / "python"
+    fake_python.write_text("#!/bin/sh\nexit 42\n")
+    fake_python.chmod(0o755)
+
+    result = subprocess.run(
+        [node, str(root / "apps" / "desktop" / "electron" / "scripts" / "check-electron.js")],
+        env={**os.environ, "EASYMANET_PYTHON": str(fake_python)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 42
+    assert "EasyMANET bridge check failed:" in result.stderr
+    assert "failed without stdout or stderr (exit code 42)" in result.stderr

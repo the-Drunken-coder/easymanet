@@ -15,6 +15,7 @@ blockers that another agent or developer may need to pick up.
 | [`docs/sample-fleet.md`](sample-fleet.md) | Starter fleet YAML and workspace copy command. | "What should my first fleet file look like?" |
 | [`docs/manifest.md`](manifest.md) | Reference for every field in `fleet.yml`. | "What config shape does this project accept?" |
 | [`docs/flashing.md`](flashing.md) | Host-side flashing and provisioning guide. | "How do I safely flash a node?" |
+| [`docs/verification-system-plan.md`](verification-system-plan.md) | Layered test and verification plan for reducing routine bench testing. | "How should we prove changes without bench testing every time?" |
 | [`docs/openmanet-config-investigation.md`](openmanet-config-investigation.md) | Notes on OpenMANET wizard behavior and config files. | "What does OpenMANET expect on the device?" |
 | [`docs/lessons-learned.md`](lessons-learned.md) | Recurring hardware, build, and debugging gotchas from real node work. | "What should a future session know before touching this?" |
 | [`docs/design-decisions/`](design-decisions/) | Durable architectural and implementation choices. | "What did we decide, and why?" |

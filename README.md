@@ -242,6 +242,42 @@ on `flash` and `image build`.
 | `easymanet-desktop serve` | Run the browser-served fallback console |
 | `easymanet-publish export` | Generate local public product surfaces without setting up subrepos |
 
+## Developer Verification
+
+Run these from the repo root before handing off a change:
+
+```bash
+python tools/verify.py fast
+python tools/verify.py openwrt-sim
+python tools/verify.py package
+python tools/verify.py artifact
+```
+
+`fast` runs the normal local gate: Python tests, OpenWrt overlay shell syntax,
+Electron shell check, overlay packaging, and `git diff --check`. Set
+`EASYMANET_VERIFY_PYTHON=/path/to/venv/bin/python` when you want the Python
+checks and Electron bridge smoke to use a specific development venv.
+
+`openwrt-sim` runs the targeted shell-harnessed provisioning, first-boot, API,
+and status tests. Use it for overlay, provisioning, status, topology, or
+management-LAN changes.
+
+`package` installs Electron dependencies with `npm ci`, then builds and smokes
+the installed wheel through `tools/release_smoke.py`, including the installed
+wheel Electron smoke. It uses clean temporary virtual environments with fresh
+build tooling so it does not depend on a host Python with `setuptools` already
+available.
+
+`artifact` runs non-hardware image and release checks. Without arguments it
+checks source overlay packaging, required files, executable modes, a synthetic
+boot payload fixture, and read-only image-cache state. For built images, pass
+`--artifact` and `--release-manifest` to the same profile.
+
+`hil` delegates to the manual hardware-in-the-loop runner:
+`python tools/verify.py hil --config ... --gate-node ... --point-node ...`.
+Use it for release, flashing, radio, or real image validation, not routine
+application-only changes.
+
 ## Architecture
 
 ```text

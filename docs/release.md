@@ -125,10 +125,15 @@ and Sigstore/cosign signature bundle. Custom local images and custom URLs are
 still allowed with an explicit SHA-256, but they are treated as
 checksum-only/user-supplied rather than official.
 
-The image release workflow generates release notes with the OpenAI Responses
-API. Configure the public image repository with an `OPENAI_API_KEY` secret and,
-optionally, an `OPENAI_RELEASE_NOTES_MODEL` variable. The default model is
-`gpt-5.4-mini`.
+The image release workflow generates release notes with OpenCode Go when the
+public image repository has an `OPENCODE_GO_API_KEY` secret. `OPENCODE_API_KEY`
+is also accepted for teams that keep one OpenCode key name across tools. The
+default OpenCode Go model is `deepseek-v4-flash`; override it with an
+`OPENCODE_GO_RELEASE_NOTES_MODEL` variable.
+
+The workflow still supports the older OpenAI path as a fallback when
+`OPENAI_API_KEY` is configured instead. If no AI key is configured, release
+publishing continues with static fallback notes.
 
 Retention is automatic after a successful image release:
 

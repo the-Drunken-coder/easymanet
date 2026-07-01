@@ -51,7 +51,11 @@ def test_public_image_readme_documents_workflow_steps_that_exist():
             ("actions/attest-build-provenance", "dist/easymanet-image-release.json"),
         ),
         ("Sigstore/cosign", "Sign release manifest", ("cosign sign-blob",)),
-        ("generates release notes", "Generate release notes", ("generate_image_release_notes.py",)),
+        (
+            "generates release notes",
+            "Generate release notes",
+            ("generate_image_release_notes.py", "OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"),
+        ),
         ("creates the GitHub Release", "Create GitHub release", ("gh", "release create")),
     )
 

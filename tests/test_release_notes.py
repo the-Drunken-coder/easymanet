@@ -59,6 +59,8 @@ def test_generate_notes_prefers_opencode_go(monkeypatch):
 def test_generate_notes_accepts_general_opencode_key(monkeypatch):
     notes = load_release_notes()
 
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    monkeypatch.delenv("OPENCODE_GO_RELEASE_NOTES_MODEL", raising=False)
     monkeypatch.setenv("OPENCODE_API_KEY", "shared-opencode-key")
     monkeypatch.setattr(
         notes,

@@ -38,6 +38,10 @@ def test_export_surfaces_include_installable_python_roots(tmp_path):
     assert any(path.startswith("apps/cli/") for path in image_files)
     assert any(path.startswith("packages/image/") for path in cli_files)
     assert any(path.startswith("images/openmanet/") for path in cli_files)
+    assert "tests/fixtures/openwrt/uci-wireless-radios.txt" in image_files
+    assert "tests/fixtures/openwrt/uci-wireless-radios.txt" in cli_files
+    assert "tests/fixtures/openwrt/batctl-neighbors-current.txt" in image_files
+    assert "tests/fixtures/openwrt/batctl-neighbors-current.txt" in cli_files
     assert any(path.startswith("apps/desktop/") for path in desktop_files)
     assert not any(path.startswith("apps/cli/") for path in desktop_files)
     assert not any(path.startswith("packages/image/") for path in desktop_files)

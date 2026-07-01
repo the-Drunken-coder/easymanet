@@ -1830,6 +1830,9 @@ def test_electron_shell_files_exist():
 
 
 def test_electron_check_formats_empty_bridge_failure(tmp_path):
+    if os.name == "nt":
+        pytest.skip("this smoke test uses a POSIX executable shim")
+
     root = Path(__file__).resolve().parents[1]
     node = shutil.which("node")
     if not node:

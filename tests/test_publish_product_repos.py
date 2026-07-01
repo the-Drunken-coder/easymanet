@@ -138,6 +138,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
         assert not (repo / "docs" / "public-repos.md").exists()
         assert not (repo / "docs" / "problems").exists()
         assert not (repo / "docs" / "design-decisions").exists()
+        assert (repo / "tests" / "fixtures" / "openwrt" / "uci-wireless-radios.txt").exists()
+        assert (repo / "tests" / "fixtures" / "openwrt" / "batctl-neighbors-current.txt").exists()
         assert not list(repo.rglob("__pycache__"))
         metadata = (repo / "REPO_GENERATION.md").read_text(encoding="utf-8")
         assert "Generated at:" not in metadata

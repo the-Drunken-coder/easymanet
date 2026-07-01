@@ -53,6 +53,7 @@ PRODUCT_DOC_PATHS = (
 )
 
 PRODUCT_TEST_PATHS = (
+    "tests/fixtures/openwrt",
     "tests/shell_harness",
     "tests/test_build.py",
     "tests/test_cli.py",

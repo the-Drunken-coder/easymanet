@@ -479,3 +479,26 @@ defaults:
     assert result.valid
     assert result.errors == []
     os.unlink(path)
+
+
+def test_point_gateway_wifi_warns_but_remains_valid():
+    config = VALID_CONFIG + """
+  node03:
+    role: point
+    hostname: node03
+    ip: 10.41.3.1
+    gateway:
+      wifi:
+        enabled: true
+        ssid: home-wifi
+        password: home-password
+"""
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m, node_name="node03")
+    assert result.valid
+    assert result.errors == []
+    assert any("does not make the point a mesh gateway" in w for w in result.warnings)
+    assert any("local_ap will not be created" in w for w in result.warnings)
+    assert any("SSH on upstream Wi-Fi if SSH is enabled" in w for w in result.warnings)
+    os.unlink(path)

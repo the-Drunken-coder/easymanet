@@ -186,6 +186,11 @@ upstream Wi-Fi LAN. Treat any WAN-reachable management or API service as
 trusted-LAN only. With `uplink_interface: eth0`, EasyMANET runs WAN DHCP on
 `eth0` and keeps that port out of `br-ahwlan`.
 
+On point nodes, `gateway.wifi.enabled` is allowed as a management uplink for
+direct SSH or troubleshooting over an upstream Wi-Fi LAN. It does not make the
+point a mesh gateway, does not provide mesh-to-WAN forwarding, and uses the
+same local AP radio that would otherwise host `local_ap`.
+
 ---
 
 ## Resolved Config
@@ -223,6 +228,7 @@ Priority (highest to lowest):
 | mesh.country must be two-letter ISO code (e.g. US) | Error |
 | gateway.wifi.enabled requires ssid and password | Error |
 | gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |
+| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior, local AP suppression, and SSH exposure if enabled | Warning |
 
 ## Security
 
@@ -235,6 +241,9 @@ Priority (highest to lowest):
   endpoints under `/v1`.
 - On gate nodes, `gateway.wifi.enabled` with SSH enabled also opens SSH on the
   WAN firewall zone.
+- On point nodes, `gateway.wifi.enabled` can expose SSH on the upstream Wi-Fi
+  LAN if SSH is enabled during flash, but it does not expose the EasyMANET API
+  or provide mesh-to-WAN forwarding.
 - EasyMANET API exposure on WAN (port 10411) is intended for trusted upstream
   Wi-Fi LANs and is sensitive on untrusted uplinks.
 - Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext

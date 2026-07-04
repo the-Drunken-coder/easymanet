@@ -694,7 +694,7 @@ function renderMeshDiscovery(payload) {
   state.meshLinks = links;
   meshCount.textContent = `${nodes.length}`;
   meshSummary.hidden = false;
-  meshSummary.className = `validation ${payload.ok ? "ok" : "bad"}`;
+  meshSummary.className = `validation ${payload.ok ? "ok" : payload.degraded ? "warn" : "bad"}`;
   meshSummary.innerHTML = meshDiscoveryMarkup(payload);
   if (nodes.length) {
     meshRadios.className = "topology-view";
@@ -795,6 +795,8 @@ function appendMeshDiscoveryResult(payload) {
   const summary = `${countLabel(nodes.length, "node")}, ${countLabel(links.length, "link")}, ${countLabel(checked, "candidate")} checked.`;
   if (payload.ok) {
     appendMeshLog(nodes.length ? "success" : "warning", `Scan complete: ${summary}`);
+  } else if (payload.degraded) {
+    appendMeshLog("warning", `Scan degraded: ${summary}`);
   } else {
     appendMeshLog("error", `Scan failed: ${summary}`);
   }

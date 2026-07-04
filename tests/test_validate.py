@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from easymanet.manifest import load_manifest
-from easymanet.validate import resolve_node, validate
+from easymanet.validate import resolve_node, validate, validate_ip
 
 
 VALID_CONFIG = """
@@ -180,6 +180,10 @@ def test_ipv6_node_ip_is_invalid():
     assert not result.valid
     assert any("Invalid IPv4 address" in e for e in result.errors)
     os.unlink(path)
+
+
+def test_generic_ipv4_validation_allows_probe_addresses_outside_mesh_subnet():
+    assert validate_ip("192.168.50.10") is None
 
 
 def test_node_ip_outside_mesh_subnet_is_invalid():

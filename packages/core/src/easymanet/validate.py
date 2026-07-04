@@ -6,7 +6,7 @@ Returns a list of errors and warnings.
 
 import ipaddress
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .manifest import Manifest
 from .provision import GatewayConfig, LocalApConfig, resolve_node_model
@@ -48,13 +48,27 @@ class ValidationResult:
         self.warnings.append(msg)
 
 
-def validate_ip(ip_str: str) -> Optional[str]:
+def _parse_ipv4(ip_str: str) -> Tuple[Optional[ipaddress.IPv4Address], Optional[str]]:
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
-        return f"Invalid IP address: {ip_str}"
+        return None, f"Invalid IP address: {ip_str}"
     if not isinstance(ip, ipaddress.IPv4Address):
-        return f"Invalid IPv4 address: {ip_str}"
+        return None, f"Invalid IPv4 address: {ip_str}"
+    return ip, None
+
+
+def validate_ip(ip_str: str) -> Optional[str]:
+    _, err = _parse_ipv4(ip_str)
+    return err
+
+
+def validate_mesh_node_ip(ip_str: str) -> Optional[str]:
+    ip, err = _parse_ipv4(ip_str)
+    if err:
+        return err
+    if ip is None:
+        return f"Invalid IP address: {ip_str}"
     if ip not in MESH_NETWORK:
         return f"IP address must be in mesh subnet {MESH_NETWORK}: {ip_str}"
     if GATE_DHCP_POOL_START <= ip <= GATE_DHCP_POOL_END:
@@ -198,7 +212,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if not ip:
             result.add_error(f"Node '{name}': ip is required")
         else:
-            err = validate_ip(ip)
+            err = validate_mesh_node_ip(ip)
             if err:
                 result.add_error(f"Node '{name}': {err}")
             elif ip in ips_seen:

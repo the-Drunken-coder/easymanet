@@ -222,6 +222,13 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                         f"Node '{name}': gate role without gateway.uplink_interface set"
                     )
             _validate_gateway_wifi(result, name, resolved.gateway)
+            if role == "point":
+                _warn_point_gateway_wifi(
+                    result,
+                    name,
+                    resolved.local_ap,
+                    resolved.gateway,
+                )
 
     if len(gate_nodes) != 1:
         if gate_nodes:
@@ -364,6 +371,31 @@ def _validate_gateway_wifi(
             f"Node '{node_label}': gateway.wifi.encryption must be one of "
             f"{sorted(VALID_WIFI_ENCRYPTION)}, got '{encryption}'"
         )
+
+
+def _warn_point_gateway_wifi(
+    result: ValidationResult,
+    node_label: str,
+    local_ap: LocalApConfig,
+    gateway: GatewayConfig,
+) -> None:
+    wifi = gateway.wifi
+    if wifi is None or not wifi.enabled:
+        return
+    result.add_warning(
+        f"Node '{node_label}': gateway.wifi.enabled on a point is allowed "
+        "for management access, but it does not make the point a mesh gateway "
+        "or provide mesh-to-WAN forwarding"
+    )
+    if local_ap.enabled:
+        result.add_warning(
+            f"Node '{node_label}': gateway.wifi.enabled on a point uses the "
+            "local AP radio, so local_ap will not be created"
+        )
+    result.add_warning(
+        f"Node '{node_label}': gateway.wifi.enabled on a point will expose "
+        "SSH on upstream Wi-Fi if SSH is enabled during flash"
+    )
 
 
 def resolve_node(manifest: Manifest, node_name: str) -> dict:

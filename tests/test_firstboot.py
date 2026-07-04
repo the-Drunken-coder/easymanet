@@ -218,13 +218,19 @@ def test_display_status_hook_is_packaged_enabled_and_reported():
         assert path.stat().st_mode & 0o111
 
     assert "--once" in script.read_text()
-    assert "--once" in cache_script.read_text()
+    cache_script_text = cache_script.read_text()
+    assert "--once" in cache_script_text
+    assert "while [ ! -f \"$PROVISION_JSON\" ]" in cache_script_text
+    assert "shellcheck disable=SC2034" in cache_script_text
+    assert '|| { log_cache "failed to source provision-lib.sh"; exit 1; }' in cache_script_text
+    assert '|| { log_cache "failed to source api-lib.sh"; exit 1; }' in cache_script_text
+    assert '|| { log_cache "failed to source status-lib.sh"; exit 1; }' in cache_script_text
     assert "EASYMANET_DISPLAY_TTY:=/dev/tty1" in status_lib.read_text()
     assert "render_status_text" in status_lib.read_text()
     assert "status_cache_file" in status_lib.read_text()
     cache_init_text = cache_init.read_text()
     assert "procd_set_param command /usr/lib/easymanet/status-cache.sh" in cache_init_text
-    assert "procd_set_param respawn" in cache_init_text
+    assert "procd_set_param respawn 10 5 5" in cache_init_text
     assert "/etc/init.d/easymanet-status-cache enable" in cache_defaults.read_text()
     init_text = init.read_text()
     assert "procd_set_param command /usr/lib/easymanet/display-status.sh" in init_text

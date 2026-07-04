@@ -5,7 +5,9 @@ set -u
 
 SCRIPT_DIR="${EASYMANET_LIB_DIR:-/usr/lib/easymanet}"
 PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
+# shellcheck disable=SC2034
 API_PORT="${EASYMANET_API_PORT:-10411}"
+# shellcheck disable=SC2034
 FETCH_TIMEOUT="${EASYMANET_API_FETCH_TIMEOUT:-1}"
 MAX_TOPOLOGY_PEER_PROBES="${EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES:-8}"
 : "${EASYMANET_STATUS_CACHE_INTERVAL:=10}"
@@ -44,17 +46,17 @@ log_cache() {
 if [ ! -f "$PROVISION_JSON" ]; then
     log_cache "provision payload $PROVISION_JSON not available"
     [ "$MODE" = "once" ] && exit 0
-    while true; do
+    while [ ! -f "$PROVISION_JSON" ]; do
         sleep "$EASYMANET_STATUS_CACHE_INTERVAL"
     done
 fi
 
 # shellcheck source=provision-lib.sh
-. "$SCRIPT_DIR/provision-lib.sh"
+. "$SCRIPT_DIR/provision-lib.sh" || { log_cache "failed to source provision-lib.sh"; exit 1; }
 # shellcheck source=api-lib.sh
-. "$SCRIPT_DIR/api-lib.sh"
+. "$SCRIPT_DIR/api-lib.sh" || { log_cache "failed to source api-lib.sh"; exit 1; }
 # shellcheck source=status-lib.sh
-. "$SCRIPT_DIR/status-lib.sh"
+. "$SCRIPT_DIR/status-lib.sh" || { log_cache "failed to source status-lib.sh"; exit 1; }
 
 refresh_once() {
     topology_payload="$(topology_live_json_body)"

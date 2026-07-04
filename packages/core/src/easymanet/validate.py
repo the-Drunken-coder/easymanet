@@ -125,6 +125,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
     hostnames_seen: dict = {}
     ips_seen: dict = {}
     node_names_lower = set()
+    gate_nodes: list[str] = []
 
     default_gateway = defaults.get("gateway", {})
     if not isinstance(default_gateway, dict):
@@ -165,6 +166,8 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         role = node.get("role", defaults.get("role", "point"))
         if role not in VALID_ROLES:
             result.add_error(f"Node '{name}': role must be one of {sorted(VALID_ROLES)}, got '{role}'")
+        elif role == "gate":
+            gate_nodes.append(name)
 
         target = node.get("target", defaults.get("target"))
         if target not in VALID_TARGETS:
@@ -219,6 +222,15 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                         f"Node '{name}': gate role without gateway.uplink_interface set"
                     )
             _validate_gateway_wifi(result, name, resolved.gateway)
+
+    if len(gate_nodes) != 1:
+        if gate_nodes:
+            result.add_error(
+                "fleet must define exactly one gate node; "
+                f"found {len(gate_nodes)}: {', '.join(gate_nodes)}"
+            )
+        else:
+            result.add_error("fleet must define exactly one gate node; found 0")
 
     ssh_keys = management.get("ssh_authorized_keys", [])
     if not ssh_keys:

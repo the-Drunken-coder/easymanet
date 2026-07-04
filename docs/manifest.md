@@ -153,6 +153,9 @@ node name used with `--node` in CLI commands.
 | `local_ap` | object | no | from defaults | Local AP override |
 | `gateway` | object | no | from defaults | Gateway settings override |
 
+The current runtime model requires exactly one `gate` node per fleet. That gate
+is the single DHCP server and internet exit for the flat `br-ahwlan` mesh LAN.
+
 ### Node `local_ap` Overrides
 
 Any field in `defaults.local_ap` can be overridden per node:
@@ -213,6 +216,7 @@ Priority (highest to lowest):
 | Hostnames must be unique | Error |
 | IP addresses must be unique and valid | Error |
 | role must be gate or point | Error |
+| fleet must define exactly one gate node | Error |
 | target must be one of the supported targets (e.g., rpi4-mm6108-spi) | Error |
 | local_ap.password min 8 chars when enabled | Error |
 | Selected node must exist in manifest | Error |

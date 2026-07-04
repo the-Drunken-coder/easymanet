@@ -121,6 +121,44 @@ nodes:
     assert access["gate01"]["ethernet_mesh_access"] is False
 
 
+def test_node_access_respects_disabled_gateway_and_local_ap(tmp_path):
+    config = tmp_path / "disabled-gateway.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: false
+    password: local-ap-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: false
+      uplink_interface: eth0
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["local_ap_enabled"] is False
+    assert access["gate01"]["local_ap_ssid"] == "gate01-local"
+    assert access["gate01"]["ethernet_mesh_access"] is True
+
+
 def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
     manifest = payloads.load_manifest("examples/three-node-field-mesh.yml")
     original_resolve = payloads.resolve_node_model

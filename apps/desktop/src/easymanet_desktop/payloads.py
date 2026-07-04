@@ -20,7 +20,7 @@ from easymanet.download import (
 )
 from easymanet.manifest import ManifestError, load_manifest
 from easymanet.platform import check_platform
-from easymanet.provision import eth0_mesh_side, resolve_node_model
+from easymanet.provision import eth0_mesh_side, provision_json_bool, resolve_node_model
 from easymanet.validate import validate
 from easymanet.workspace import FLEET_SUFFIXES, resolve_fleet_config, workspace_payload
 
@@ -489,7 +489,7 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
         local_ap = resolved.local_ap
         access[name] = {
             "role": str(resolved.role),
-            "local_ap_enabled": bool(local_ap.enabled),
+            "local_ap_enabled": provision_json_bool(local_ap.enabled),
             "local_ap_ssid": str(local_ap.ssid or ""),
             "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
             "mesh_ip": str(resolved.ip or ""),

@@ -17,12 +17,13 @@
   function flashAccessHint(access = {}, payload = {}) {
     const address = access.management_ip || "10.41.254.1";
     const ssid = String(access.local_ap_ssid || "").trim();
-    const meshPath = ssid ? `Join local AP ${ssid} or another mesh node` : "Join another mesh node";
+    const localApAvailable = access.local_ap_enabled === true && ssid;
+    const meshPath = localApAvailable ? `Join local AP ${ssid} or another mesh node` : "Join another mesh node";
     if (access.ethernet_mesh_access === false) {
       if ((payload.plan || {}).ssh_enabled === true) {
         return `Gate Ethernet is the WAN uplink. ${meshPath}, then SSH to root@${address}.`;
       }
-      return `Gate Ethernet is the WAN uplink. Manage this gate through ${ssid ? "its local AP or another mesh node" : "another mesh node"}.`;
+      return `Gate Ethernet is the WAN uplink. Manage this gate through ${localApAvailable ? "its local AP or another mesh node" : "another mesh node"}.`;
     }
     if ((payload.plan || {}).ssh_enabled === true) {
       return `Connect Ethernet, then SSH to root@${address}.`;

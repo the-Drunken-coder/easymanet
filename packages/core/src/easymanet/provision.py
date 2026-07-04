@@ -138,10 +138,22 @@ class GatewayConfig:
 
 
 def eth0_mesh_side(role: object, gateway: GatewayConfig) -> bool:
+    if not provision_json_bool(gateway.enabled):
+        return True
     wifi = gateway.wifi
-    wifi_uplink = bool(wifi and wifi.enabled)
+    wifi_uplink = bool(wifi and provision_json_bool(wifi.enabled))
     uplink = str(gateway.uplink_interface or "eth0")
     return not (str(role) == "gate" and not wifi_uplink and uplink == "eth0")
+
+
+def provision_json_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        return value in {"1", "true", "TRUE", "yes", "YES"}
+    return False
 
 
 @dataclass(frozen=True)

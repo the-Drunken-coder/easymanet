@@ -9,7 +9,13 @@ import re
 from typing import List, Optional
 
 from .manifest import Manifest
-from .provision import GatewayConfig, LocalApConfig, eth0_mesh_side, resolve_node_model
+from .provision import (
+    GatewayConfig,
+    LocalApConfig,
+    eth0_mesh_side,
+    provision_json_bool,
+    resolve_node_model,
+)
 
 VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
@@ -212,7 +218,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if isinstance(manifest.defaults, dict):
             resolved = resolve_node_model(manifest, name)
             _validate_local_ap(result, name, resolved.local_ap)
-            if str(resolved.role) == "gate":
+            if str(resolved.role) == "gate" and provision_json_bool(resolved.gateway.enabled):
                 uplink = resolved.gateway.uplink_interface
                 if not uplink:
                     result.add_warning(
@@ -316,7 +322,7 @@ def _validate_local_ap(
     node_label: str,
     local_ap: LocalApConfig,
 ) -> None:
-    if not local_ap.enabled:
+    if not provision_json_bool(local_ap.enabled):
         return
     password = local_ap.password
     if not password:
@@ -339,7 +345,7 @@ def _validate_gateway_wifi(
     gateway: GatewayConfig,
 ) -> None:
     wifi = gateway.wifi
-    if wifi is None or not wifi.enabled:
+    if wifi is None or not provision_json_bool(wifi.enabled):
         return
     ssid = wifi.ssid
     password = wifi.password

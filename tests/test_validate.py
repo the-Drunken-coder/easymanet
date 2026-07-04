@@ -244,6 +244,35 @@ def test_warning_gate_without_uplink_defaults_to_eth0_wan():
     os.unlink(path)
 
 
+def test_warning_gate_wifi_false_string_still_treats_eth0_as_wan():
+    config = VALID_CONFIG.replace(
+        "      uplink_interface: eth0",
+        """
+      uplink_interface: eth0
+      wifi:
+        enabled: "false"
+        ssid: upstream
+        password: upstream-password
+""".rstrip(),
+    )
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
+    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    os.unlink(path)
+
+
+def test_disabled_gate_gateway_does_not_warn_eth0_wan():
+    config = VALID_CONFIG.replace("      enabled: true", "      enabled: false", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
+    assert not any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    os.unlink(path)
+
+
 def test_wifi_uplink_gate_does_not_warn_eth0_wan():
     m = load_manifest("examples/three-node-field-mesh.yml")
     result = validate(m)

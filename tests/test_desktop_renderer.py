@@ -235,6 +235,7 @@ const nativeApi = {
       node_access: {
         gate01: {
           management_ip: "10.41.1.1",
+          local_ap_enabled: true,
           local_ap_ssid: "gate01-local",
           ethernet_mesh_access: false,
         },
@@ -475,6 +476,15 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && context.window.EMState.logLines.some((line) =>
       line.includes("Gate Ethernet is the WAN uplink. Manage this gate through its local AP or another mesh node.")
     );
+  const localApDisabledHint = context.window.EMFlashUi.flashAccessHint(
+    {
+      management_ip: "10.41.1.1",
+      local_ap_enabled: false,
+      local_ap_ssid: "ghost-ap",
+      ethernet_mesh_access: false,
+    },
+    { plan: { ssh_enabled: true } }
+  ) === "Gate Ethernet is the WAN uplink. Join another mesh node, then SSH to root@10.41.1.1.";
 
   holdMesh = true;
   const meshPromise = context.discoverMesh();
@@ -528,6 +538,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     planPayloadTextOnly,
     sshEnabledHint,
     sshDisabledHint,
+    localApDisabledHint,
     meshBusy,
     meshRestored,
     meshLogAvailable,
@@ -578,6 +589,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "planPayloadTextOnly": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
+        "localApDisabledHint": True,
         "meshBusy": True,
         "meshRestored": True,
         "meshLogAvailable": True,

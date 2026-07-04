@@ -55,9 +55,12 @@ const reviewNode = $("review-node");
 const reviewDisk = $("review-disk");
 const reviewImage = $("review-image");
 const reviewSsh = $("review-ssh");
+const reviewWanApi = $("review-wan-api");
 const eraseWarning = $("erase-warning");
 const sshAutoRadio = $("role-default-ssh");
 const sshAutoHint = $("ssh-auto-hint");
+const wanApiToggle = $("wan-api-enable");
+const wanApiHint = $("wan-api-hint");
 const adminPasswordRow = $("admin-password-row");
 const adminPasswordInput = $("admin-password");
 const previewFlash = $("preview-flash");
@@ -186,6 +189,7 @@ images.addEventListener("click", (event) => {
 document.querySelectorAll("input[name='ssh-mode']").forEach((input) => {
   input.addEventListener("change", updateFlashControls);
 });
+wanApiToggle.addEventListener("change", updateFlashControls);
 adminPasswordInput.addEventListener("input", updateFlashControls);
 
 previewFlash.addEventListener("click", async () => {
@@ -831,6 +835,7 @@ function flashPayload(options = {}) {
     node: state.nodeName,
     device: state.diskDevice,
     sshMode: selectedSshMode(),
+    wanApiEnabled: selectedWanApiEnabled(),
   };
   if (options.includeAdminPassword) {
     payload.adminPassword = adminPasswordInput.value;
@@ -846,6 +851,21 @@ function selectedSshMode() {
 
 function selectedSshLabel() {
   return sshModeLabel(selectedSshMode(), sshAutoHint.textContent || "role default");
+}
+
+function selectedWanApiEnabled() {
+  return selectedWanApiApplicable() && Boolean(wanApiToggle.checked);
+}
+
+function selectedWanApiApplicable() {
+  return Boolean(selectedNodeAccess().wifi_uplink_gate);
+}
+
+function selectedWanApiLabel() {
+  if (!selectedWanApiApplicable()) {
+    return "N/A";
+  }
+  return selectedWanApiEnabled() ? "On" : "Off";
 }
 
 function applyRoleDefaultSsh() {
@@ -913,6 +933,7 @@ function updateFlashControls() {
   const ready = Boolean(config && node && state.diskDevice);
   const needsPassword = ready && isMac && !adminPasswordInput.value;
   adminPasswordRow.hidden = !isMac || !ready;
+  updateWanApiControl();
   previewFlash.disabled = !ready || state.flashBusy;
   startFlash.disabled = !ready || needsPassword || state.flashBusy;
   flashPanel.classList.toggle("ready", ready && !needsPassword && !state.flashBusy);
@@ -944,13 +965,14 @@ function updateFlashControls() {
 }
 
 function currentFlashSignature(config = configInput.value.trim(), node = nodeSelect.value.trim()) {
-  return [config, node, state.diskDevice, selectedSshMode()].join("|");
+  return [config, node, state.diskDevice, selectedSshMode(), selectedWanApiEnabled()].join("|");
 }
 
 function updateFlashReview({ node, ready, needsPassword, label, tone }) {
   reviewNode.textContent = node || "Select a node";
   reviewDisk.textContent = state.diskDevice || "Select a disk";
   reviewSsh.textContent = selectedSshLabel();
+  reviewWanApi.textContent = selectedWanApiLabel();
   reviewImage.textContent = state.planImageSummary || imageReadinessSummary(state.images);
   eraseWarning.hidden = !state.diskDevice;
   reviewStatus.textContent = label;
@@ -959,10 +981,22 @@ function updateFlashReview({ node, ready, needsPassword, label, tone }) {
   reviewDisk.classList.toggle("pending", !state.diskDevice);
   reviewImage.classList.toggle("pending", !state.planImageSummary && !imagesFullyCached(state.images));
   reviewSsh.classList.remove("pending");
+  reviewWanApi.classList.toggle("pending", !selectedWanApiApplicable());
   if (ready && !needsPassword && !state.flashBusy) {
     reviewStatus.textContent = state.planImageSummary ? "reviewed" : "ready";
     reviewStatus.className = `chip ${state.planImageSummary ? "ok" : tone}`;
   }
+}
+
+function updateWanApiControl() {
+  const applicable = selectedWanApiApplicable();
+  wanApiToggle.disabled = !applicable || state.flashBusy;
+  if (!applicable) {
+    wanApiToggle.checked = false;
+  }
+  wanApiHint.textContent = applicable
+    ? "Trusted upstream Wi-Fi only."
+    : "Off by default; Wi-Fi gate only.";
 }
 
 function updateDiskMode() {

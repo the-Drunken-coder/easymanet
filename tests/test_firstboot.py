@@ -223,6 +223,7 @@ def test_display_status_hook_is_packaged_enabled_and_reported():
     assert "easymanet-status-cache.log" in report.read_text()
     provision_text = PROVISION_SCRIPT.read_text()
     assert "status_cache_init=" in provision_text
+    assert provision_text.index("hostname: $HOSTNAME") < provision_text.index("status_cache_init=")
     assert provision_text.index("status_cache_init=") < provision_text.index("display_status_init=")
 
 

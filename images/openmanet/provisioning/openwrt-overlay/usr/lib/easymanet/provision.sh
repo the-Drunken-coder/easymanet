@@ -558,6 +558,11 @@ if [ -x "$openmanetd_init" ]; then
     "$openmanetd_init" enable 2>/dev/null || true
 fi
 
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" > "$PROVISIONED_FLAG"
+echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
+echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"
+echo "ip: $NODE_IP" >> "$PROVISIONED_FLAG"
+
 status_cache_init="$(_prefix_path /etc/init.d/easymanet-status-cache)"
 if [ -x "$status_cache_init" ]; then
     echo "Enabling EasyMANET status cache..." >> "$LOG_FILE"
@@ -585,10 +590,6 @@ else
     echo "WARNING: EasyMANET display status init script not found; HDMI status will not start" >> "$LOG_FILE"
 fi
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" > "$PROVISIONED_FLAG"
-echo "hostname: $HOSTNAME" >> "$PROVISIONED_FLAG"
-echo "role: $NODE_ROLE" >> "$PROVISIONED_FLAG"
-echo "ip: $NODE_IP" >> "$PROVISIONED_FLAG"
 echo "=== EasyMANET provisioning complete $(date) ===" >> "$LOG_FILE"
 
 wipe_boot_provision_json

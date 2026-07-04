@@ -315,14 +315,23 @@ def _write_status_cache_stub(prefix: Path) -> None:
     init_dir = prefix / "etc" / "init.d"
     init_dir.mkdir(parents=True, exist_ok=True)
     state_file = prefix / "var" / "status-cache-state"
+    provisioned_file = prefix / "etc" / "easymanet" / "provisioned"
     state_file.parent.mkdir(parents=True, exist_ok=True)
     stub = init_dir / "easymanet-status-cache"
     stub.write_text(
         f"""#!/bin/sh
 state_file="{state_file}"
+provisioned_file="{provisioned_file}"
 case "$1" in
   enable) echo enabled >> "$state_file" ;;
-  restart) echo restarted >> "$state_file" ;;
+  restart)
+    echo restarted >> "$state_file"
+    if [ -s "$provisioned_file" ]; then
+      echo provisioned-before-restart >> "$state_file"
+    else
+      echo missing-provisioned-before-restart >> "$state_file"
+    fi
+    ;;
   start) echo started >> "$state_file" ;;
 esac
 """
@@ -564,6 +573,8 @@ def test_provision_gate_node_starts_status_cache_when_present(tmp_path):
     cache_state = (prefix / "var" / "status-cache-state").read_text()
     assert "enabled" in cache_state
     assert "restarted" in cache_state
+    assert "provisioned-before-restart" in cache_state
+    assert "missing-provisioned-before-restart" not in cache_state
 
 
 def test_provision_gate_node_starts_display_status_when_present(tmp_path):

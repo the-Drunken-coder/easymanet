@@ -500,7 +500,7 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
                 and wifi is not None
                 and wifi.enabled is True
             ),
-            "management_ip": MANAGEMENT_LAN_IP,
+            "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
         }
     return access
 

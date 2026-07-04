@@ -40,6 +40,16 @@ defaults:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"
 
 nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+
   point01:
     role: point
     hostname: point01

@@ -79,7 +79,8 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
     assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
-    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
+    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
+    assert payload["node_access"]["point01"]["management_ip"] == "10.41.2.1"
     assert payload["node_access"]["gate01"]["wifi_uplink_gate"] is True
     assert payload["node_access"]["point01"]["wifi_uplink_gate"] is False
 
@@ -106,6 +107,7 @@ def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
         "management_ip": "10.41.254.1",
     }
     assert access["gate01"]["role"] == "gate"
+    assert access["gate01"]["management_ip"] == "10.41.1.1"
 
 
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):

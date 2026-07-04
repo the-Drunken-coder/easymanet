@@ -220,6 +220,7 @@ Priority (highest to lowest):
 | No SSH keys provided | Warning |
 | root_password_hash is empty | Warning |
 | Gate role without uplink_interface | Warning |
+| Gate Ethernet (`eth0`) is the WAN uplink | Warning |
 | mesh.country must be two-letter ISO code (e.g. US) | Error |
 | gateway.wifi.enabled requires ssid and password | Error |
 | gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |

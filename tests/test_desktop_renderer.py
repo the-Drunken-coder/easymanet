@@ -232,7 +232,13 @@ const nativeApi = {
       ok: true,
       nodes: ["gate01"],
       node_roles: { gate01: "gate" },
-      node_access: { gate01: { management_ip: "10.41.254.9" } },
+      node_access: {
+        gate01: {
+          management_ip: "10.41.1.1",
+          local_ap_ssid: "gate01-local",
+          ethernet_mesh_access: false,
+        },
+      },
     });
   },
   discoverMesh() {
@@ -461,11 +467,13 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && !planHtml.includes("<boot>")
     && !planHtml.includes("<b>boot files</b>");
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "no textual", ssh_enabled: true } });
-  const sshEnabledHint = context.window.EMState.logLines.some((line) => line.includes("SSH to root@"));
+  const sshEnabledHint = context.window.EMState.logLines.some((line) =>
+    line.includes("Gate Ethernet is the WAN uplink. Join local AP gate01-local or another mesh node, then SSH to root@10.41.1.1.")
+  );
   context.renderFlash({ ok: true, node: "gate01", plan: { ssh: "yes textual", ssh_enabled: false } });
   const sshDisabledHint = !element("flash-status-text").textContent.includes("SSH to root@")
     && context.window.EMState.logLines.some((line) =>
-      line.includes("Connect Ethernet to the node management port.")
+      line.includes("Gate Ethernet is the WAN uplink. Manage this gate through its local AP or another mesh node.")
     );
 
   holdMesh = true;

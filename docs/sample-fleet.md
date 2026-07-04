@@ -62,3 +62,8 @@ nodes:
     local_ap:
       ssid: point01-local
 ```
+
+In this sample, `gate01` uses a Wi-Fi uplink, so its Ethernet port stays on the
+mesh-side `br-ahwlan` network like a point node. If you change a gate to
+`gateway.uplink_interface: eth0`, that Ethernet port becomes the gate WAN uplink
+instead; manage the gate through its local AP or another mesh node.

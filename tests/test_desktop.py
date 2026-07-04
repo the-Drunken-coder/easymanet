@@ -79,7 +79,46 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
     assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
-    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
+    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
+    assert payload["node_access"]["gate01"]["mesh_ip"] == "10.41.1.1"
+    assert payload["node_access"]["gate01"]["ethernet_mesh_access"] is True
+
+
+def test_node_access_marks_eth0_gate_ethernet_as_wan(tmp_path):
+    config = tmp_path / "eth0-gate.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: local-ap-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["management_ip"] == "10.41.1.1"
+    assert access["gate01"]["ethernet_mesh_access"] is False
 
 
 def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
@@ -1641,7 +1680,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "ssh_enabled === true" in text
     assert "sshNote" not in text
     assert "Connect Ethernet, then SSH to root@" in text
-    assert "Connect Ethernet to the node management port." in text
+    assert "Gate Ethernet is the WAN uplink." in text
+    assert "Connect Ethernet to reach the mesh-side node network." in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
     assert "detectMacPlatform" in text

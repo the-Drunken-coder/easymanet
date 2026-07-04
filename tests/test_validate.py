@@ -224,6 +224,33 @@ def test_warning_empty_root_password():
     os.unlink(path)
 
 
+def test_warning_gate_eth0_is_wan_uplink():
+    path = _write_config(VALID_CONFIG)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
+    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    os.unlink(path)
+
+
+def test_warning_gate_without_uplink_defaults_to_eth0_wan():
+    config = VALID_CONFIG.replace("      uplink_interface: eth0\n", "")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
+    assert any("gate role without gateway.uplink_interface set" in w for w in result.warnings)
+    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    os.unlink(path)
+
+
+def test_wifi_uplink_gate_does_not_warn_eth0_wan():
+    m = load_manifest("examples/three-node-field-mesh.yml")
+    result = validate(m)
+    assert result.valid
+    assert not any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+
+
 def test_no_nodes():
     config = """
 version: 1

@@ -207,12 +207,24 @@ def _point_provision_json() -> dict:
     return data
 
 
+def _two_node_gate_provision_json() -> dict:
+    data = _gate_provision_json()
+    data["fleet"] = {
+        "nodes": [
+            {"name": "gate01", "hostname": "gate01", "role": "gate", "target": "rpi4-mm6108-spi", "ip": "10.41.1.1"},
+            {"name": "point01", "hostname": "point01", "role": "point", "target": "rpi4-mm6108-spi", "ip": "10.41.2.1"},
+        ]
+    }
+    return data
+
+
 def _copy_api_overlay(prefix: Path) -> None:
     for relative in (
         "usr/lib/easymanet/api-lib.sh",
         "usr/lib/easymanet/api.sh",
         "usr/lib/easymanet/provision-lib.sh",
         "usr/lib/easymanet/status-lib.sh",
+        "usr/lib/easymanet/status-cache.sh",
         "www/easymanet-api/v1/identity",
         "www/easymanet-api/v1/neighbors",
         "www/easymanet-api/v1/status",
@@ -293,6 +305,34 @@ state_file="{state_file}"
 case "$1" in
   enable) echo enabled >> "$state_file" ;;
   restart) echo restarted >> "$state_file" ;;
+  start) echo started >> "$state_file" ;;
+esac
+"""
+    )
+    stub.chmod(0o755)
+
+
+def _write_status_cache_stub(prefix: Path) -> None:
+    init_dir = prefix / "etc" / "init.d"
+    init_dir.mkdir(parents=True, exist_ok=True)
+    state_file = prefix / "var" / "status-cache-state"
+    provisioned_file = prefix / "etc" / "easymanet" / "provisioned"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    stub = init_dir / "easymanet-status-cache"
+    stub.write_text(
+        f"""#!/bin/sh
+state_file="{state_file}"
+provisioned_file="{provisioned_file}"
+case "$1" in
+  enable) echo enabled >> "$state_file" ;;
+  restart)
+    echo restarted >> "$state_file"
+    if [ -s "$provisioned_file" ]; then
+      echo provisioned-before-restart >> "$state_file"
+    else
+      echo missing-provisioned-before-restart >> "$state_file"
+    fi
+    ;;
   start) echo started >> "$state_file" ;;
 esac
 """
@@ -514,9 +554,28 @@ def test_provision_missing_led_status_service_is_nonfatal(tmp_path):
     assert "EasyMANET LED status init script not found" in (
         prefix / "var" / "log" / "easymanet.log"
     ).read_text()
+    assert "EasyMANET status cache init script not found" in (
+        prefix / "var" / "log" / "easymanet.log"
+    ).read_text()
     assert "EasyMANET display status init script not found" in (
         prefix / "var" / "log" / "easymanet.log"
     ).read_text()
+
+
+def test_provision_gate_node_starts_status_cache_when_present(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _write_status_cache_stub(prefix)
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    cache_state = (prefix / "var" / "status-cache-state").read_text()
+    assert "enabled" in cache_state
+    assert "restarted" in cache_state
+    assert "provisioned-before-restart" in cache_state
+    assert "missing-provisioned-before-restart" not in cache_state
 
 
 def test_provision_gate_node_starts_display_status_when_present(tmp_path):
@@ -1031,8 +1090,19 @@ def _status_env(tmp_path: Path, provision_data: dict, *, ping_ok: bool = True, n
         "EASYMANET_PROVISIONED_FLAG": str(provisioned),
         "EASYMANET_API_HOME": str(api_home),
         "EASYMANET_API_SCRIPT": str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"),
+        "EASYMANET_STATUS_CACHE_DIR": str(tmp_path / "cache"),
         "UCI_STATE_FILE": str(tmp_path / "uci-state"),
     }
+
+
+def _refresh_status_cache(env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "status-cache.sh"), "--once"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _copy_status_lib_dir(tmp_path: Path) -> Path:
@@ -1044,9 +1114,13 @@ def _copy_status_lib_dir(tmp_path: Path) -> Path:
 
 
 def test_status_api_reports_point_node_local_status(tmp_path):
+    env = _status_env(tmp_path, _point_provision_json())
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "status"],
-        env=_status_env(tmp_path, _point_provision_json()),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -1104,9 +1178,13 @@ def test_status_helper_failure_returns_status_fallback(tmp_path):
 
 
 def test_status_api_reports_public_internet_down(tmp_path):
+    env = _status_env(tmp_path, _point_provision_json(), ping_ok=False)
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "status"],
-        env=_status_env(tmp_path, _point_provision_json(), ping_ok=False),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -1130,6 +1208,8 @@ def test_status_api_reports_gateway_missing_fleet_node(tmp_path):
     env = _status_env(tmp_path, provision_data)
     (bin_dir / "uclient-fetch").write_text("#!/bin/sh\nexit 1\n")
     (bin_dir / "uclient-fetch").chmod(0o755)
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
 
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "status"],
@@ -1181,10 +1261,158 @@ status_fleet_json "{tmp_path / "missing.txt"}"
     assert {"name": "point01", "status": "UNKNOWN"} in payload
 
 
-def test_display_status_renders_copyable_console_text(tmp_path):
+def test_status_cache_once_writes_status_and_topology_snapshots(tmp_path):
+    env = _status_env(tmp_path, _point_provision_json())
+
+    result = _refresh_status_cache(env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    cache_dir = Path(env["EASYMANET_STATUS_CACHE_DIR"])
+    status = json.loads((cache_dir / "status.json").read_text())
+    topology = json.loads((cache_dir / "topology.json").read_text())
+    assert status["support_code"] == "EM-OK"
+    assert status["cache"]["state"] == "fresh"
+    assert topology["code"] == "not_gateway"
+    assert topology["cache"]["state"] == "fresh"
+
+
+def test_status_api_uses_fresh_cache_without_peer_fetch(tmp_path):
+    env = _status_env(tmp_path, _two_node_gate_provision_json())
+    request_log = tmp_path / "requests.log"
+    fetch = tmp_path / "bin" / "uclient-fetch"
+    fetch.write_text(f'#!/bin/sh\necho "$*" >> "{request_log}"\nexit 1\n')
+    fetch.chmod(0o755)
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+    request_log.write_text("")
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["support_code"] == "EM-NODE-MISSING"
+    assert {"name": "point01", "status": "MISSING"} in payload["fleet"]
+    assert request_log.read_text() == ""
+
+
+def test_topology_api_uses_fresh_cache_without_peer_fetch(tmp_path):
+    env = _status_env(tmp_path, _two_node_gate_provision_json())
+    request_log = tmp_path / "requests.log"
+    fetch = tmp_path / "bin" / "uclient-fetch"
+    fetch.write_text(f'#!/bin/sh\necho "$*" >> "{request_log}"\nexit 1\n')
+    fetch.chmod(0o755)
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+    request_log.write_text("")
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert any(node["name"] == "point01" and node["status"] == "offline" for node in payload["nodes"])
+    assert request_log.read_text() == ""
+
+
+def test_topology_api_reports_missing_cache_without_peer_fetch(tmp_path):
+    env = _status_env(tmp_path, _two_node_gate_provision_json())
+    request_log = tmp_path / "requests.log"
+    fetch = tmp_path / "bin" / "uclient-fetch"
+    fetch.write_text(f'#!/bin/sh\necho "$*" >> "{request_log}"\nexit 1\n')
+    fetch.chmod(0o755)
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["code"] == "snapshot_unavailable"
+    assert any(node["name"] == "point01" and node["status"] == "unknown" for node in payload["nodes"])
+    assert not request_log.exists()
+
+
+def test_status_api_reports_stale_cache_without_green_fleet(tmp_path):
+    env = _status_env(tmp_path, _two_node_gate_provision_json())
+    cache_dir = Path(env["EASYMANET_STATUS_CACHE_DIR"])
+    cache_dir.mkdir()
+    (cache_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "schema_version": 1,
+                "support_code": "EM-OK",
+                "fleet": [{"name": "point01", "status": "OK"}],
+                "cache": {"generated_epoch": 1},
+            }
+        )
+    )
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["support_code"] == "EM-DIAG-PARTIAL"
+    assert payload["cache"]["state"] == "stale"
+    assert {"name": "point01", "status": "UNKNOWN"} in payload["fleet"]
+    assert {"name": "point01", "status": "OK"} not in payload["fleet"]
+
+
+def test_display_status_uses_fresh_cache_without_peer_fetch(tmp_path):
+    env = _status_env(tmp_path, _two_node_gate_provision_json())
+    request_log = tmp_path / "requests.log"
+    fetch = tmp_path / "bin" / "uclient-fetch"
+    fetch.write_text(f'#!/bin/sh\necho "$*" >> "{request_log}"\nexit 1\n')
+    fetch.chmod(0o755)
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+    request_log.write_text("")
+
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "display-status.sh"), "--once"],
-        env=_status_env(tmp_path, _point_provision_json()),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "point01" in result.stdout
+    assert "MISSING" in result.stdout
+    assert request_log.read_text() == ""
+
+
+def test_display_status_renders_copyable_console_text(tmp_path):
+    env = _status_env(tmp_path, _point_provision_json())
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "display-status.sh"), "--once"],
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -1327,13 +1555,21 @@ exit 1
     )
     (bin_dir / "mktemp").chmod(0o755)
 
+    script = f'''
+PROVISION_JSON="{provision_json}"
+API_PORT=10411
+FETCH_TIMEOUT=1
+MAX_TOPOLOGY_PEER_PROBES=8
+SCRIPT_DIR="{OVERLAY / "usr" / "lib" / "easymanet"}"
+. "$SCRIPT_DIR/provision-lib.sh"
+. "$SCRIPT_DIR/api-lib.sh"
+topology_live_json_body
+'''
     result = subprocess.run(
-        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
+        ["sh", "-c", script],
         env={
             **os.environ,
             "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
-            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
-            "EASYMANET_PROVISION_JSON": str(provision_json),
             "UCI_STATE_FILE": str(tmp_path / "uci-state"),
         },
         capture_output=True,
@@ -1388,16 +1624,21 @@ exit 1
     )
     (bin_dir / "uclient-fetch").chmod(0o755)
 
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
+        "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
+        "EASYMANET_PROVISION_JSON": str(provision_json),
+        "EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES": "1",
+        "EASYMANET_STATUS_CACHE_DIR": str(tmp_path / "cache"),
+        "UCI_STATE_FILE": str(tmp_path / "uci-state"),
+    }
+    result = _refresh_status_cache(env)
+    assert result.returncode == 0, result.stderr + result.stdout
+
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}:{HARNESS}:{os.environ.get('PATH', '')}",
-            "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
-            "EASYMANET_PROVISION_JSON": str(provision_json),
-            "EASYMANET_API_MAX_TOPOLOGY_PEER_PROBES": "1",
-            "UCI_STATE_FILE": str(tmp_path / "uci-state"),
-        },
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -1502,7 +1743,11 @@ esac
         "EASYMANET_LIB_DIR": str(OVERLAY / "usr" / "lib" / "easymanet"),
         "EASYMANET_PROVISION_JSON": str(provision_json),
         "EASYMANET_API_FETCH_TIMEOUT": "1",
+        "EASYMANET_STATUS_CACHE_DIR": str(tmp_path / "cache"),
     }
+    cache_result = _refresh_status_cache(env)
+    assert cache_result.returncode == 0, cache_result.stderr + cache_result.stdout
+
     result = subprocess.run(
         ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "topology"],
         env=env,

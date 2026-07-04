@@ -206,22 +206,42 @@ def test_led_status_hook_is_packaged_enabled_and_reported():
 def test_display_status_hook_is_packaged_enabled_and_reported():
     script = OVERLAY / "usr" / "lib" / "easymanet" / "display-status.sh"
     status_lib = OVERLAY / "usr" / "lib" / "easymanet" / "status-lib.sh"
+    cache_script = OVERLAY / "usr" / "lib" / "easymanet" / "status-cache.sh"
+    cache_init = OVERLAY / "etc" / "init.d" / "easymanet-status-cache"
+    cache_defaults = OVERLAY / "etc" / "uci-defaults" / "94-easymanet-status-cache"
     init = OVERLAY / "etc" / "init.d" / "easymanet-display-status"
     defaults = OVERLAY / "etc" / "uci-defaults" / "95-easymanet-display-status"
     report = OVERLAY / "usr" / "lib" / "easymanet" / "boot-report.sh"
 
-    for path in (script, status_lib, init, defaults):
+    for path in (script, status_lib, cache_script, cache_init, cache_defaults, init, defaults):
         assert path.exists()
         assert path.stat().st_mode & 0o111
 
     assert "--once" in script.read_text()
+    cache_script_text = cache_script.read_text()
+    assert "--once" in cache_script_text
+    assert "while [ ! -f \"$PROVISION_JSON\" ]" in cache_script_text
+    assert "shellcheck disable=SC2034" in cache_script_text
+    assert '|| { log_cache "failed to source provision-lib.sh"; exit 1; }' in cache_script_text
+    assert '|| { log_cache "failed to source api-lib.sh"; exit 1; }' in cache_script_text
+    assert '|| { log_cache "failed to source status-lib.sh"; exit 1; }' in cache_script_text
     assert "EASYMANET_DISPLAY_TTY:=/dev/tty1" in status_lib.read_text()
     assert "render_status_text" in status_lib.read_text()
+    assert "status_cache_file" in status_lib.read_text()
+    cache_init_text = cache_init.read_text()
+    assert "procd_set_param command /usr/lib/easymanet/status-cache.sh" in cache_init_text
+    assert "procd_set_param respawn 10 5 5" in cache_init_text
+    assert "/etc/init.d/easymanet-status-cache enable" in cache_defaults.read_text()
     init_text = init.read_text()
     assert "procd_set_param command /usr/lib/easymanet/display-status.sh" in init_text
     assert "procd_set_param respawn" not in init_text
     assert "/etc/init.d/easymanet-display-status enable" in defaults.read_text()
     assert "easymanet-display-status.log" in report.read_text()
+    assert "easymanet-status-cache.log" in report.read_text()
+    provision_text = PROVISION_SCRIPT.read_text()
+    assert "status_cache_init=" in provision_text
+    assert provision_text.index("hostname: $HOSTNAME") < provision_text.index("status_cache_init=")
+    assert provision_text.index("status_cache_init=") < provision_text.index("display_status_init=")
 
 
 def test_topology_api_overlay_is_packaged():

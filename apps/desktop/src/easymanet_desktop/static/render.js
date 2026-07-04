@@ -166,6 +166,13 @@
     return plan.ssh;
   }
 
+  function planWanApiValue(plan) {
+    if (typeof plan.api_wan_enabled === "boolean") {
+      return plan.api_wan_enabled ? "enabled" : "disabled";
+    }
+    return plan.api_wan;
+  }
+
   function planDetailsElement(label, text) {
     if (!text) {
       return null;
@@ -202,6 +209,7 @@
       ["Image", imagePath],
       ["Version", image.version],
       ["SSH", planSshValue(plan)],
+      ["WAN API", planWanApiValue(plan)],
       ["Boot payload", plan.boot_payload],
     ]) {
       grid.append(...planRowElement(label, value));

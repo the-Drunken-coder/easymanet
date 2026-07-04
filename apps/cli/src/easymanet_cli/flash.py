@@ -16,6 +16,7 @@ from easymanet.flash import (
     redact_provision_for_display,
     render_provision_for_display,
     resolve_base_image,
+    resolve_flash_api_wan_enabled,
     resolve_flash_ssh_enabled,
     run_flash_workflow,
 )
@@ -86,6 +87,16 @@ def register_flash_command(app: typer.Typer) -> None:
             "--disable-ssh",
             help="Disable SSH at first boot, including on gate nodes.",
         ),
+        enable_wan_api: bool = typer.Option(
+            False,
+            "--enable-wan-api",
+            help="Expose the EasyMANET API on a Wi-Fi gate's upstream/WAN network.",
+        ),
+        disable_wan_api: bool = typer.Option(
+            False,
+            "--disable-wan-api",
+            help="Keep the EasyMANET API closed on upstream/WAN networks.",
+        ),
         show_secrets: bool = typer.Option(
             False,
             "--show-secrets",
@@ -109,6 +120,8 @@ def register_flash_command(app: typer.Typer) -> None:
             skip_overlay_wipe=skip_overlay_wipe,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
             show_secrets=show_secrets,
         )
 
@@ -130,6 +143,8 @@ def run_flash(
     skip_overlay_wipe: bool = False,
     enable_ssh: bool = False,
     disable_ssh: bool = False,
+    enable_wan_api: bool = False,
+    disable_wan_api: bool = False,
     show_secrets: bool = False,
 ) -> None:
     """Run the shared flash workflow and present it for the CLI."""
@@ -151,6 +166,8 @@ def run_flash(
             skip_overlay_wipe=skip_overlay_wipe,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
             show_secrets=show_secrets,
         ),
         emit=_print_flash_event,
@@ -200,6 +217,7 @@ def _print_plan_event(event: FlashEvent) -> None:
     typer.echo(f"  Device:       {plan.get('device', '')}")
     typer.echo(f"  Boot payload: {plan.get('boot_payload', '')}")
     typer.echo(f"  SSH:          {plan.get('ssh', '')}")
+    typer.echo(f"  WAN API:      {plan.get('api_wan', '')}")
 
     disk = plan.get("disk") or {}
     if disk:

@@ -232,7 +232,7 @@ const nativeApi = {
       ok: true,
       nodes: ["gate01"],
       node_roles: { gate01: "gate" },
-      node_access: { gate01: { management_ip: "10.41.254.9" } },
+      node_access: { gate01: { management_ip: "10.41.254.9", wifi_uplink_gate: true } },
     });
   },
   discoverMesh() {
@@ -443,6 +443,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
       device: "/dev/disk-test",
       boot_payload: "<boot>",
       ssh_enabled: false,
+      api_wan_enabled: false,
     },
     provision_display: "<script>alert(1)</script>",
     dry_run_info: "<b>boot files</b>",
@@ -455,6 +456,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && planText.includes("<script>alert(1)</script>")
     && planText.includes("<boot>")
     && planText.includes("<b>boot files</b>")
+    && planText.includes("WAN API")
     && planText.includes("disabled")
     && !planHtml.includes("<img src=x")
     && !planHtml.includes("<script>")

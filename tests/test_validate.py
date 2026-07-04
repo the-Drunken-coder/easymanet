@@ -238,6 +238,26 @@ def test_invalid_role():
     os.unlink(path)
 
 
+def test_zero_gate_nodes_is_invalid():
+    config = VALID_CONFIG.replace("role: gate", "role: point", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("exactly one gate node; found 0" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_multiple_gate_nodes_is_invalid():
+    config = VALID_CONFIG.replace("role: point", "role: gate", 1)
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("exactly one gate node; found 2" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_invalid_target():
     config = VALID_CONFIG.replace("target: rpi4-mm6108-spi", "target: rpi5")
     path = _write_config(config)
@@ -479,7 +499,7 @@ def test_resolve_node_non_dict_local_ap_and_gateway():
 
 
 def test_gateway_wifi_requires_ssid_and_password():
-    config = VALID_CONFIG + """
+    config = VALID_CONFIG.replace("role: gate", "role: point", 1) + """
   node03:
     role: gate
     hostname: node03
@@ -499,7 +519,7 @@ def test_gateway_wifi_requires_ssid_and_password():
 
 
 def test_gateway_wifi_validation_uses_deep_merge_defaults():
-    config = VALID_CONFIG.replace(
+    config = VALID_CONFIG.replace("role: gate", "role: point", 1).replace(
         "defaults:\n  target: rpi4-mm6108-spi",
         """
 defaults:
@@ -524,4 +544,27 @@ defaults:
     result = validate(m, node_name="node03")
     assert result.valid
     assert result.errors == []
+    os.unlink(path)
+
+
+def test_point_gateway_wifi_warns_but_remains_valid():
+    config = VALID_CONFIG + """
+  node03:
+    role: point
+    hostname: node03
+    ip: 10.41.3.1
+    gateway:
+      wifi:
+        enabled: true
+        ssid: home-wifi
+        password: home-password
+"""
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m, node_name="node03")
+    assert result.valid
+    assert result.errors == []
+    assert any("does not make the point a mesh gateway" in w for w in result.warnings)
+    assert any("local_ap will not be created" in w for w in result.warnings)
+    assert any("SSH on upstream Wi-Fi if SSH is enabled" in w for w in result.warnings)
     os.unlink(path)

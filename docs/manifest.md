@@ -158,6 +158,9 @@ must not use the subnet network or broadcast addresses (`10.41.0.0` or
 `10.41.255.255`), and must stay outside the gate DHCP pool
 `10.41.1.95`-`10.41.1.110`.
 
+The current runtime model requires exactly one `gate` node per fleet. That gate
+is the single DHCP server and internet exit for the flat `br-ahwlan` mesh LAN.
+
 ### Node `local_ap` Overrides
 
 Any field in `defaults.local_ap` can be overridden per node:
@@ -186,10 +189,15 @@ nodes:
 With `uplink_interface: wifi`, EasyMANET joins the configured upstream Wi-Fi as
 `wan`. The desktop Mesh and Diagnostics tabs discover nodes through the local
 EasyMANET API (`/v1/identity`, `/v1/neighbors`, `/v1/status`, and gate-only
-`/v1/topology`), so Wi-Fi gateways expose the API on port `10411` to the
-upstream Wi-Fi LAN. Treat any WAN-reachable management or API service as
-trusted-LAN only. With `uplink_interface: eth0`, EasyMANET runs WAN DHCP on
-`eth0` and keeps that port out of `br-ahwlan`.
+`/v1/topology`). Wi-Fi gateways keep that API mesh-side by default; use the
+flash-time `--enable-wan-api` opt-in only on trusted upstream Wi-Fi LANs. With
+`uplink_interface: eth0`, EasyMANET runs WAN DHCP on `eth0` and keeps that port
+out of `br-ahwlan`.
+
+On point nodes, `gateway.wifi.enabled` is allowed as a management uplink for
+direct SSH or troubleshooting over an upstream Wi-Fi LAN. It does not make the
+point a mesh gateway, does not provide mesh-to-WAN forwarding, and uses the
+same local AP radio that would otherwise host `local_ap`.
 
 ---
 
@@ -218,6 +226,7 @@ Priority (highest to lowest):
 | Hostnames must be unique | Error |
 | IP addresses must be unique, strings, inside `10.41.0.0/16`, outside `10.41.1.95`-`10.41.1.110`, and not `10.41.0.0` or `10.41.255.255` | Error |
 | role must be gate or point | Error |
+| fleet must define exactly one gate node | Error |
 | target must be one of the supported targets (e.g., rpi4-mm6108-spi) | Error |
 | local_ap.password min 8 chars when enabled | Error |
 | Selected node must exist in manifest | Error |
@@ -228,6 +237,7 @@ Priority (highest to lowest):
 | mesh.country must be two-letter ISO code (e.g. US) | Error |
 | gateway.wifi.enabled requires ssid and password | Error |
 | gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |
+| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior, local AP suppression, and SSH exposure if enabled | Warning |
 
 ## Security
 
@@ -235,12 +245,16 @@ Priority (highest to lowest):
 - `gateway.uplink_interface: eth0` makes Ethernet the gateway WAN uplink.
   Use Wi-Fi or a separate uplink if Ethernet should stay mesh-side on
   `br-ahwlan`.
-- On gate nodes, `gateway.wifi.enabled` binds the EasyMANET API to
-  `0.0.0.0:10411` and opens WAN firewall access to that API, including topology
-  endpoints under `/v1`.
+- On gate nodes, `gateway.wifi.enabled` keeps the EasyMANET API bound to the
+  mesh IP by default. Flashing with `--enable-wan-api` writes
+  `management.api_wan_enabled: true`, binds the API to `0.0.0.0:10411`, and
+  opens WAN firewall access to topology endpoints under `/v1`.
 - On gate nodes, `gateway.wifi.enabled` with SSH enabled also opens SSH on the
   WAN firewall zone.
-- EasyMANET API exposure on WAN (port 10411) is intended for trusted upstream
-  Wi-Fi LANs and is sensitive on untrusted uplinks.
+- EasyMANET API exposure on WAN (port 10411) is opt-in, intended only for
+  trusted upstream Wi-Fi LANs, and sensitive on untrusted uplinks.
+- On point nodes, `gateway.wifi.enabled` can expose SSH on the upstream Wi-Fi
+  LAN if SSH is enabled during flash, but it does not expose the EasyMANET API
+  or provide mesh-to-WAN forwarding.
 - Mesh credentials may be written to `/etc/openmanetd/config.yml` in plaintext
   when that file exists on the image.

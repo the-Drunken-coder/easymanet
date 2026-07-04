@@ -13,6 +13,7 @@ from easymanet_cli.flash import (
     REDACTED_VALUE,
     redact_provision_for_display,
     resolve_base_image,
+    resolve_flash_api_wan_enabled,
     resolve_flash_ssh_enabled,
 )
 from easymanet_cli import image as cli_image
@@ -39,6 +40,16 @@ defaults:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKm8abcdefgh"
 
 nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+
   point01:
     role: point
     hostname: point01
@@ -58,6 +69,18 @@ def test_resolve_flash_ssh_enable_overrides_point():
 
 def test_resolve_flash_ssh_role_defaults():
     assert resolve_flash_ssh_enabled(enable_ssh=False, disable_ssh=False) is None
+
+
+def test_resolve_flash_api_wan_defaults_off():
+    assert resolve_flash_api_wan_enabled(enable_wan_api=False, disable_wan_api=False) is False
+
+
+def test_resolve_flash_api_wan_enable_overrides_default():
+    assert resolve_flash_api_wan_enabled(enable_wan_api=True, disable_wan_api=False) is True
+
+
+def test_resolve_flash_api_wan_disable_wins():
+    assert resolve_flash_api_wan_enabled(enable_wan_api=True, disable_wan_api=True) is False
 
 
 def test_redact_provision_for_display_hides_secret_values():
@@ -119,6 +142,31 @@ def test_flash_ssh_flags_mutually_exclusive():
     )
     assert result.exit_code == 1
     assert "Cannot use --enable-ssh and --disable-ssh" in result.output
+
+
+def test_flash_wan_api_flags_mutually_exclusive():
+    from typer.testing import CliRunner
+
+    from easymanet_cli.app import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "flash",
+            "--config",
+            "fleet.yml",
+            "--node",
+            "n1",
+            "--device",
+            "/dev/disk4",
+            "--enable-wan-api",
+            "--disable-wan-api",
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Cannot use --enable-wan-api and --disable-wan-api" in result.output
 
 
 def test_flash_download_flags_mutually_exclusive():

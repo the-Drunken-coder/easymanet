@@ -244,6 +244,66 @@ def test_prepare_flash_workflow_exposes_effective_ssh_enabled(monkeypatch):
         assert result.plan["ssh_enabled"] is expected
 
 
+def test_prepare_flash_workflow_scopes_wan_api_to_wifi_gates(tmp_path, monkeypatch):
+    ethernet_gate = tmp_path / "ethernet-gate.yml"
+    ethernet_gate.write_text(
+        """\
+version: 1
+mesh:
+  id: ethernet
+  password: mesh-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: false
+  gateway:
+    enabled: true
+    uplink_interface: eth0
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys: []
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+"""
+    )
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    _guard_flash_execution_steps(monkeypatch)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+
+    cases = [
+        ("examples/three-node-field-mesh.yml", "gate01", {}, False, True),
+        ("examples/three-node-field-mesh.yml", "gate01", {"enable_wan_api": True}, True, True),
+        ("examples/three-node-field-mesh.yml", "point01", {"enable_wan_api": True}, False, False),
+        (str(ethernet_gate), "gate01", {"enable_wan_api": True}, False, False),
+    ]
+
+    for config, node, overrides, expected_enabled, expected_applicable in cases:
+        result = flash.prepare_flash_workflow(
+            flash.FlashOptions(
+                config=config,
+                node=node,
+                device="/dev/disk4",
+                dry_run=True,
+                **overrides,
+            )
+        )
+
+        assert result.ok is True
+        assert result.plan["api_wan_enabled"] is expected_enabled
+        assert result.plan["api_wan_applicable"] is expected_applicable
+        assert result.provision["management"]["api_wan_enabled"] is expected_enabled
+        if overrides.get("enable_wan_api") and not expected_applicable:
+            assert any("Wi-Fi-uplink gate" in warning for warning in result.warnings)
+
+
 def test_flash_workflow_validation_failure_returns_structured_errors(tmp_path, monkeypatch):
     config = tmp_path / "bad.yml"
     config.write_text("version: 1\nnodes: {}\n")

@@ -6,7 +6,7 @@ Returns a list of errors and warnings.
 
 import ipaddress
 import re
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from .manifest import Manifest
 from .provision import GatewayConfig, LocalApConfig, resolve_node_model
@@ -34,8 +34,8 @@ SSH_KEY_PATTERN = re.compile(
 
 class ValidationResult:
     def __init__(self):
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     @property
     def valid(self) -> bool:
@@ -48,7 +48,9 @@ class ValidationResult:
         self.warnings.append(msg)
 
 
-def _parse_ipv4(ip_str: str) -> Tuple[Optional[ipaddress.IPv4Address], Optional[str]]:
+def _parse_ipv4(ip_str: object) -> tuple[Optional[ipaddress.IPv4Address], Optional[str]]:
+    if not isinstance(ip_str, str):
+        return None, f"IP address must be a string, got {type(ip_str).__name__}: {ip_str}"
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
@@ -58,12 +60,12 @@ def _parse_ipv4(ip_str: str) -> Tuple[Optional[ipaddress.IPv4Address], Optional[
     return ip, None
 
 
-def validate_ip(ip_str: str) -> Optional[str]:
+def validate_ip(ip_str: object) -> Optional[str]:
     _, err = _parse_ipv4(ip_str)
     return err
 
 
-def validate_mesh_node_ip(ip_str: str) -> Optional[str]:
+def validate_mesh_node_ip(ip_str: object) -> Optional[str]:
     ip, err = _parse_ipv4(ip_str)
     if err:
         return err

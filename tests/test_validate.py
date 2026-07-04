@@ -172,6 +172,16 @@ def test_invalid_ip():
     os.unlink(path)
 
 
+def test_numeric_node_ip_is_invalid():
+    config = VALID_CONFIG.replace("ip: 10.41.2.1", "ip: 101")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert not result.valid
+    assert any("IP address must be a string" in e for e in result.errors)
+    os.unlink(path)
+
+
 def test_ipv6_node_ip_is_invalid():
     config = VALID_CONFIG.replace("ip: 10.41.2.1", "ip: fd00::1")
     path = _write_config(config)

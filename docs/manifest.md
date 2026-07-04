@@ -153,6 +153,11 @@ node name used with `--node` in CLI commands.
 | `local_ap` | object | no | from defaults | Local AP override |
 | `gateway` | object | no | from defaults | Gateway settings override |
 
+Node `ip` values must be strings inside the `10.41.0.0/16` mesh subnet,
+must not use the subnet network or broadcast addresses (`10.41.0.0` or
+`10.41.255.255`), and must stay outside the gate DHCP pool
+`10.41.1.95`-`10.41.1.110`.
+
 ### Node `local_ap` Overrides
 
 Any field in `defaults.local_ap` can be overridden per node:
@@ -211,7 +216,7 @@ Priority (highest to lowest):
 | nodes section must have at least one node | Error |
 | Node names must be unique (case-insensitive) | Error |
 | Hostnames must be unique | Error |
-| IP addresses must be unique and valid | Error |
+| IP addresses must be unique, strings, inside `10.41.0.0/16`, outside `10.41.1.95`-`10.41.1.110`, and not `10.41.0.0` or `10.41.255.255` | Error |
 | role must be gate or point | Error |
 | target must be one of the supported targets (e.g., rpi4-mm6108-spi) | Error |
 | local_ap.password min 8 chars when enabled | Error |

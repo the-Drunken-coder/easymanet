@@ -1,0 +1,11 @@
+1. **Time & Date:** 2026-07-04T06:17:34Z
+2. **Name:** Point nodes accept `gateway.wifi` and become half-configured pseudo-gateways
+3. **Issue:** A `role: point` node with an explicit `gateway.wifi.enabled: true` block resolves and provisions a Wi-Fi WAN uplink, but never gets BATMAN `gw_mode=server` or mesh→WAN forwarding. Validation checks the wifi fields without questioning the role combination.
+4. **Severity:** S3 (Moderate)
+5. **Location:** `packages/core/src/easymanet/provision.py:359-384` (`_resolved_gateway` keeps explicit node wifi on points); `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh:265-294,456-484` (WIFI_UPLINK block runs regardless of role); `packages/core/src/easymanet/validate.py:331-354` (`_validate_gateway_wifi` has no role check)
+6. **Expected:** Validation warns (or errors) when a point carries gateway Wi-Fi settings, or the docs define the "managed point over house Wi-Fi" use case and its exact behavior.
+7. **Actual:** The point gets `wan0` STA + `network.wan` DHCP, but: (a) its **local AP is silently sacrificed** — `provision.sh:244` skips `local_ap` whenever the Wi-Fi uplink is on (shared radio), with no error for an operator who configured both; (b) if `ssh_enabled` is true (e.g. fleet-wide), the point also gets the `allow_ssh_wan` firewall rule (`provision.sh:467-474`), inheriting upstream-network SSH exposure on a node nobody thinks of as internet-facing; (c) the mesh gains nothing — no `gw_mode=server`, no `mesh_wan_forwarding`, so it never acts as an internet exit.
+8. **Reproduction:**
+   1. In fleet.yml give a `role: point` node `gateway: { wifi: { enabled: true, ssid: X, password: Y } }` and `local_ap: { enabled: true, ... }`.
+   2. `easymanet validate` — passes with no role warning; `easymanet render <fleet.yml> <node>` shows the gateway wifi block on the point.
+9. **Notes:** From the handed 2026-07-04 review; verified against code. Don't hard-error — the remote-management use case may be legitimate — but it deserves a validation warning covering the local-AP conflict and SSH exposure. Fits in the same `validate.py` change as [2026-07-04-gate-count-unvalidated-dup-dhcp.md](2026-07-04-gate-count-unvalidated-dup-dhcp.md).

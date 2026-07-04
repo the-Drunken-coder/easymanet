@@ -1,0 +1,9 @@
+1. **Time & Date:** 2026-07-04T06:17:34Z
+2. **Name:** eth0 means "mesh access" on points but "WAN uplink" on default gates — undocumented operator trap
+3. **Issue:** The same physical Ethernet jack changes meaning by role: on a point (and on gates with Wi-Fi or non-eth0 uplinks) eth0 is bridged into `br-ahwlan` and drops you onto the mesh; on a default gate (uplink `eth0`, no Wi-Fi uplink) eth0 is the WAN port and is kept out of the bridge. No user-facing doc states this.
+4. **Severity:** S5 (Note)
+5. **Location:** `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh:166-171,330-334` (`ETH0_MESH_SIDE`), `network.sh:41-54` (same policy for late repair); user docs: `docs/flashing.md` / `docs/sample-fleet.md` (no mention)
+6. **Expected:** Docs (and ideally the desktop post-flash hint) say explicitly: "plug your laptop into a point's Ethernet to reach the mesh; a gate's Ethernet is its internet uplink — use its Wi-Fi AP or another node to manage it."
+7. **Actual:** An operator who manages a point over Ethernet, then walks to the gate and plugs into the same-looking jack, lands on the upstream WAN network (or an unplugged dead port) and concludes the gate is broken. The desktop hint compounds it by saying "Connect Ethernet, then SSH to root@..." for gates too (see [2026-07-04-desktop-management-ip-stale.md](2026-07-04-desktop-management-ip-stale.md)).
+8. **Reproduction:** Behavioral, not a code defect: provision one default gate and one point, plug a laptop into each eth0, compare what network you land on.
+9. **Notes:** From the 2026-07-04 mesh review. Pure docs/UX fix; the underlying behavior is correct and deliberate. When fixing the desktop hint, make the gate variant role-aware ("gate: manage via its mesh IP over the mesh or local AP, not its Ethernet jack").

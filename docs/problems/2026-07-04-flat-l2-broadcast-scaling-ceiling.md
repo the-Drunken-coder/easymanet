@@ -1,0 +1,9 @@
+1. **Time & Date:** 2026-07-04T06:17:34Z
+2. **Name:** Flat L2 /16 mesh design — broadcast scaling ceiling and 16-lease DHCP pool (design note)
+3. **Issue:** Every node bridges bat0, eth0, and the local AP into one `br-ahwlan` on a single `10.41.0.0/16` broadcast domain. All broadcast traffic (ARP, DHCP, client chatter) floods the whole mesh over a HaLow radio moving only a few Mbps. Separately, the gate's DHCP pool is 16 leases total for all client devices on the entire mesh.
+4. **Severity:** S5 (Note)
+5. **Location:** `images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh:319-341` (bridge + /16), `provision.sh:33-34,387-391` (`EM_AHWLAN_DHCP_START=351`, `LIMIT=16`)
+6. **Expected:** n/a — this is the deliberate design, and it is the right one for small fleets: BATMAN makes the multi-hop mesh look like one Ethernet cable, points stay near-stateless, and OpenMANETd manages the LAN with its normal model.
+7. **Actual:** Works well at ~5–15 nodes; degrades as node/client count grows because every broadcast crosses every radio hop (BATMAN's distributed ARP table and `multicast_mode` soften but don't remove this). The 16-lease pool is a quiet hard ceiling on connected client devices mesh-wide, and its size/offset are env-default constants no fleet.yml field controls.
+8. **Reproduction:** n/a — inherent characteristic, not a defect. Symptom to watch on HIL at larger scale: rising airtime on `wlan0` with idle clients, slow/failed DHCP at the mesh edge.
+9. **Notes:** From the 2026-07-04 mesh review — recorded so scaling expectations are explicit. Not worth engineering around now (single maintainer, small target fleets — see 2026-06 review). If bigger fleets ever matter, the levers in order of cheapness: raise `EM_AHWLAN_DHCP_LIMIT`, expose pool size in fleet.yml, then the much larger step of segmenting client LANs per node with routed access (loses the flat-bridge elegance).

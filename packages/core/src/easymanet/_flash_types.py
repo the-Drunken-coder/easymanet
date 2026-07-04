@@ -41,6 +41,8 @@ class FlashOptions:
     skip_overlay_wipe: bool = False
     enable_ssh: bool = False
     disable_ssh: bool = False
+    enable_wan_api: bool = False
+    disable_wan_api: bool = False
     show_secrets: bool = False
 
 

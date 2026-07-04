@@ -237,6 +237,7 @@ const nativeApi = {
           management_ip: "10.41.1.1",
           local_ap_enabled: true,
           local_ap_ssid: "gate01-local",
+          wifi_uplink_gate: true,
           ethernet_mesh_access: false,
         },
       },
@@ -450,6 +451,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
       device: "/dev/disk-test",
       boot_payload: "<boot>",
       ssh_enabled: false,
+      api_wan_enabled: false,
     },
     provision_display: "<script>alert(1)</script>",
     dry_run_info: "<b>boot files</b>",
@@ -462,6 +464,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && planText.includes("<script>alert(1)</script>")
     && planText.includes("<boot>")
     && planText.includes("<b>boot files</b>")
+    && planText.includes("WAN API")
     && planText.includes("disabled")
     && !planHtml.includes("<img src=x")
     && !planHtml.includes("<script>")

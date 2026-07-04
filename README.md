@@ -330,7 +330,8 @@ Generated public product repositories are produced with
 - `gateway.uplink_interface: eth0` is reserved for wired management on
   `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
 - Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
-- Gate topology API exposure on WAN (port 10411) is sensitive on untrusted uplinks.
+- Gate topology API exposure on WAN (port 10411) is default-off and must stay
+  limited to trusted uplinks when `--enable-wan-api` is used.
 - When `/etc/openmanetd/config.yml` exists, first-boot writes mesh credentials
   into that file in plaintext (OpenMANET daemon requirement; verify on hardware).
 

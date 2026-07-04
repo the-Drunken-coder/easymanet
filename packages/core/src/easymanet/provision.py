@@ -159,6 +159,7 @@ class ManagementConfig:
     root_password_hash: object = ""
     ssh_authorized_keys: object = field(default_factory=list)
     ssh_enabled: Optional[bool] = None
+    api_wan_enabled: Optional[bool] = None
 
     @classmethod
     def from_mapping(
@@ -166,11 +167,13 @@ class ManagementConfig:
         management: dict[str, object],
         *,
         ssh_enabled: Optional[bool] = None,
+        api_wan_enabled: Optional[bool] = None,
     ) -> "ManagementConfig":
         return cls(
             root_password_hash=management.get("root_password_hash", ""),
             ssh_authorized_keys=management.get("ssh_authorized_keys", []),
             ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -180,6 +183,8 @@ class ManagementConfig:
         }
         if self.ssh_enabled is not None:
             payload["ssh_enabled"] = bool(self.ssh_enabled)
+        if self.api_wan_enabled is not None:
+            payload["api_wan_enabled"] = bool(self.api_wan_enabled)
         return payload
 
 
@@ -288,6 +293,7 @@ def resolve_provision(
     node_name: str,
     *,
     ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
 ) -> ProvisionPayload:
     mesh = _require_mapping(manifest.mesh, "mesh")
     defaults = _require_mapping(manifest.defaults, "defaults")
@@ -301,7 +307,11 @@ def resolve_provision(
         version=1,
         mesh=MeshConfig.from_mapping(mesh),
         node=resolve_node_model(manifest, node_name),
-        management=ManagementConfig.from_mapping(management, ssh_enabled=ssh_enabled),
+        management=ManagementConfig.from_mapping(
+            management,
+            ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
+        ),
         fleet=resolve_fleet_model(manifest),
     )
 

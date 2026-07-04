@@ -101,6 +101,12 @@ def mesh_discover_payload(
         if topology.get("ok"):
             nodes = topology.get("nodes") or []
             links = topology.get("links") or []
+            roster = topology.get("roster")
+            roster_nodes = roster if isinstance(roster, list) else nodes
+            merged_warnings = [
+                *merged_warnings,
+                *_stale_gate_roster_warnings(config, roster_nodes),
+            ]
             return {
                 "ok": True,
                 "config": config,
@@ -351,6 +357,76 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
                     )
                 )
     return candidates
+
+
+RosterEntry = tuple[str, str, str]
+
+
+def _stale_gate_roster_warnings(config: str, topology_nodes: object) -> list[str]:
+    if not config:
+        return []
+    try:
+        local_roster = _local_fleet_roster(config)
+    except (ManifestError, OSError, ValueError):
+        return []
+
+    gateway_roster = _topology_roster(topology_nodes)
+    if not local_roster or local_roster == gateway_roster:
+        return []
+
+    missing = sorted(local_roster - gateway_roster)
+    extra = sorted(gateway_roster - local_roster)
+    details: list[str] = []
+    if missing:
+        details.append(f"missing from gateway: {_format_roster_entries(missing)}")
+    if extra:
+        details.append(f"only on gateway: {_format_roster_entries(extra)}")
+    return [
+        "Gateway roster differs from the selected fleet.yml "
+        f"({'; '.join(details)}). Reflash gate nodes after changing fleet.yml."
+    ]
+
+
+def _local_fleet_roster(config: str) -> set[RosterEntry]:
+    config_path = resolve_fleet_config(config)
+    manifest = load_manifest(str(config_path))
+    roster: set[RosterEntry] = set()
+    for name in manifest.node_names():
+        node = resolve_node_model(manifest, name)
+        roster.add(_roster_entry(name, node.ip, node.role))
+    return roster
+
+
+def _topology_roster(topology_nodes: object) -> set[RosterEntry]:
+    if not isinstance(topology_nodes, list):
+        return set()
+    roster: set[RosterEntry] = set()
+    for node in topology_nodes:
+        if not isinstance(node, dict):
+            continue
+        name = node.get("name")
+        ipaddr = node.get("ip")
+        role = node.get("role")
+        roster.add(_roster_entry(name, ipaddr, role))
+    return roster
+
+
+def _roster_entry(name: object, ipaddr: object, role: object) -> RosterEntry:
+    return (
+        str(name or "").strip(),
+        str(ipaddr or "").strip(),
+        str(role or "").strip().lower(),
+    )
+
+
+def _format_roster_entries(entries: list[RosterEntry]) -> str:
+    labels: list[str] = []
+    for name, ipaddr, role in entries[:3]:
+        parts = [part for part in (name, ipaddr, role) if part]
+        labels.append("/".join(parts) or "<unknown>")
+    if len(entries) > 3:
+        labels.append(f"+{len(entries) - 3} more")
+    return ", ".join(labels)
 
 
 def _looks_like_easymanet_api(payload: dict[str, Any]) -> bool:

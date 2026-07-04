@@ -17,9 +17,11 @@ from ._flash_disk import disk_details as _disk_details_impl
 from ._flash_display import (
     REDACTED_VALUE,
     effective_flash_ssh_enabled,
+    flash_api_wan_note,
     flash_ssh_note,
     redact_provision_for_display,
     render_provision_for_display,
+    resolve_flash_api_wan_enabled,
     resolve_flash_ssh_enabled,
 )
 from ._flash_images import (
@@ -105,6 +107,7 @@ class _PreparedFlash:
     manifest: Manifest | None = None
     image_path: str = ""
     ssh_enabled: bool | None = None
+    api_wan_enabled: bool = False
 
 
 def prepare_flash_workflow(
@@ -137,6 +140,7 @@ def run_flash_workflow(
     manifest = prepared.manifest
     image_path = prepared.image_path
     ssh_enabled = prepared.ssh_enabled
+    api_wan_enabled = prepared.api_wan_enabled
     send = _event_sender(events, emit)
 
     try:
@@ -182,6 +186,7 @@ def run_flash_workflow(
                     manifest=manifest,
                     node_name=options.node,
                     ssh_enabled=ssh_enabled,
+                    api_wan_enabled=api_wan_enabled,
                 )
             ]
             for item in inject_results:
@@ -261,6 +266,7 @@ def _prepare_flash_workflow(
     manifest: Manifest | None = None
     image_path = ""
     ssh_enabled: bool | None = None
+    api_wan_enabled = False
     send = _event_sender(events, emit)
 
     try:
@@ -293,13 +299,27 @@ def _prepare_flash_workflow(
         resolved_node = provision.node
         target = str(resolved_node.target)
         role = str(resolved_node.role)
+        api_wan_requested = resolve_flash_api_wan_enabled(
+            enable_wan_api=options.enable_wan_api,
+            disable_wan_api=options.disable_wan_api,
+        )
+        api_wan_applicable = _is_wifi_uplink_gate(resolved_node)
+        api_wan_enabled = api_wan_requested and api_wan_applicable
+        if api_wan_requested and not api_wan_applicable:
+            message = "WAN API access only applies to Wi-Fi-uplink gate nodes; leaving it closed for this node."
+            warnings.append(message)
+            send("warning", message, level="warning")
         ssh_enabled = effective_flash_ssh_enabled(
             role,
             enable_ssh=options.enable_ssh,
             disable_ssh=options.disable_ssh,
         )
-        if ssh_override is None:
-            provision = resolve_provision(manifest, options.node, ssh_enabled=ssh_enabled)
+        provision = resolve_provision(
+            manifest,
+            options.node,
+            ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
+        )
         provision_dict = provision.to_dict()
         public_provision = redact_provision_for_display(provision_dict)
         image_path, image_details, image_warnings = resolve_base_image(
@@ -350,6 +370,14 @@ def _prepare_flash_workflow(
                 disable_ssh=options.disable_ssh,
             ),
             "ssh_enabled": ssh_enabled,
+            "api_wan": flash_api_wan_note(
+                api_wan_enabled=api_wan_enabled,
+                api_wan_applicable=api_wan_applicable,
+                enable_wan_api=options.enable_wan_api,
+                disable_wan_api=options.disable_wan_api,
+            ),
+            "api_wan_enabled": api_wan_enabled,
+            "api_wan_applicable": api_wan_applicable,
             "secrets_redacted": not options.show_secrets,
             "disk": disk,
         }
@@ -394,6 +422,7 @@ def _prepare_flash_workflow(
             manifest=manifest,
             image_path=image_path,
             ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
         )
     except FlashWorkflowError as exc:
         send("error", exc.message, level="error")
@@ -413,6 +442,7 @@ def _prepare_flash_workflow(
             manifest=manifest,
             image_path=image_path,
             ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
         )
     except Exception as exc:  # noqa: BLE001 - API boundary returns structured failures.
         message = f"Unexpected flash workflow error: {type(exc).__name__}: {exc}"
@@ -434,6 +464,7 @@ def _prepare_flash_workflow(
             manifest=manifest,
             image_path=image_path,
             ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
         )
 
 
@@ -481,6 +512,11 @@ def _validate_options(options: FlashOptions) -> None:
             FlashErrorCode.OPTIONS,
             "Cannot use --enable-ssh and --disable-ssh together.",
         )
+    if options.enable_wan_api and options.disable_wan_api:
+        raise FlashWorkflowError(
+            FlashErrorCode.OPTIONS,
+            "Cannot use --enable-wan-api and --disable-wan-api together.",
+        )
     if options.download and options.no_download:
         raise FlashWorkflowError(
             FlashErrorCode.OPTIONS,
@@ -506,6 +542,17 @@ def _load_manifest(config_path: Path) -> Manifest:
         return load_manifest(str(config_path))
     except ManifestError as exc:
         raise FlashWorkflowError(FlashErrorCode.MANIFEST, f"Error: {exc}") from exc
+
+
+def _is_wifi_uplink_gate(resolved_node: Any) -> bool:
+    gateway = getattr(resolved_node, "gateway", None)
+    wifi = getattr(gateway, "wifi", None)
+    return (
+        str(getattr(resolved_node, "role", "")) == "gate"
+        and getattr(gateway, "enabled", None) is True
+        and wifi is not None
+        and getattr(wifi, "enabled", None) is True
+    )
 
 
 def _result(

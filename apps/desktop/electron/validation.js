@@ -52,8 +52,9 @@ async function validateFlashPayload(payload) {
   }
 
   const adminPassword = typeof payload.adminPassword === "string" ? payload.adminPassword : "";
+  const wanApiEnabled = booleanFlag(payload.wanApiEnabled) || booleanFlag(payload.apiWanEnabled);
 
-  return { ...validated, device, sshMode, adminPassword };
+  return { ...validated, device, sshMode, wanApiEnabled, adminPassword };
 }
 
 async function validateMeshPayload(payload) {
@@ -140,6 +141,9 @@ function flashArgs(payload) {
     args.push("--enable-ssh");
   } else if (payload.sshMode === "disable") {
     args.push("--disable-ssh");
+  }
+  if (payload.wanApiEnabled) {
+    args.push("--enable-wan-api");
   }
   return args;
 }

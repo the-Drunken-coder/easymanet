@@ -43,6 +43,8 @@ def flash_plan_payload(
     image_sha256: str | None = None,
     enable_ssh: bool = False,
     disable_ssh: bool = False,
+    enable_wan_api: bool = False,
+    disable_wan_api: bool = False,
 ) -> dict[str, Any]:
     result = prepare_flash_workflow(
         FlashOptions(
@@ -55,6 +57,8 @@ def flash_plan_payload(
             yes=False,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
         )
     )
     payload = result.to_dict(include_events=True)
@@ -71,6 +75,8 @@ def prepare_flash_payload(
     image_sha256: str | None = None,
     enable_ssh: bool = False,
     disable_ssh: bool = False,
+    enable_wan_api: bool = False,
+    disable_wan_api: bool = False,
     emit: Callable[[FlashEvent], None] | None = None,
 ) -> dict[str, Any]:
     result = prepare_flash_workflow(
@@ -84,6 +90,8 @@ def prepare_flash_payload(
             yes=True,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
         ),
         emit=emit,
     )
@@ -102,6 +110,8 @@ def flash_payload(
     image_sha256: str | None = None,
     enable_ssh: bool = False,
     disable_ssh: bool = False,
+    enable_wan_api: bool = False,
+    disable_wan_api: bool = False,
     emit: Callable[[FlashEvent], None] | None = None,
 ) -> dict[str, Any]:
     result = run_flash_workflow(
@@ -115,6 +125,8 @@ def flash_payload(
             yes=yes,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
         ),
         emit=emit,
     )
@@ -127,6 +139,8 @@ def flash_payload(
             device=device,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            enable_wan_api=enable_wan_api,
+            disable_wan_api=disable_wan_api,
             image=payload["image"],
         )
     return payload
@@ -225,6 +239,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 image_sha256=args.image_sha256,
                 enable_ssh=args.enable_ssh,
                 disable_ssh=args.disable_ssh,
+                enable_wan_api=args.enable_wan_api,
+                disable_wan_api=args.disable_wan_api,
             )
         elif args.command == "prepare-flash":
             payload = prepare_flash_payload(
@@ -235,6 +251,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 image_sha256=args.image_sha256,
                 enable_ssh=args.enable_ssh,
                 disable_ssh=args.disable_ssh,
+                enable_wan_api=args.enable_wan_api,
+                disable_wan_api=args.disable_wan_api,
                 emit=_print_bridge_event,
             )
             print(json.dumps({"type": "result", **payload}), flush=True)
@@ -249,6 +267,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 image_sha256=args.image_sha256,
                 enable_ssh=args.enable_ssh,
                 disable_ssh=args.disable_ssh,
+                enable_wan_api=args.enable_wan_api,
+                disable_wan_api=args.disable_wan_api,
                 emit=_print_bridge_event,
             )
             print(json.dumps({"type": "result", **payload}), flush=True)
@@ -273,6 +293,8 @@ def _add_flash_args(parser: argparse.ArgumentParser, *, include_yes: bool) -> No
     parser.add_argument("--image-sha256", default=None)
     parser.add_argument("--enable-ssh", action="store_true")
     parser.add_argument("--disable-ssh", action="store_true")
+    parser.add_argument("--enable-wan-api", action="store_true")
+    parser.add_argument("--disable-wan-api", action="store_true")
     if include_yes:
         parser.add_argument("--yes", action="store_true")
 
@@ -324,6 +346,8 @@ def _sudo_flash_command(
     device: str,
     enable_ssh: bool,
     disable_ssh: bool,
+    enable_wan_api: bool,
+    disable_wan_api: bool,
     image: dict[str, Any],
 ) -> str:
     args = ["sudo", *_bridge_command(), "flash", "--config", config, "--node", node, "--device", device, "--yes"]
@@ -331,6 +355,10 @@ def _sudo_flash_command(
         args.append("--enable-ssh")
     if disable_ssh:
         args.append("--disable-ssh")
+    if enable_wan_api:
+        args.append("--enable-wan-api")
+    if disable_wan_api:
+        args.append("--disable-wan-api")
 
     cached_path = str(image.get("cached_path") or image.get("path") or "")
     sha256 = str(image.get("sha256") or "")

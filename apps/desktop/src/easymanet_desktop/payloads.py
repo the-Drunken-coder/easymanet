@@ -496,9 +496,9 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
             "local_ap_ssid": str(local_ap.ssid or ""),
             "wifi_uplink_gate": (
                 str(resolved.role) == "gate"
-                and gateway.enabled is True
+                and provision_json_bool(gateway.enabled)
                 and wifi is not None
-                and wifi.enabled is True
+                and provision_json_bool(wifi.enabled)
             ),
             "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
             "mesh_ip": str(resolved.ip or ""),

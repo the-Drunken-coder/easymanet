@@ -188,6 +188,47 @@ nodes:
     assert access["gate01"]["ethernet_mesh_access"] is False
 
 
+def test_node_access_normalizes_wifi_uplink_gate_booleans(tmp_path):
+    config = tmp_path / "string-bool-wifi-gate.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: local-ap-password
+  gateway:
+    enabled: "true"
+    uplink_interface: wifi
+    wifi:
+      enabled: "true"
+      ssid: uplink
+      password: uplink-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["ethernet_mesh_access"] is True
+    assert access["gate01"]["wifi_uplink_gate"] is True
+
+
 def test_node_access_matches_disabled_gate_flashed_eth0_wan_behavior(tmp_path):
     config = tmp_path / "disabled-gateway.yml"
     config.write_text(

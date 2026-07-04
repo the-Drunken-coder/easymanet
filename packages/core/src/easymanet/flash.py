@@ -51,7 +51,7 @@ from .inject import InjectError, inject, inject_dry_run_info
 from .manifest import Manifest, ManifestError, load_manifest
 from .platform import check_platform
 from .privileges import PrivilegeError, check_privileges
-from .provision import resolve_provision
+from .provision import provision_json_bool, resolve_provision
 from .validate import validate
 from .workspace import resolve_fleet_config
 
@@ -549,9 +549,9 @@ def _is_wifi_uplink_gate(resolved_node: Any) -> bool:
     wifi = getattr(gateway, "wifi", None)
     return (
         str(getattr(resolved_node, "role", "")) == "gate"
-        and getattr(gateway, "enabled", None) is True
+        and provision_json_bool(getattr(gateway, "enabled", None))
         and wifi is not None
-        and getattr(wifi, "enabled", None) is True
+        and provision_json_bool(getattr(wifi, "enabled", None))
     )
 
 

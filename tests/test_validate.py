@@ -196,6 +196,17 @@ def test_node_ip_outside_mesh_subnet_is_invalid():
     os.unlink(path)
 
 
+def test_node_ip_cannot_be_mesh_subnet_network_or_broadcast_address():
+    for reserved_ip in ("10.41.0.0", "10.41.255.255"):
+        config = VALID_CONFIG.replace("ip: 10.41.2.1", f"ip: {reserved_ip}")
+        path = _write_config(config)
+        m = load_manifest(path)
+        result = validate(m)
+        assert not result.valid
+        assert any("network or broadcast address" in e for e in result.errors)
+        os.unlink(path)
+
+
 def test_node_ip_in_gate_dhcp_pool_is_invalid():
     for reserved_ip in ("10.41.1.95", "10.41.1.110"):
         config = VALID_CONFIG.replace("ip: 10.41.2.1", f"ip: {reserved_ip}")

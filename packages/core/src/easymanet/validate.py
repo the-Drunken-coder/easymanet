@@ -71,6 +71,11 @@ def validate_mesh_node_ip(ip_str: str) -> Optional[str]:
         return f"Invalid IP address: {ip_str}"
     if ip not in MESH_NETWORK:
         return f"IP address must be in mesh subnet {MESH_NETWORK}: {ip_str}"
+    if ip in (MESH_NETWORK.network_address, MESH_NETWORK.broadcast_address):
+        return (
+            "IP address cannot be the mesh subnet network or broadcast address "
+            f"({MESH_NETWORK.network_address}, {MESH_NETWORK.broadcast_address}): {ip_str}"
+        )
     if GATE_DHCP_POOL_START <= ip <= GATE_DHCP_POOL_END:
         return (
             "IP address is reserved for gate DHCP leases "

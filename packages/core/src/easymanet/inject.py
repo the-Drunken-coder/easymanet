@@ -56,9 +56,15 @@ def inject(
     dry_run: bool = False,
     *,
     ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
 ) -> List[Tuple[str, bool]]:
     if dry_run:
-        render(manifest, node_name, ssh_enabled=ssh_enabled)
+        render(
+            manifest,
+            node_name,
+            ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
+        )
         return [
             ("/boot/easymanet/provision.json", True),
             ("Base image must already include EasyMANET first-boot hooks", True),
@@ -71,6 +77,7 @@ def inject(
             manifest,
             node_name,
             ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
         )
     except OSError as e:
         raise InjectError(f"Failed to write boot-partition provision.json: {e}") from e
@@ -84,8 +91,14 @@ def stage_boot_payload(
     node_name: str,
     *,
     ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
 ) -> List[Tuple[str, bool]]:
-    provision_json = render(manifest, node_name, ssh_enabled=ssh_enabled)
+    provision_json = render(
+        manifest,
+        node_name,
+        ssh_enabled=ssh_enabled,
+        api_wan_enabled=api_wan_enabled,
+    )
     dest_dir = boot_root / "easymanet"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / "provision.json"

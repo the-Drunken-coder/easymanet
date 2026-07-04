@@ -111,6 +111,21 @@ easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
   --base-image ./openmanet.img.gz --enable-ssh --yes
 ```
 
+### Upstream API access at flash time
+
+The EasyMANET API stays mesh-side by default. On Wi-Fi-uplink gate nodes only,
+`--enable-wan-api` exposes port `10411` on the upstream Wi-Fi/WAN side for
+trusted-LAN desktop management. Leave it off on shared, venue, or untrusted
+Wi-Fi.
+
+| Flags | Result |
+|-------|--------|
+| (none) | WAN API off. |
+| `--enable-wan-api` | WAN API on only for Wi-Fi-uplink gate nodes. |
+| `--disable-wan-api` | WAN API off. |
+
+`--enable-wan-api` and `--disable-wan-api` cannot be used together.
+
 ### Safety
 
 - Mac internal drives (containing `/` or `/System/Volumes/Data`) are

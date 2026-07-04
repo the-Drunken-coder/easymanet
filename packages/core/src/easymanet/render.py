@@ -11,8 +11,14 @@ def render(
     node_name: str,
     *,
     ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
 ) -> str:
-    return resolve_provision(manifest, node_name, ssh_enabled=ssh_enabled).to_json()
+    return resolve_provision(
+        manifest,
+        node_name,
+        ssh_enabled=ssh_enabled,
+        api_wan_enabled=api_wan_enabled,
+    ).to_json()
 
 
 def render_dict(
@@ -20,5 +26,11 @@ def render_dict(
     node_name: str,
     *,
     ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
 ) -> dict[str, object]:
-    return resolve_provision(manifest, node_name, ssh_enabled=ssh_enabled).to_dict()
+    return resolve_provision(
+        manifest,
+        node_name,
+        ssh_enabled=ssh_enabled,
+        api_wan_enabled=api_wan_enabled,
+    ).to_dict()

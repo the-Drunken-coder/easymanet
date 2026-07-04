@@ -20,7 +20,7 @@ from easymanet.download import (
 )
 from easymanet.manifest import ManifestError, load_manifest
 from easymanet.platform import check_platform
-from easymanet.provision import resolve_node_model
+from easymanet.provision import eth0_mesh_side, provision_json_bool, resolve_node_model
 from easymanet.validate import validate
 from easymanet.workspace import FLEET_SUFFIXES, resolve_fleet_config, workspace_payload
 
@@ -485,6 +485,8 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
                 "local_ap_ssid": "",
                 "wifi_uplink_gate": False,
                 "management_ip": MANAGEMENT_LAN_IP,
+                "mesh_ip": "",
+                "ethernet_mesh_access": True,
             }
             continue
         local_ap = resolved.local_ap
@@ -492,15 +494,17 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
         wifi = gateway.wifi
         access[name] = {
             "role": str(resolved.role),
-            "local_ap_enabled": bool(local_ap.enabled),
+            "local_ap_enabled": provision_json_bool(local_ap.enabled),
             "local_ap_ssid": str(local_ap.ssid or ""),
             "wifi_uplink_gate": (
                 str(resolved.role) == "gate"
-                and gateway.enabled is True
+                and provision_json_bool(gateway.enabled)
                 and wifi is not None
-                and wifi.enabled is True
+                and provision_json_bool(wifi.enabled)
             ),
             "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
+            "mesh_ip": str(resolved.ip or ""),
+            "ethernet_mesh_access": eth0_mesh_side(resolved.role, resolved.gateway),
         }
     return access
 

@@ -2047,6 +2047,26 @@ def test_provision_non_eth0_uplink_configures_wan(tmp_path):
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 
+def test_provision_disabled_gate_still_uses_eth0_as_wan(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    provision_data["node"]["gateway"] = {
+        "enabled": False,
+        "uplink_interface": "eth0",
+    }
+
+    result = _run_provision(prefix, provision_data, uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "server"
+    assert _uci_get(uci_state, "network.wan.device", env) == "eth0"
+    assert _uci_get(uci_state, "network.wan.ifname", env) == "eth0"
+    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0"}
+
+
 def test_provision_wifi_uplink_keeps_wan_on_wifi_sta_path(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"

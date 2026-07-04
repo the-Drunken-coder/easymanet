@@ -144,9 +144,127 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_roles"]["point01"] == "point"
     assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
     assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
+    assert payload["node_access"]["gate01"]["mesh_ip"] == "10.41.1.1"
+    assert payload["node_access"]["gate01"]["ethernet_mesh_access"] is True
     assert payload["node_access"]["point01"]["management_ip"] == "10.41.2.1"
     assert payload["node_access"]["gate01"]["wifi_uplink_gate"] is True
     assert payload["node_access"]["point01"]["wifi_uplink_gate"] is False
+
+
+def test_node_access_marks_eth0_gate_ethernet_as_wan(tmp_path):
+    config = tmp_path / "eth0-gate.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: local-ap-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["management_ip"] == "10.41.1.1"
+    assert access["gate01"]["ethernet_mesh_access"] is False
+
+
+def test_node_access_normalizes_wifi_uplink_gate_booleans(tmp_path):
+    config = tmp_path / "string-bool-wifi-gate.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: true
+    password: local-ap-password
+  gateway:
+    enabled: "true"
+    uplink_interface: wifi
+    wifi:
+      enabled: "true"
+      ssid: uplink
+      password: uplink-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["ethernet_mesh_access"] is True
+    assert access["gate01"]["wifi_uplink_gate"] is True
+
+
+def test_node_access_matches_disabled_gate_flashed_eth0_wan_behavior(tmp_path):
+    config = tmp_path / "disabled-gateway.yml"
+    config.write_text(
+        """version: 1
+
+mesh:
+  id: test-mesh
+  password: test-password
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  local_ap:
+    enabled: false
+    password: local-ap-password
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      ssid: gate01-local
+    gateway:
+      enabled: false
+      uplink_interface: eth0
+"""
+    )
+    manifest = payloads.load_manifest(str(config))
+    access = payloads.node_access(manifest)
+
+    assert access["gate01"]["local_ap_enabled"] is False
+    assert access["gate01"]["local_ap_ssid"] == "gate01-local"
+    assert access["gate01"]["ethernet_mesh_access"] is False
 
 
 def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
@@ -169,6 +287,8 @@ def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
         "local_ap_ssid": "",
         "wifi_uplink_gate": False,
         "management_ip": "10.41.254.1",
+        "mesh_ip": "",
+        "ethernet_mesh_access": True,
     }
     assert access["gate01"]["role"] == "gate"
     assert access["gate01"]["management_ip"] == "10.41.1.1"
@@ -1753,7 +1873,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "ssh_enabled === true" in text
     assert "sshNote" not in text
     assert "Connect Ethernet, then SSH to root@" in text
-    assert "Connect Ethernet to the node management port." in text
+    assert "Gate Ethernet is the WAN uplink." in text
+    assert "Connect Ethernet to reach the mesh-side node network." in text
     assert "includeAdminPassword" in text
     assert "adminPassword" in text
     assert "detectMacPlatform" in text

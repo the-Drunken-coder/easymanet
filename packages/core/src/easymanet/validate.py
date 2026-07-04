@@ -9,7 +9,13 @@ import re
 from typing import List, Optional
 
 from .manifest import Manifest
-from .provision import GatewayConfig, LocalApConfig, resolve_node_model
+from .provision import (
+    GatewayConfig,
+    LocalApConfig,
+    eth0_mesh_side,
+    provision_json_bool,
+    resolve_node_model,
+)
 
 VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
@@ -215,11 +221,16 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if isinstance(manifest.defaults, dict):
             resolved = resolve_node_model(manifest, name)
             _validate_local_ap(result, name, resolved.local_ap)
-            if resolved.gateway.enabled and role == "gate":
+            if str(resolved.role) == "gate":
                 uplink = resolved.gateway.uplink_interface
                 if not uplink:
                     result.add_warning(
                         f"Node '{name}': gate role without gateway.uplink_interface set"
+                    )
+                if not eth0_mesh_side(resolved.role, resolved.gateway):
+                    result.add_warning(
+                        f"Node '{name}': gate Ethernet (eth0) is the WAN uplink; "
+                        "manage this gate through the mesh, local AP, or another node."
                     )
             _validate_gateway_wifi(result, name, resolved.gateway)
             if role == "point":
@@ -330,7 +341,7 @@ def _validate_local_ap(
     node_label: str,
     local_ap: LocalApConfig,
 ) -> None:
-    if not local_ap.enabled:
+    if not provision_json_bool(local_ap.enabled):
         return
     password = local_ap.password
     if not password:
@@ -353,7 +364,7 @@ def _validate_gateway_wifi(
     gateway: GatewayConfig,
 ) -> None:
     wifi = gateway.wifi
-    if wifi is None or not wifi.enabled:
+    if wifi is None or not provision_json_bool(wifi.enabled):
         return
     ssid = wifi.ssid
     password = wifi.password

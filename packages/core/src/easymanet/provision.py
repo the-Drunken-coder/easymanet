@@ -137,6 +137,23 @@ class GatewayConfig:
         return _with_present_fields(self.extra, self.fields, values)
 
 
+def eth0_mesh_side(role: object, gateway: GatewayConfig) -> bool:
+    wifi = gateway.wifi
+    wifi_uplink = bool(wifi and provision_json_bool(wifi.enabled))
+    uplink = str(gateway.uplink_interface or "eth0")
+    return not (str(role) == "gate" and not wifi_uplink and uplink == "eth0")
+
+
+def provision_json_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return False
+
+
 @dataclass(frozen=True)
 class ManagementConfig:
     root_password_hash: object = ""

@@ -149,6 +149,18 @@ Wi-Fi.
 After successful flash and boot-payload staging, the drive is ejected. Remove it
 and insert into the Raspberry Pi.
 
+### Ethernet access by role
+
+After provisioning, EasyMANET puts node management on the OpenMANET mesh bridge
+(`br-ahwlan`), but `eth0` does not always point at that bridge:
+
+- Point nodes bridge `eth0` into the mesh. Plug a laptop into a point's Ethernet
+  port to reach the mesh-side node network.
+- Gates with a Wi-Fi uplink or a non-`eth0` uplink also keep `eth0` mesh-side.
+- Gates with `gateway.uplink_interface: eth0` use Ethernet as the WAN uplink.
+  Do not use that Ethernet port for management; join the gate's local AP or
+  manage it through another mesh node, then use the gate's mesh IP.
+
 ## Linux
 
 ### Detecting Disks

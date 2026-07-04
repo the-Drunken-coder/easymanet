@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -961,7 +962,16 @@ def test_desktop_mesh_discovery_shows_degraded_points_without_gateway(monkeypatc
             }
         return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
 
+    neighbor_starts: list[str] = []
+    neighbor_start_lock = threading.Lock()
+    all_neighbors_started = threading.Event()
+
     def fake_neighbors(node):
+        with neighbor_start_lock:
+            neighbor_starts.append(node["node"])
+            if len(neighbor_starts) == len(point_payloads):
+                all_neighbors_started.set()
+        assert all_neighbors_started.wait(1), "neighbor fetches should start in parallel"
         if node["node"] == "point01":
             return {
                 "ok": True,

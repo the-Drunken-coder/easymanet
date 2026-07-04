@@ -436,8 +436,7 @@ def _degraded_mesh_payload(
     links: list[dict[str, str]] = []
     merged_warnings = [*warnings, DEGRADED_MESH_WARNING]
 
-    for result in connected:
-        neighbors = neighbor_fetcher(result)
+    for result, neighbors in _fetch_degraded_neighbors(connected, neighbor_fetcher=neighbor_fetcher):
         if neighbors.get("ok"):
             links.extend(_degraded_links(result, neighbors, mac_index))
             continue
@@ -460,6 +459,28 @@ def _degraded_mesh_payload(
         "errors": [],
         "generated_at": _now_iso(),
     }
+
+
+def _fetch_degraded_neighbors(
+    connected: list[dict[str, Any]],
+    *,
+    neighbor_fetcher: NeighborFetcher,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    workers = min(MAX_WORKERS, max(1, len(connected)))
+    order = {id(result): index for index, result in enumerate(connected)}
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(neighbor_fetcher, result): result for result in connected}
+        for future in as_completed(futures):
+            result = futures[future]
+            try:
+                neighbors = future.result()
+            except Exception as exc:  # noqa: BLE001 - degraded discovery should keep going.
+                neighbors = {"ok": False, "code": "neighbors_failed", "errors": [str(exc)]}
+            pairs.append((result, neighbors))
+
+    return sorted(pairs, key=lambda pair: order[id(pair[0])])
 
 
 def _degraded_node(result: dict[str, Any]) -> dict[str, str]:

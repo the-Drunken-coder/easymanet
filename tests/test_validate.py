@@ -263,13 +263,13 @@ def test_warning_gate_wifi_false_string_still_treats_eth0_as_wan():
     os.unlink(path)
 
 
-def test_disabled_gate_gateway_does_not_warn_eth0_wan():
+def test_disabled_gate_gateway_still_warns_eth0_wan_to_match_flash_behavior():
     config = VALID_CONFIG.replace("      enabled: true", "      enabled: false", 1)
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
     assert result.valid
-    assert not any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
     os.unlink(path)
 
 

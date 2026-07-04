@@ -218,7 +218,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if isinstance(manifest.defaults, dict):
             resolved = resolve_node_model(manifest, name)
             _validate_local_ap(result, name, resolved.local_ap)
-            if str(resolved.role) == "gate" and provision_json_bool(resolved.gateway.enabled):
+            if str(resolved.role) == "gate":
                 uplink = resolved.gateway.uplink_interface
                 if not uplink:
                     result.add_warning(

@@ -121,7 +121,7 @@ nodes:
     assert access["gate01"]["ethernet_mesh_access"] is False
 
 
-def test_node_access_respects_disabled_gateway_and_local_ap(tmp_path):
+def test_node_access_matches_disabled_gate_flashed_eth0_wan_behavior(tmp_path):
     config = tmp_path / "disabled-gateway.yml"
     config.write_text(
         """version: 1
@@ -156,7 +156,7 @@ nodes:
 
     assert access["gate01"]["local_ap_enabled"] is False
     assert access["gate01"]["local_ap_ssid"] == "gate01-local"
-    assert access["gate01"]["ethernet_mesh_access"] is True
+    assert access["gate01"]["ethernet_mesh_access"] is False
 
 
 def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):

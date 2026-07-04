@@ -491,7 +491,7 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
             "role": str(resolved.role),
             "local_ap_enabled": bool(local_ap.enabled),
             "local_ap_ssid": str(local_ap.ssid or ""),
-            "management_ip": MANAGEMENT_LAN_IP,
+            "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
         }
     return access
 

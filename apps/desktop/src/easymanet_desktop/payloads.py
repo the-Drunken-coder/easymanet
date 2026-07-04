@@ -485,6 +485,8 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
                 "local_ap_ssid": "",
                 "wifi_uplink_gate": False,
                 "management_ip": MANAGEMENT_LAN_IP,
+                "mesh_ip": "",
+                "ethernet_mesh_access": True,
             }
             continue
         local_ap = resolved.local_ap

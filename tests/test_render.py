@@ -8,7 +8,7 @@ import tempfile
 import pytest
 
 from easymanet.manifest import ManifestError, load_manifest
-from easymanet.provision import ProvisionPayload, resolve_provision
+from easymanet.provision import ProvisionPayload, provision_json_bool, resolve_provision
 from easymanet.render import render, render_dict
 
 
@@ -56,6 +56,14 @@ def _write_config(content: str) -> str:
     with os.fdopen(fd, "w") as f:
         f.write(content)
     return path
+
+
+def test_provision_json_bool_normalizes_string_values():
+    true_values = [True, 1, "1", "true", "TRUE", "True", "True ", " yes ", "Yes"]
+    false_values = [False, 0, 2, "0", "false", "trueish", "", None]
+
+    assert [provision_json_bool(value) for value in true_values] == [True] * len(true_values)
+    assert [provision_json_bool(value) for value in false_values] == [False] * len(false_values)
 
 
 def test_render_valid_provision_json():

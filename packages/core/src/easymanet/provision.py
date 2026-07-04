@@ -150,7 +150,7 @@ def provision_json_bool(value: object) -> bool:
     if isinstance(value, int):
         return value == 1
     if isinstance(value, str):
-        return value in {"1", "true", "TRUE", "yes", "YES"}
+        return value.strip().lower() in {"1", "true", "yes"}
     return False
 
 

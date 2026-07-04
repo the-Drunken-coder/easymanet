@@ -287,6 +287,8 @@ def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
         "local_ap_ssid": "",
         "wifi_uplink_gate": False,
         "management_ip": "10.41.254.1",
+        "mesh_ip": "",
+        "ethernet_mesh_access": True,
     }
     assert access["gate01"]["role"] == "gate"
     assert access["gate01"]["management_ip"] == "10.41.1.1"

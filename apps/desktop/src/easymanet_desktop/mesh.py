@@ -101,9 +101,11 @@ def mesh_discover_payload(
         if topology.get("ok"):
             nodes = topology.get("nodes") or []
             links = topology.get("links") or []
+            roster = topology.get("roster")
+            roster_nodes = roster if isinstance(roster, list) else nodes
             merged_warnings = [
                 *merged_warnings,
-                *_stale_gate_roster_warnings(config, nodes),
+                *_stale_gate_roster_warnings(config, roster_nodes),
             ]
             return {
                 "ok": True,

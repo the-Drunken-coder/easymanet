@@ -112,10 +112,15 @@ def _connected_gate_probe(candidate):
     return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
 
 
-def _mesh_topology_payload(*, point01_ip="10.41.2.1"):
+def _mesh_topology_payload(*, point01_ip="10.41.2.1", roster_point01_ip=None):
+    roster_ip = roster_point01_ip or point01_ip
     return {
         "ok": True,
         "generated_at": "2026-07-04T00:00:00Z",
+        "roster": [
+            {"name": "gate01", "role": "gate", "ip": "10.41.1.1"},
+            {"name": "point01", "role": "point", "ip": roster_ip},
+        ],
         "nodes": [
             {"name": "gate01", "role": "gate", "ip": "10.41.1.1", "status": "online"},
             {"name": "point01", "role": "point", "ip": point01_ip, "status": "online"},
@@ -941,7 +946,7 @@ def test_desktop_mesh_discovery_warns_when_gateway_roster_is_stale(tmp_path, mon
     payload = mesh.mesh_discover_payload(
         {"config": str(fleet), "scanSubnet": False},
         probe=_connected_gate_probe,
-        topology_fetcher=lambda _gateway: _mesh_topology_payload(point01_ip="10.41.20.1"),
+        topology_fetcher=lambda _gateway: _mesh_topology_payload(roster_point01_ip="10.41.20.1"),
     )
 
     assert payload["ok"] is True

@@ -372,15 +372,37 @@ links_json_from_file() {
     done < "$links_file"
 }
 
+roster_json_body() {
+    first=1
+    i=0
+    while :; do
+        name="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].name" 2>/dev/null || true)"
+        [ -n "$name" ] || break
+        hostname="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].hostname" 2>/dev/null || true)"
+        role="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].role" 2>/dev/null || true)"
+        target="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].target" 2>/dev/null || true)"
+        ipaddr="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$i].ip" 2>/dev/null || true)"
+        [ "$first" -eq 1 ] || printf ','
+        first=0
+        printf '{"name":%s,"hostname":%s,"role":%s,"target":%s,"ip":%s}' \
+            "$(json_string "$name")" \
+            "$(json_string "$hostname")" \
+            "$(json_string "$role")" \
+            "$(json_string "$target")" \
+            "$(json_string "$ipaddr")"
+        i=$((i + 1))
+    done
+}
+
 topology_json_body() {
     if ! is_gateway; then
-        printf '{"ok":false,"code":"not_gateway","errors":["Topology is only available from gate nodes"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        printf '{"ok":false,"code":"not_gateway","errors":["Topology is only available from gate nodes"],"roster":[],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
         return 0
     fi
 
     tmp_dir="$(mktemp -d /tmp/easymanet-topology.XXXXXX 2>/dev/null || true)"
     if [ -z "$tmp_dir" ]; then
-        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to allocate topology scratch directory"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to allocate topology scratch directory"],"roster":[],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
         return 0
     fi
     trap 'rm -rf "$tmp_dir"' EXIT INT TERM
@@ -390,7 +412,7 @@ topology_json_body() {
     if ! : > "$nodes_file" || ! : > "$links_file" || ! : > "$warnings_file"; then
         trap - EXIT INT TERM
         rm -rf "$tmp_dir"
-        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to initialize topology scratch files"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
+        printf '{"ok":false,"code":"scratch_init_failed","errors":["Failed to initialize topology scratch files"],"roster":[],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
         return 0
     fi
 
@@ -451,13 +473,15 @@ topology_json_body() {
     nodes_json="$(nodes_json_from_file "$nodes_file")"
     links_json="$(links_json_from_file "$links_file" "$nodes_file")"
     warnings_json="$(json_warnings_array "$warnings_file")"
+    roster_json="$(roster_json_body)"
     gateway_json="$(identity_json_body)"
     trap - EXIT INT TERM
     rm -rf "$tmp_dir"
 
-    printf '{"ok":true,"generated_at":%s,"gateway":%s,"nodes":[%s],"links":[%s],"warnings":[%s]}\n' \
+    printf '{"ok":true,"generated_at":%s,"gateway":%s,"roster":[%s],"nodes":[%s],"links":[%s],"warnings":[%s]}\n' \
         "$(json_string "$(generated_at)")" \
         "$gateway_json" \
+        "$roster_json" \
         "$nodes_json" \
         "$links_json" \
         "$warnings_json"

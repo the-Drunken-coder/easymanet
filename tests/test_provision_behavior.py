@@ -1513,6 +1513,12 @@ esac
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
+    assert [node["name"] for node in payload["roster"]] == [
+        "gate01",
+        "point01",
+        "point02",
+    ]
+    assert payload["roster"][1]["ip"] == "10.41.2.1"
     assert [node["name"] for node in payload["nodes"]] == [
         "gate01",
         "point01",

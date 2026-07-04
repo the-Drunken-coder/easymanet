@@ -66,6 +66,14 @@ Steps:
 8. Write `/easymanet/provision.json`.
 9. Unmount and eject.
 
+### Fleet roster changes
+
+Gate nodes read their fleet roster from the `provision.json` copied during
+first boot. When `fleet.yml` changes node names, IPs, or roles, reflash every
+gate before trusting the Mesh tab, `/v1/topology`, or `/v1/status` fleet list.
+The desktop warns when a gate's reported roster does not match the selected
+local fleet file.
+
 ### Image verification
 
 Downloaded images must use HTTPS and must have a SHA-256 checksum. When

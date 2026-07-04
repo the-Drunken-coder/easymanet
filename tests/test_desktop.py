@@ -66,6 +66,70 @@ nodes:
     )
 
 
+def _write_mesh_roster_fleet(path, *, point01_ip="10.41.2.1"):
+    path.write_text(
+        f"""version: 1
+
+mesh:
+  id: test-mesh
+  password: "strong-mesh-password"
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys: []
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+  point01:
+    role: point
+    hostname: point01
+    ip: {point01_ip}
+"""
+    )
+
+
+def _connected_gate_probe(candidate):
+    if candidate.node == "gate01" and candidate.host == "10.41.1.1":
+        return {
+            **candidate.to_dict(),
+            "ok": True,
+            "status": "connected",
+            "hostname": "gate01",
+            "role": "gate",
+            "node_ip": "10.41.1.1",
+        }
+    return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+
+def _mesh_topology_payload(*, point01_ip="10.41.2.1", roster_point01_ip=None):
+    roster_ip = roster_point01_ip or point01_ip
+    return {
+        "ok": True,
+        "generated_at": "2026-07-04T00:00:00Z",
+        "roster": [
+            {"name": "gate01", "role": "gate", "ip": "10.41.1.1"},
+            {"name": "point01", "role": "point", "ip": roster_ip},
+        ],
+        "nodes": [
+            {"name": "gate01", "role": "gate", "ip": "10.41.1.1", "status": "online"},
+            {"name": "point01", "role": "point", "ip": point01_ip, "status": "online"},
+        ],
+        "links": [],
+        "warnings": [],
+    }
+
+
 def test_desktop_validate_payload_returns_nodes():
     payload = payloads.validate_payload(
         {
@@ -876,6 +940,41 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
     assert payload["links"][0]["target"] == "point01"
     assert payload["seen"][0]["hostname"] == "gate01"
+
+
+def test_desktop_mesh_discovery_warns_when_gateway_roster_is_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+    fleet = tmp_path / "fleet.yml"
+    _write_mesh_roster_fleet(fleet, point01_ip="10.41.2.1")
+
+    payload = mesh.mesh_discover_payload(
+        {"config": str(fleet), "scanSubnet": False},
+        probe=_connected_gate_probe,
+        topology_fetcher=lambda _gateway: _mesh_topology_payload(roster_point01_ip="10.41.20.1"),
+    )
+
+    assert payload["ok"] is True
+    warning = next(item for item in payload["warnings"] if "Gateway roster differs" in item)
+    assert "point01/10.41.2.1/point" in warning
+    assert "point01/10.41.20.1/point" in warning
+    assert "Reflash gate nodes after changing fleet.yml" in warning
+
+
+def test_desktop_mesh_discovery_does_not_warn_when_gateway_roster_matches(tmp_path, monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+    fleet = tmp_path / "fleet.yml"
+    _write_mesh_roster_fleet(fleet)
+
+    payload = mesh.mesh_discover_payload(
+        {"config": str(fleet), "scanSubnet": False},
+        probe=_connected_gate_probe,
+        topology_fetcher=lambda _gateway: _mesh_topology_payload(),
+    )
+
+    assert payload["ok"] is True
+    assert all("Gateway roster differs" not in warning for warning in payload["warnings"])
 
 
 def test_desktop_mesh_discovery_tries_next_gateway_after_topology_failure(monkeypatch):

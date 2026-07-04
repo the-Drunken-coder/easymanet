@@ -47,10 +47,7 @@ easymanet_eth0_mesh_side() {
         wifi_uplink=1
     fi
 
-    if [ "$role" = "gate" ] && [ "$wifi_uplink" -ne 1 ] && [ "$uplink" = "eth0" ]; then
-        return 1
-    fi
-    return 0
+    easymanet_eth0_mesh_side_for_values "$role" "$wifi_uplink" "$uplink"
 }
 
 easymanet_ensure_ahwlan_bridge() {

@@ -166,7 +166,7 @@ fi
 UPLINK_INTERFACE="$(json_val node gateway uplink_interface 2>/dev/null || true)"
 [ -n "$UPLINK_INTERFACE" ] || UPLINK_INTERFACE="eth0"
 ETH0_MESH_SIDE=1
-if [ "$NODE_ROLE" = "gate" ] && [ "$WIFI_UPLINK_ENABLED" -ne 1 ] && [ "$UPLINK_INTERFACE" = "eth0" ]; then
+if ! easymanet_eth0_mesh_side_for_values "$NODE_ROLE" "$WIFI_UPLINK_ENABLED" "$UPLINK_INTERFACE"; then
     ETH0_MESH_SIDE=0
 fi
 

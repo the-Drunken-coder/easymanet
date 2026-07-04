@@ -10,6 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from easymanet.manifest import load_manifest
+from easymanet.render import render_dict
+from easymanet.validate import validate
+
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "images" / "openmanet" / "provisioning" / "openwrt-overlay"
 PROVISION_LIB = OVERLAY / "usr" / "lib" / "easymanet" / "provision-lib.sh"
@@ -26,6 +30,48 @@ def _fixture_text(name: str) -> str:
 def _write_executable(path: Path, text: str) -> None:
     path.write_text(text)
     path.chmod(0o755)
+
+
+def _policy_parity_config(
+    *,
+    role: str = "gate",
+    target: str = "rpi4-mm6108-spi",
+    channel: object = 42,
+    bandwidth_mhz: object = 2,
+) -> str:
+    return f"""
+version: 1
+
+mesh:
+  id: parity-mesh
+  password: "parity-password"
+  channel: {channel}
+  bandwidth_mhz: {bandwidth_mhz}
+  country: US
+
+defaults:
+  target: {target}
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys: []
+
+nodes:
+  gate01:
+    role: {role}
+    hostname: gate01
+    ip: 10.41.1.1
+    local_ap:
+      enabled: false
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+"""
+
+
+def _load_policy_parity_manifest(tmp_path: Path, config: str):
+    path = tmp_path / "fleet.yml"
+    path.write_text(config)
+    return load_manifest(str(path))
 
 
 def _harness_env(uci_state: Path, extra: dict | None = None) -> dict:
@@ -97,6 +143,65 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
     assert result.returncode == 0
     assert "ssh_on" in result.stdout
     assert "wifi_off" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("name", "config", "expected_valid"),
+    [
+        ("valid baseline", _policy_parity_config(), True),
+        ("unsupported role", _policy_parity_config(role="relay"), False),
+        ("unsupported target", _policy_parity_config(target="rpi5"), False),
+        ("unsupported bandwidth", _policy_parity_config(bandwidth_mhz=3), False),
+        ("untested US channel", _policy_parity_config(channel=36), False),
+        ("non-numeric channel", _policy_parity_config(channel="abc"), False),
+    ],
+)
+def test_python_validation_and_shell_provision_policy_parity(
+    tmp_path,
+    name,
+    config,
+    expected_valid,
+):
+    manifest = _load_policy_parity_manifest(tmp_path, config)
+    validation = validate(manifest, node_name="gate01")
+    provision_data = render_dict(manifest, "gate01")
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert validation.valid is expected_valid, name
+    assert (result.returncode == 0) is expected_valid, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("role", "wifi_uplink", "uplink", "expected"),
+    [
+        ("gate", "0", "eth0", "wan"),
+        ("gate", "0", "usb0", "mesh"),
+        ("gate", "1", "eth0", "mesh"),
+        ("point", "0", "eth0", "mesh"),
+        ("point", "1", "eth0", "mesh"),
+    ],
+)
+def test_eth0_mesh_side_value_helper(role, wifi_uplink, uplink, expected, tmp_path):
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    env = _harness_env(uci_state)
+
+    result = _run_sh(
+        (
+            f'. "{PROVISION_LIB}"; '
+            f'if easymanet_eth0_mesh_side_for_values {shlex.quote(role)} '
+            f'{shlex.quote(wifi_uplink)} {shlex.quote(uplink)}; '
+            f'then echo mesh; else echo wan; fi'
+        ),
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.strip() == expected
 
 
 def test_jsonfilter_rejects_malformed_array_expression(tmp_path):

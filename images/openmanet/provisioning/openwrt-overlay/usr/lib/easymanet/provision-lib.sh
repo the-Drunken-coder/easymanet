@@ -32,6 +32,18 @@ json_bool() {
     esac
 }
 
+easymanet_eth0_mesh_side_for_values() {
+    role="$1"
+    wifi_uplink="$2"
+    uplink="$3"
+    [ -n "$uplink" ] || uplink="eth0"
+
+    if [ "$role" = "gate" ] && [ "$wifi_uplink" -ne 1 ] && [ "$uplink" = "eth0" ]; then
+        return 1
+    fi
+    return 0
+}
+
 find_morse_radio() {
     radio="$(uci show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='morse'$/\1/p" | head -n 1)"
     if [ -n "$radio" ]; then

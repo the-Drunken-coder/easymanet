@@ -181,6 +181,10 @@ if [ -n "$(json_val management ssh_enabled)" ]; then
 elif [ "$NODE_ROLE" = "gate" ]; then
     SSH_ENABLED=1
 fi
+API_WAN_ENABLED=0
+if json_bool management api_wan_enabled; then
+    API_WAN_ENABLED=1
+fi
 
 echo "Setting hostname to $HOSTNAME..." >> "$LOG_FILE"
 uci_set system.@system[0].hostname="$HOSTNAME"
@@ -472,7 +476,7 @@ if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
         uci_set firewall.allow_ssh_wan.dest_port="22"
         uci_set firewall.allow_ssh_wan.target="ACCEPT"
     fi
-    if [ "$NODE_ROLE" = "gate" ]; then
+    if [ "$NODE_ROLE" = "gate" ] && [ "$API_WAN_ENABLED" -eq 1 ]; then
         uci_set firewall.allow_easymanet_api_wan=rule
         uci_set firewall.allow_easymanet_api_wan.name="Allow-EasyMANET-API-WAN"
         uci_set firewall.allow_easymanet_api_wan.src="wan"

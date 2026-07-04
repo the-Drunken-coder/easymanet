@@ -483,14 +483,23 @@ def node_access(manifest: Any) -> dict[str, dict[str, Any]]:
                 "role": "",
                 "local_ap_enabled": False,
                 "local_ap_ssid": "",
+                "wifi_uplink_gate": False,
                 "management_ip": MANAGEMENT_LAN_IP,
             }
             continue
         local_ap = resolved.local_ap
+        gateway = resolved.gateway
+        wifi = gateway.wifi
         access[name] = {
             "role": str(resolved.role),
             "local_ap_enabled": bool(local_ap.enabled),
             "local_ap_ssid": str(local_ap.ssid or ""),
+            "wifi_uplink_gate": (
+                str(resolved.role) == "gate"
+                and gateway.enabled is True
+                and wifi is not None
+                and wifi.enabled is True
+            ),
             "management_ip": str(resolved.ip or MANAGEMENT_LAN_IP),
         }
     return access

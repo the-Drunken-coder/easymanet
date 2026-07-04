@@ -22,6 +22,16 @@ def resolve_flash_ssh_enabled(
     return None
 
 
+def resolve_flash_api_wan_enabled(
+    *,
+    enable_wan_api: bool,
+    disable_wan_api: bool,
+) -> bool:
+    if disable_wan_api:
+        return False
+    return bool(enable_wan_api)
+
+
 def effective_flash_ssh_enabled(
     role: str,
     *,
@@ -33,6 +43,22 @@ def effective_flash_ssh_enabled(
     if enable_ssh:
         return True
     return role == "gate"
+
+
+def flash_api_wan_note(
+    *,
+    api_wan_enabled: bool,
+    api_wan_applicable: bool,
+    enable_wan_api: bool,
+    disable_wan_api: bool,
+) -> str:
+    if not api_wan_applicable:
+        return "not applicable"
+    if api_wan_enabled:
+        return "yes (--enable-wan-api)"
+    if disable_wan_api:
+        return "no (--disable-wan-api)"
+    return "no (default)"
 
 
 def flash_ssh_note(

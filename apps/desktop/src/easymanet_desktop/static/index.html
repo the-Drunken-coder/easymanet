@@ -190,6 +190,8 @@
                             <strong id="review-image">Image status pending</strong>
                             <span>SSH</span>
                             <strong id="review-ssh">Auto</strong>
+                            <span>WAN API</span>
+                            <strong id="review-wan-api">Off</strong>
                           </div>
                           <div class="erase-warning" id="erase-warning" hidden>
                             The selected disk will be erased when flashing starts.
@@ -208,6 +210,15 @@
                               <label for="ssh-disable">Off</label>
                             </div>
                           </fieldset>
+
+                          <label class="field checkbox-field" id="wan-api-row">
+                            <span class="field-label">Upstream API</span>
+                            <span class="checkbox-line">
+                              <input id="wan-api-enable" type="checkbox">
+                              <span>Allow WAN API</span>
+                            </span>
+                            <small id="wan-api-hint">Off by default; Wi-Fi gate only.</small>
+                          </label>
 
                           <label class="field" id="admin-password-row" hidden>
                             <span class="field-label">Mac admin password</span>

@@ -112,6 +112,7 @@ IMAGE_DATA_FILES = (
             "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-display-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-led-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-management-lan",
+            "images/openmanet/provisioning/openwrt-overlay/etc/init.d/easymanet-status-cache",
         ),
     ),
     (
@@ -121,6 +122,7 @@ IMAGE_DATA_FILES = (
     (
         "share/easymanet/images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults",
         (
+            "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/94-easymanet-status-cache",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/95-easymanet-display-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/96-easymanet-led-status",
             "images/openmanet/provisioning/openwrt-overlay/etc/uci-defaults/97-easymanet-management-lan",
@@ -140,6 +142,7 @@ IMAGE_DATA_FILES = (
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-lib.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision-runtime.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/provision.sh",
+            "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/status-cache.sh",
             "images/openmanet/provisioning/openwrt-overlay/usr/lib/easymanet/status-lib.sh",
         ),
     ),

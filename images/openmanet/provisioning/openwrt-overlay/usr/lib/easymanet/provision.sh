@@ -558,6 +558,15 @@ if [ -x "$openmanetd_init" ]; then
     "$openmanetd_init" enable 2>/dev/null || true
 fi
 
+status_cache_init="$(_prefix_path /etc/init.d/easymanet-status-cache)"
+if [ -x "$status_cache_init" ]; then
+    echo "Enabling EasyMANET status cache..." >> "$LOG_FILE"
+    "$status_cache_init" enable 2>/dev/null || true
+    "$status_cache_init" restart 2>/dev/null || "$status_cache_init" start 2>/dev/null || true
+else
+    echo "WARNING: EasyMANET status cache init script not found; status snapshots will not refresh" >> "$LOG_FILE"
+fi
+
 led_status_init="$(_prefix_path /etc/init.d/easymanet-led-status)"
 if [ -x "$led_status_init" ]; then
     echo "Enabling EasyMANET LED status..." >> "$LOG_FILE"

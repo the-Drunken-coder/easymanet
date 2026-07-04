@@ -1,0 +1,6 @@
+#!/bin/sh
+# Enable the EasyMANET status cache service after overlay install.
+
+if [ -x /etc/init.d/easymanet-status-cache ]; then
+    /etc/init.d/easymanet-status-cache enable 2>/dev/null || true
+fi

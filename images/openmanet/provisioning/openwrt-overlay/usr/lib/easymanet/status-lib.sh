@@ -79,6 +79,7 @@ status_warnings_json() {
     internet_ok="$3"
     manageable_ok="$4"
     missing_count="$5"
+    extra_warning="${6:-}"
     case "$neighbor_count" in
         ""|*[!0-9]*) neighbor_count=0 ;;
     esac
@@ -97,18 +98,25 @@ status_warnings_json() {
     [ "$internet_ok" = "true" ] || status_add_warning "Public internet check failed for configured targets."
     [ "$manageable_ok" = "true" ] || status_add_warning "EasyMANET management API is not fully available."
     [ "$missing_count" -gt 0 ] && status_add_warning "$missing_count expected fleet node(s) are missing."
+    [ -n "$extra_warning" ] && status_add_warning "$extra_warning"
     printf ']'
 }
 
 status_fleet_json() {
     missing_count_file="$1"
+    topology="$(topology_json_body 2>/dev/null || true)"
+    status_fleet_json_from_topology "$missing_count_file" "$topology"
+}
+
+status_fleet_json_from_topology() {
+    missing_count_file="$1"
+    topology="$2"
     : > "$missing_count_file"
     if ! is_gateway; then
         printf '[]'
         return 0
     fi
 
-    topology="$(topology_json_body 2>/dev/null || true)"
     if [ "$(json_get "$topology" '@.ok')" != "true" ]; then
         status_unknown_fleet_json
         return 0
@@ -137,6 +145,11 @@ status_fleet_json() {
     printf ']'
 }
 
+status_cache_warning_json() {
+    warning="$1"
+    printf '[%s]' "$(json_string "$warning")"
+}
+
 status_unknown_fleet_json() {
     first=1
     index=0
@@ -152,7 +165,14 @@ status_unknown_fleet_json() {
     printf ']'
 }
 
-status_json_body() {
+status_live_json_body() {
+    topology="${1:-}"
+    topology_ok=true
+    topology_warning=""
+    if is_gateway && [ -n "$topology" ] && [ "$(json_get "$topology" '@.ok')" != "true" ]; then
+        topology_ok=false
+        topology_warning="EasyMANET topology snapshot is unavailable; fleet status is unknown."
+    fi
     neighbor_count="$(status_neighbor_count)"
     internet_ok="$(status_bool status_public_internet)"
     manageable_ok="$(status_bool status_manageable)"
@@ -160,7 +180,11 @@ status_json_body() {
     [ "$neighbor_count" -gt 0 ] && mesh_ok=true
     tmp_missing="$(mktemp /tmp/easymanet-status-missing.XXXXXX 2>/dev/null || true)"
     if [ -n "$tmp_missing" ]; then
-        fleet_json="$(status_fleet_json "$tmp_missing")"
+        if [ -n "$topology" ]; then
+            fleet_json="$(status_fleet_json_from_topology "$tmp_missing" "$topology")"
+        else
+            fleet_json="$(status_fleet_json "$tmp_missing")"
+        fi
         missing_count="$(wc -l < "$tmp_missing" 2>/dev/null | tr -d ' ')"
         rm -f "$tmp_missing"
     else
@@ -171,8 +195,10 @@ status_json_body() {
         ""|*[!0-9]*) missing_count=0 ;;
     esac
     code="$(status_support_code "$neighbor_count" "$internet_ok" "$missing_count")"
+    [ "$topology_ok" = "true" ] || code="EM-DIAG-PARTIAL"
     level="$(status_support_level "$code")"
-    printf '{"ok":true,"schema_version":%s,"generated_at":%s,"support_code":%s,"support_level":%s,"node":%s,"interfaces":%s,"mesh":{"ok":%s,"neighbor_count":%s},"internet":{"ok":%s,"targets":%s},"manageability":{"ok":%s},"fleet":%s,"warnings":%s}\n' \
+    cache_json="$(json_cache_object live fresh "$(epoch_now)")"
+    printf '{"ok":true,"schema_version":%s,"generated_at":%s,"support_code":%s,"support_level":%s,"node":%s,"interfaces":%s,"mesh":{"ok":%s,"neighbor_count":%s},"internet":{"ok":%s,"targets":%s},"manageability":{"ok":%s},"fleet":%s,"warnings":%s,"cache":%s}\n' \
         "$EASYMANET_STATUS_SCHEMA" \
         "$(json_string "$(generated_at)")" \
         "$(json_string "$code")" \
@@ -185,7 +211,48 @@ status_json_body() {
         "$(json_string "$EASYMANET_INTERNET_TARGETS")" \
         "$manageable_ok" \
         "$fleet_json" \
-        "$(status_warnings_json "$code" "$neighbor_count" "$internet_ok" "$manageable_ok" "$missing_count")"
+        "$(status_warnings_json "$code" "$neighbor_count" "$internet_ok" "$manageable_ok" "$missing_count" "$topology_warning")" \
+        "$cache_json"
+}
+
+status_unavailable_json_body() {
+    warning="$1"
+    cache_state="$2"
+    generated_epoch="$3"
+    fleet_json="[]"
+    if is_gateway; then
+        fleet_json="$(status_unknown_fleet_json)"
+    fi
+    manageable_ok="$(status_bool status_manageable)"
+    cache_json="$(json_cache_object snapshot "$cache_state" "$generated_epoch")"
+    printf '{"ok":true,"schema_version":%s,"generated_at":%s,"support_code":"EM-DIAG-PARTIAL","support_level":"warn","node":%s,"interfaces":%s,"mesh":{"ok":false,"neighbor_count":0},"internet":{"ok":false,"targets":%s},"manageability":{"ok":%s},"fleet":%s,"warnings":%s,"cache":%s}\n' \
+        "$EASYMANET_STATUS_SCHEMA" \
+        "$(json_string "$(generated_at)")" \
+        "$(node_json_body)" \
+        "$(interfaces_json_body)" \
+        "$(json_string "$EASYMANET_INTERNET_TARGETS")" \
+        "$manageable_ok" \
+        "$fleet_json" \
+        "$(status_cache_warning_json "$warning")" \
+        "$cache_json"
+}
+
+status_json_body() {
+    file="$(status_cache_file)"
+    state_pair="$(cache_file_state "$file")"
+    state="${state_pair%%:*}"
+    generated_epoch="${state_pair#*:}"
+    case "$state" in
+        fresh)
+            cat "$file"
+            ;;
+        stale)
+            status_unavailable_json_body "EasyMANET status snapshot is stale; fleet status is unknown until the cache refreshes." stale "$generated_epoch"
+            ;;
+        *)
+            status_unavailable_json_body "EasyMANET status snapshot is not available yet; fleet status is unknown until the cache refreshes." missing 0
+            ;;
+    esac
 }
 
 status_label() {

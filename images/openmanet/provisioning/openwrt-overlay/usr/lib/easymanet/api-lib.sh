@@ -36,6 +36,124 @@ generated_at() {
     date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date
 }
 
+epoch_now() {
+    date +%s 2>/dev/null || printf '0'
+}
+
+cache_dir() {
+    printf '%s' "${EASYMANET_STATUS_CACHE_DIR:-/tmp/easymanet}"
+}
+
+status_cache_file() {
+    printf '%s/status.json' "$(cache_dir)"
+}
+
+topology_cache_file() {
+    printf '%s/topology.json' "$(cache_dir)"
+}
+
+cache_refresh_interval() {
+    value="${EASYMANET_STATUS_CACHE_INTERVAL:-10}"
+    case "$value" in
+        ""|*[!0-9]*) value=10 ;;
+    esac
+    printf '%s' "$value"
+}
+
+cache_stale_after() {
+    value="${EASYMANET_STATUS_CACHE_STALE_AFTER:-30}"
+    case "$value" in
+        ""|*[!0-9]*) value=30 ;;
+    esac
+    printf '%s' "$value"
+}
+
+json_cache_object() {
+    source="$1"
+    state="$2"
+    generated_epoch="$3"
+    now_epoch="$(epoch_now)"
+    age=0
+    if [ "$state" != "missing" ]; then
+        case "$generated_epoch$now_epoch" in
+            *[!0-9]*|"") age=0 ;;
+            *) age=$((now_epoch - generated_epoch)) ;;
+        esac
+    fi
+    [ "$age" -lt 0 ] 2>/dev/null && age=0
+    stale=false
+    [ "$state" = "stale" ] && stale=true
+    printf '{"source":%s,"state":%s,"stale":%s,"generated_epoch":%s,"age_seconds":%s,"refresh_interval_seconds":%s,"stale_after_seconds":%s}' \
+        "$(json_string "$source")" \
+        "$(json_string "$state")" \
+        "$stale" \
+        "$generated_epoch" \
+        "$age" \
+        "$(cache_refresh_interval)" \
+        "$(cache_stale_after)"
+}
+
+json_with_cache() {
+    payload="$1"
+    cache_json="$2"
+    awk -v cache="$cache_json" '
+        BEGIN { ORS = "" }
+        {
+            line = $0
+            sub(/[[:space:]]*$/, "", line)
+            if (line ~ /^\{.*\}$/) {
+                sub(/\}$/, ",\"cache\":" cache "}", line)
+            }
+            print line
+        }
+        END { print "\n" }
+    ' <<EOF
+$payload
+EOF
+}
+
+cache_file_state() {
+    file="$1"
+    [ -s "$file" ] || {
+        printf 'missing:0'
+        return 0
+    }
+
+    generated_epoch="$(json_get "$(cat "$file")" '@.cache.generated_epoch')"
+    case "$generated_epoch" in
+        ""|*[!0-9]*)
+            printf 'stale:0'
+            return 0
+            ;;
+    esac
+
+    now_epoch="$(epoch_now)"
+    stale_after="$(cache_stale_after)"
+    age=$((now_epoch - generated_epoch))
+    if [ "$age" -lt 0 ] 2>/dev/null || [ "$age" -gt "$stale_after" ] 2>/dev/null; then
+        printf 'stale:%s' "$generated_epoch"
+    else
+        printf 'fresh:%s' "$generated_epoch"
+    fi
+}
+
+write_json_atomic() {
+    file="$1"
+    payload="$2"
+    dir="$(dirname "$file")"
+    mkdir -p "$dir" 2>/dev/null || return 1
+    tmp="$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null || true)"
+    [ -n "$tmp" ] || return 1
+    printf '%s\n' "$payload" > "$tmp" || {
+        rm -f "$tmp"
+        return 1
+    }
+    mv "$tmp" "$file" || {
+        rm -f "$tmp"
+        return 1
+    }
+}
+
 # Node accessors require json_val from provision-lib.sh. The api.sh entrypoint
 # must source provision-lib.sh before api-lib.sh.
 node_name() {
@@ -372,7 +490,7 @@ links_json_from_file() {
     done < "$links_file"
 }
 
-topology_json_body() {
+topology_live_json_body() {
     if ! is_gateway; then
         printf '{"ok":false,"code":"not_gateway","errors":["Topology is only available from gate nodes"],"nodes":[],"links":[],"warnings":[],"generated_at":%s}\n' "$(json_string "$(generated_at)")"
         return 0
@@ -461,6 +579,69 @@ topology_json_body() {
         "$nodes_json" \
         "$links_json" \
         "$warnings_json"
+}
+
+topology_unknown_nodes_json() {
+    first=1
+    index=0
+    while :; do
+        name="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].name" 2>/dev/null || true)"
+        [ -n "$name" ] || break
+        hostname="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].hostname" 2>/dev/null || true)"
+        role="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].role" 2>/dev/null || true)"
+        target="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].target" 2>/dev/null || true)"
+        ipaddr="$(jsonfilter -i "$PROVISION_JSON" -e "@.fleet.nodes[$index].ip" 2>/dev/null || true)"
+        [ "$first" -eq 1 ] || printf ','
+        first=0
+        printf '{"name":%s,"hostname":%s,"role":%s,"target":%s,"ip":%s,"mesh_mac":"","bat0_mac":"","status":"unknown"}' \
+            "$(json_string "$name")" \
+            "$(json_string "$hostname")" \
+            "$(json_string "$role")" \
+            "$(json_string "$target")" \
+            "$(json_string "$ipaddr")"
+        index=$((index + 1))
+    done
+}
+
+topology_unavailable_json_body() {
+    code="$1"
+    warning="$2"
+    cache_state="$3"
+    generated_epoch="$4"
+    cache_json="$(json_cache_object snapshot "$cache_state" "$generated_epoch")"
+    nodes_json="$(topology_unknown_nodes_json)"
+    printf '{"ok":false,"code":%s,"errors":[%s],"nodes":[%s],"links":[],"warnings":[%s],"generated_at":%s,"cache":%s}\n' \
+        "$(json_string "$code")" \
+        "$(json_string "$warning")" \
+        "$nodes_json" \
+        "$(json_string "$warning")" \
+        "$(json_string "$(generated_at)")" \
+        "$cache_json"
+}
+
+topology_json_body() {
+    if ! is_gateway; then
+        cache_json="$(json_cache_object live not_gateway "$(epoch_now)")"
+        payload="$(topology_live_json_body)"
+        json_with_cache "$payload" "$cache_json"
+        return 0
+    fi
+
+    file="$(topology_cache_file)"
+    state_pair="$(cache_file_state "$file")"
+    state="${state_pair%%:*}"
+    generated_epoch="${state_pair#*:}"
+    case "$state" in
+        fresh)
+            cat "$file"
+            ;;
+        stale)
+            topology_unavailable_json_body snapshot_stale "EasyMANET topology snapshot is stale; fleet status is unknown until the cache refreshes." stale "$generated_epoch"
+            ;;
+        *)
+            topology_unavailable_json_body snapshot_unavailable "EasyMANET topology snapshot is not available yet; fleet status is unknown until the cache refreshes." missing 0
+            ;;
+    esac
 }
 
 json_warnings_array() {

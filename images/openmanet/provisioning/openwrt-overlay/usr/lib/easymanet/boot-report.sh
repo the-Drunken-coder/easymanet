@@ -85,7 +85,8 @@ write_easymanet_status_json() {
         . "$script_dir/api-lib.sh" || exit 1
         # shellcheck source=status-lib.sh
         . "$script_dir/status-lib.sh" || exit 1
-        status_json_body
+        topology="$(topology_live_json_body 2>/dev/null || true)"
+        status_live_json_body "$topology"
     ); then
         printf '{"ok":false,"support_code":"EM-DIAG-PARTIAL","support_level":"warn","warnings":["EasyMANET status generation failed; boot report collection continued."]}\n'
     fi
@@ -138,6 +139,7 @@ write_easymanet_boot_report() {
 
     cp /var/log/easymanet.log "$latest/easymanet.log" 2>/dev/null || true
     cp /var/log/easymanet-network.log "$latest/easymanet-network.log" 2>/dev/null || true
+    cp /var/log/easymanet-status-cache.log "$latest/easymanet-status-cache.log" 2>/dev/null || true
     cp /var/log/easymanet-led-status.log "$latest/easymanet-led-status.log" 2>/dev/null || true
     cp /var/log/easymanet-display-status.log "$latest/easymanet-display-status.log" 2>/dev/null || true
     cp /etc/easymanet/provisioned "$latest/provisioned" 2>/dev/null || true

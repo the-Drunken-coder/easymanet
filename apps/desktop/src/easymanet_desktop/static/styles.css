@@ -1451,6 +1451,41 @@ select:disabled {
   outline-offset: -2px;
 }
 
+.checkbox-field {
+  gap: 5px;
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.checkbox-line input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.checkbox-line:has(input:disabled),
+.checkbox-field:has(input:disabled) small {
+  color: var(--faint);
+}
+
+.checkbox-field small {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
+}
+
 #flash-panel.has-output .segmented label {
   min-height: 30px;
   padding: 4px 6px;

@@ -80,6 +80,17 @@ def test_firstboot_honors_ssh_enabled_flag():
     assert '"$dropbear_init" disable' in text
 
 
+def test_firstboot_honors_api_wan_enabled_flag():
+    text = PROVISION_SCRIPT.read_text()
+    runtime_text = PROVISION_RUNTIME.read_text()
+
+    assert "API_WAN_ENABLED=0" in text
+    assert "json_bool management api_wan_enabled" in text
+    assert "API_WAN_ENABLED=1" in text
+    assert '[ "$API_WAN_ENABLED" -eq 1 ]' in text
+    assert '[ "$API_WAN_ENABLED" -eq 1 ]' in runtime_text
+
+
 def test_firstboot_temp_boot_mount_is_writable_for_payload_removal():
     text = PROVISION_RUNTIME.read_text()
     assert 'mount -t vfat "$dev" "$BOOT_MOUNT_TMP"' in text
@@ -247,6 +258,7 @@ def test_topology_api_overlay_is_packaged():
     assert "configure_easymanet_api" in provision_text
     assert "uhttpd.easymanet_api" in provision_text
     assert '0.0.0.0:$EM_EASYMANET_API_PORT' in provision_text
+    assert "API_WAN_ENABLED" in provision_text
     assert "allow_easymanet_api_wan=rule" in provision_entrypoint
     core_check = 'api_home/v1/identity" ] || [ ! -x "$api_home/v1/topology" ] || [ ! -x "$api_home/v1/neighbors"'
     assert core_check in provision_text

@@ -66,6 +66,70 @@ nodes:
     )
 
 
+def _write_mesh_roster_fleet(path, *, point01_ip="10.41.2.1"):
+    path.write_text(
+        f"""version: 1
+
+mesh:
+  id: test-mesh
+  password: "strong-mesh-password"
+  channel: 42
+  bandwidth_mhz: 2
+  country: US
+
+defaults:
+  target: rpi4-mm6108-spi
+  management:
+    root_password_hash: ""
+    ssh_authorized_keys: []
+
+nodes:
+  gate01:
+    role: gate
+    hostname: gate01
+    ip: 10.41.1.1
+    gateway:
+      enabled: true
+      uplink_interface: eth0
+  point01:
+    role: point
+    hostname: point01
+    ip: {point01_ip}
+"""
+    )
+
+
+def _connected_gate_probe(candidate):
+    if candidate.node == "gate01" and candidate.host == "10.41.1.1":
+        return {
+            **candidate.to_dict(),
+            "ok": True,
+            "status": "connected",
+            "hostname": "gate01",
+            "role": "gate",
+            "node_ip": "10.41.1.1",
+        }
+    return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+
+def _mesh_topology_payload(*, point01_ip="10.41.2.1", roster_point01_ip=None):
+    roster_ip = roster_point01_ip or point01_ip
+    return {
+        "ok": True,
+        "generated_at": "2026-07-04T00:00:00Z",
+        "roster": [
+            {"name": "gate01", "role": "gate", "ip": "10.41.1.1"},
+            {"name": "point01", "role": "point", "ip": roster_ip},
+        ],
+        "nodes": [
+            {"name": "gate01", "role": "gate", "ip": "10.41.1.1", "status": "online"},
+            {"name": "point01", "role": "point", "ip": point01_ip, "status": "online"},
+        ],
+        "links": [],
+        "warnings": [],
+    }
+
+
 def test_desktop_validate_payload_returns_nodes():
     payload = payloads.validate_payload(
         {
@@ -79,7 +143,10 @@ def test_desktop_validate_payload_returns_nodes():
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
     assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
-    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.254.1"
+    assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
+    assert payload["node_access"]["point01"]["management_ip"] == "10.41.2.1"
+    assert payload["node_access"]["gate01"]["wifi_uplink_gate"] is True
+    assert payload["node_access"]["point01"]["wifi_uplink_gate"] is False
 
 
 def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
@@ -100,9 +167,11 @@ def test_node_access_preserves_nodes_when_one_model_fails(monkeypatch):
         "role": "",
         "local_ap_enabled": False,
         "local_ap_ssid": "",
+        "wifi_uplink_gate": False,
         "management_ip": "10.41.254.1",
     }
     assert access["gate01"]["role"] == "gate"
+    assert access["gate01"]["management_ip"] == "10.41.1.1"
 
 
 def test_desktop_state_reads_configured_images_and_workspace(tmp_path, monkeypatch):
@@ -873,6 +942,41 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
     assert payload["seen"][0]["hostname"] == "gate01"
 
 
+def test_desktop_mesh_discovery_warns_when_gateway_roster_is_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+    fleet = tmp_path / "fleet.yml"
+    _write_mesh_roster_fleet(fleet, point01_ip="10.41.2.1")
+
+    payload = mesh.mesh_discover_payload(
+        {"config": str(fleet), "scanSubnet": False},
+        probe=_connected_gate_probe,
+        topology_fetcher=lambda _gateway: _mesh_topology_payload(roster_point01_ip="10.41.20.1"),
+    )
+
+    assert payload["ok"] is True
+    warning = next(item for item in payload["warnings"] if "Gateway roster differs" in item)
+    assert "point01/10.41.2.1/point" in warning
+    assert "point01/10.41.20.1/point" in warning
+    assert "Reflash gate nodes after changing fleet.yml" in warning
+
+
+def test_desktop_mesh_discovery_does_not_warn_when_gateway_roster_matches(tmp_path, monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+    fleet = tmp_path / "fleet.yml"
+    _write_mesh_roster_fleet(fleet)
+
+    payload = mesh.mesh_discover_payload(
+        {"config": str(fleet), "scanSubnet": False},
+        probe=_connected_gate_probe,
+        topology_fetcher=lambda _gateway: _mesh_topology_payload(),
+    )
+
+    assert payload["ok"] is True
+    assert all("Gateway roster differs" not in warning for warning in payload["warnings"])
+
+
 def test_desktop_mesh_discovery_tries_next_gateway_after_topology_failure(monkeypatch):
     monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
     monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
@@ -1205,6 +1309,7 @@ def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
             "--device",
             "/dev/disk4",
             "--enable-ssh",
+            "--enable-wan-api",
         ]
     )
 
@@ -1215,6 +1320,7 @@ def test_desktop_bridge_flash_plan_outputs_json(monkeypatch, capsys):
     assert calls[0].dry_run is True
     assert calls[0].yes is False
     assert calls[0].enable_ssh is True
+    assert calls[0].enable_wan_api is True
 
 
 def test_desktop_bridge_flash_plan_preserves_cached_image_metadata(monkeypatch):
@@ -1292,6 +1398,7 @@ def test_desktop_bridge_prepare_flash_streams_events_and_final_result(monkeypatc
             "--device",
             "/dev/disk4",
             "--disable-ssh",
+            "--enable-wan-api",
         ]
     )
 
@@ -1305,6 +1412,7 @@ def test_desktop_bridge_prepare_flash_streams_events_and_final_result(monkeypatc
     assert calls[0].dry_run is False
     assert calls[0].yes is True
     assert calls[0].disable_ssh is True
+    assert calls[0].enable_wan_api is True
 
 
 def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path, monkeypatch):
@@ -1612,6 +1720,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "includeDisks: true" in text
     assert 'postJson("/api/support/bundle", payload)' in text
     assert "role-default-ssh" in index.read_text()
+    assert "wan-api-enable" in index.read_text()
+    assert "review-wan-api" in index.read_text()
     assert "admin-password" in index.read_text()
     assert 'value="default"' not in index.read_text()
     assert '<select id="node-name" name="node" disabled>' in index.read_text()
@@ -1635,6 +1745,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "applyRoleDefaultSsh" in text
     assert "node_roles" in text
     assert "node_access" in text
+    assert "wanApiEnabled" in text
+    assert "wifi_uplink_gate" in text
     assert "flashAccessHint" in text
     assert "Join ${ssid}" not in text
     assert "local_ap_ssid ? access.local_ap_ssid" not in text

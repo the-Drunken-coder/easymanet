@@ -182,6 +182,18 @@ def test_resolve_provision_returns_typed_payload_used_by_render():
     os.unlink(path)
 
 
+def test_resolve_provision_includes_api_wan_override():
+    path = _write_config(VALID_CONFIG)
+    m = load_manifest(path)
+
+    payload = resolve_provision(m, "node01", api_wan_enabled=True)
+
+    assert payload.management.api_wan_enabled is True
+    assert payload.to_dict()["management"]["api_wan_enabled"] is True
+    assert render_dict(m, "node01", api_wan_enabled=False)["management"]["api_wan_enabled"] is False
+    os.unlink(path)
+
+
 def test_render_deep_merges_gateway_wifi_defaults():
     config = """
 version: 1

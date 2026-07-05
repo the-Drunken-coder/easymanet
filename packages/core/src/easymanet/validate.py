@@ -6,7 +6,7 @@ Returns a list of errors and warnings.
 
 import ipaddress
 import re
-from typing import List, Optional
+from typing import Optional
 
 from .manifest import Manifest
 from .provision import (
@@ -24,6 +24,10 @@ MM6108_TARGET = "rpi4-mm6108-spi"
 MM6108_US_VALID_MESH = {(42, 2)}
 VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
+MESH_NETWORK = ipaddress.ip_network("10.41.0.0/16")
+# Mirrors OpenWrt ahwlan DHCP start=351, limit=16 on 10.41.0.0/16.
+GATE_DHCP_POOL_START = ipaddress.ip_address("10.41.1.95")
+GATE_DHCP_POOL_END = ipaddress.ip_address("10.41.1.110")
 
 SSH_KEY_PATTERN = re.compile(
     r"^(?:"
@@ -36,8 +40,8 @@ SSH_KEY_PATTERN = re.compile(
 
 class ValidationResult:
     def __init__(self):
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     @property
     def valid(self) -> bool:
@@ -50,13 +54,41 @@ class ValidationResult:
         self.warnings.append(msg)
 
 
-def validate_ip(ip_str: str) -> Optional[str]:
+def _parse_ipv4(ip_str: object) -> tuple[Optional[ipaddress.IPv4Address], Optional[str]]:
+    if not isinstance(ip_str, str):
+        return None, f"IP address must be a string, got {type(ip_str).__name__}: {ip_str}"
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
-        return f"Invalid IP address: {ip_str}"
+        return None, f"Invalid IP address: {ip_str}"
     if not isinstance(ip, ipaddress.IPv4Address):
-        return f"Invalid IPv4 address: {ip_str}"
+        return None, f"Invalid IPv4 address: {ip_str}"
+    return ip, None
+
+
+def validate_ip(ip_str: object) -> Optional[str]:
+    _, err = _parse_ipv4(ip_str)
+    return err
+
+
+def validate_mesh_node_ip(ip_str: object) -> Optional[str]:
+    ip, err = _parse_ipv4(ip_str)
+    if err:
+        return err
+    if ip is None:
+        return f"Invalid IP address: {ip_str}"
+    if ip not in MESH_NETWORK:
+        return f"IP address must be in mesh subnet {MESH_NETWORK}: {ip_str}"
+    if ip in (MESH_NETWORK.network_address, MESH_NETWORK.broadcast_address):
+        return (
+            "IP address cannot be the mesh subnet network or broadcast address "
+            f"({MESH_NETWORK.network_address}, {MESH_NETWORK.broadcast_address}): {ip_str}"
+        )
+    if GATE_DHCP_POOL_START <= ip <= GATE_DHCP_POOL_END:
+        return (
+            "IP address is reserved for gate DHCP leases "
+            f"({GATE_DHCP_POOL_START}-{GATE_DHCP_POOL_END}): {ip_str}"
+        )
     return None
 
 
@@ -196,7 +228,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if not ip:
             result.add_error(f"Node '{name}': ip is required")
         else:
-            err = validate_ip(ip)
+            err = validate_mesh_node_ip(ip)
             if err:
                 result.add_error(f"Node '{name}': {err}")
             elif ip in ips_seen:

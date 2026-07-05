@@ -301,9 +301,12 @@
     const nodes = payload.nodes || payload.radios || [];
     const links = payload.links || [];
     const nodeMarkup = nodes.map((node) => meshNodeCard(node)).join("");
+    const emptyLinksMeta = payload.degraded
+      ? "Reachable node APIs did not report active BATMAN neighbors."
+      : "The gateway API did not report active BATMAN neighbors.";
     const linkMarkup = links.length
       ? `<div class="topology-links">${links.map((link) => meshLinkRow(link)).join("")}</div>`
-      : `<div class="empty-state slim"><p class="empty-title">No links reported</p><p class="empty-meta">The gateway API did not report active BATMAN neighbors.</p></div>`;
+      : `<div class="empty-state slim"><p class="empty-title">No links reported</p><p class="empty-meta">${emptyLinksMeta}</p></div>`;
     return `
       <div class="topology-section">
         <div class="mesh-grid">${nodeMarkup}</div>
@@ -327,7 +330,11 @@
     const checked = Number(payload.candidates_checked) || 0;
     const nodes = payload.nodes || payload.radios || [];
     const links = payload.links || [];
-    if (payload.ok) {
+    if (payload.degraded) {
+      rows.push(statusRow("warn", `${nodes.length} partial nodes found; gateway unreachable`));
+      rows.push(statusRow("subtle", `${links.length} links reported from reachable node APIs`));
+      rows.push(statusRow("subtle", `${checked} candidates checked`));
+    } else if (payload.ok) {
       rows.push(statusRow(nodes.length ? "ok" : "subtle", `${nodes.length} nodes found`));
       if (nodes.length) {
         rows.push(statusRow("subtle", `${links.length} links reported`));

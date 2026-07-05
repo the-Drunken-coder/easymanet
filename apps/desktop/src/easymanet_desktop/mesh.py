@@ -56,6 +56,13 @@ class MeshCandidate:
 
 Probe = Callable[[MeshCandidate], dict[str, Any]]
 TopologyFetcher = Callable[[dict[str, Any]], dict[str, Any]]
+NeighborFetcher = Callable[[dict[str, Any]], dict[str, Any]]
+
+GATEWAY_UNREACHABLE_ERROR = (
+    "Gateway unreachable: no EasyMANET gateway topology API answered. "
+    "Check gateway power, network, or API health, then rescan."
+)
+DEGRADED_MESH_WARNING = "Gateway unreachable; showing partial mesh view from reachable node APIs."
 
 
 def mesh_discover_payload(
@@ -63,6 +70,7 @@ def mesh_discover_payload(
     *,
     probe: Probe | None = None,
     topology_fetcher: TopologyFetcher | None = None,
+    neighbor_fetcher: NeighborFetcher | None = None,
 ) -> dict[str, Any]:
     request = payload or {}
     config = str(request.get("config", "") or "").strip()
@@ -74,23 +82,20 @@ def mesh_discover_payload(
     gateways = _dedupe_gateways([result for result in results if _is_connected_gateway(result)])
 
     if not gateways:
-        return {
-            "ok": False,
-            "code": "gateway_api_not_found",
-            "config": config,
-            "scan_subnet": scan_subnet,
-            "candidates_checked": len(candidates),
-            "gateway": None,
-            "nodes": [],
-            "links": [],
-            "radios": [],
-            "seen": [],
-            "warnings": warnings,
-            "errors": [
-                "No EasyMANET gateway topology API answered. Reflash the gateway with a topology API image, then rescan."
-            ],
-            "generated_at": _now_iso(),
-        }
+        fallback_warnings = list(warnings)
+        fallback_candidates = _fallback_point_candidates(config, fallback_warnings, candidates)
+        fallback_results = results
+        if fallback_candidates:
+            fallback_results = [*results, *_probe_candidates(fallback_candidates, probe=probe_fn)]
+        fetch_neighbors = neighbor_fetcher or fetch_node_neighbors
+        return _degraded_mesh_payload(
+            config=config,
+            scan_subnet=scan_subnet,
+            candidates_checked=len(candidates) + len(fallback_candidates),
+            results=fallback_results,
+            warnings=fallback_warnings,
+            neighbor_fetcher=fetch_neighbors,
+        )
 
     fetcher = topology_fetcher or fetch_gateway_topology
     last_gateway = gateways[0]
@@ -182,7 +187,7 @@ def mesh_candidates(*, config: str = "", scan_subnet: bool = False) -> tuple[lis
         )
 
     if config:
-        for candidate in _fleet_gateway_candidates(config, warnings):
+        for candidate in _fleet_candidates(config, warnings, roles={"gate"}, label="Fleet gateway"):
             add(
                 candidate.host,
                 candidate.source,
@@ -255,6 +260,17 @@ def fetch_gateway_topology(gateway: dict[str, Any]) -> dict[str, Any]:
     return topology
 
 
+def fetch_node_neighbors(node: dict[str, Any]) -> dict[str, Any]:
+    host = str(node.get("host") or node.get("address") or "").strip()
+    if not host:
+        return {"ok": False, "code": "node_host_missing", "errors": ["Node host is missing"]}
+    try:
+        neighbors = _fetch_api_json(host, "neighbors", timeout=HTTP_TIMEOUT_SECONDS)
+    except TopologyApiError as exc:
+        return {"ok": False, "code": exc.status, "errors": [str(exc)]}
+    return neighbors
+
+
 class TopologyApiError(Exception):
     def __init__(self, status: str, message: str) -> None:
         super().__init__(message)
@@ -302,12 +318,18 @@ def _probe_candidates(candidates: list[MeshCandidate], *, probe: Probe) -> list[
     return sorted(results, key=lambda item: (not bool(item.get("ok")), str(item.get("host", ""))))
 
 
-def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[MeshCandidate]:
+def _fleet_candidates(
+    config: str,
+    warnings: list[str],
+    *,
+    roles: set[str] | None,
+    label: str,
+) -> Iterable[MeshCandidate]:
     try:
         config_path = resolve_fleet_config(config)
         manifest = load_manifest(str(config_path))
     except (ManifestError, OSError, ValueError) as exc:
-        warnings.append(f"Fleet gateway candidates skipped: {exc}")
+        warnings.append(f"{label} candidates skipped: {exc}")
         return []
 
     candidates: list[MeshCandidate] = []
@@ -315,10 +337,10 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
         try:
             node = resolve_node_model(manifest, name)
         except ManifestError as exc:
-            warnings.append(f"Fleet gateway candidate skipped for {name}: {exc}")
+            warnings.append(f"{label} candidate skipped for {name}: {exc}")
             continue
         role = str(node.role or "").strip()
-        if role != "gate":
+        if roles is not None and role not in roles:
             continue
         hostname = str(node.hostname or name).strip()
         node_ip = str(node.ip or "").strip()
@@ -326,7 +348,7 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
             candidates.append(
                 MeshCandidate(
                     host=node_ip,
-                    source="fleet gate ip",
+                    source=f"fleet {role or 'node'} ip",
                     node=name,
                     role=role,
                     expected_ip=node_ip,
@@ -338,7 +360,7 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
                 candidates.append(
                     MeshCandidate(
                         host=hostname,
-                        source="fleet gate hostname",
+                        source=f"fleet {role or 'node'} hostname",
                         node=name,
                         role=role,
                         expected_ip=node_ip,
@@ -349,13 +371,30 @@ def _fleet_gateway_candidates(config: str, warnings: list[str]) -> Iterable[Mesh
                 candidates.append(
                     MeshCandidate(
                         host=f"{hostname}.local",
-                        source="fleet gate mDNS",
+                        source=f"fleet {role or 'node'} mDNS",
                         node=name,
                         role=role,
                         expected_ip=node_ip,
                         expected_hostname=hostname,
                     )
                 )
+    return candidates
+
+
+def _fallback_point_candidates(
+    config: str,
+    warnings: list[str],
+    existing_candidates: list[MeshCandidate],
+) -> list[MeshCandidate]:
+    if not config:
+        return []
+
+    existing_hosts = {candidate.host.lower() for candidate in existing_candidates}
+    candidates: list[MeshCandidate] = []
+    for candidate in _fleet_candidates(config, warnings, roles={"point"}, label="Fleet point"):
+        if candidate.host.lower() in existing_hosts:
+            continue
+        candidates.append(candidate)
     return candidates
 
 
@@ -441,6 +480,154 @@ def _is_connected_gateway(result: dict[str, Any]) -> bool:
     return bool(result.get("ok")) and str(result.get("role") or "").lower() == "gate"
 
 
+def _degraded_mesh_payload(
+    *,
+    config: str,
+    scan_subnet: bool,
+    candidates_checked: int,
+    results: list[dict[str, Any]],
+    warnings: list[str],
+    neighbor_fetcher: NeighborFetcher,
+) -> dict[str, Any]:
+    connected = _dedupe_nodes([result for result in results if result.get("ok")])
+    if not connected:
+        return {
+            "ok": False,
+            "code": "gateway_api_not_found",
+            "config": config,
+            "scan_subnet": scan_subnet,
+            "candidates_checked": candidates_checked,
+            "gateway": None,
+            "nodes": [],
+            "links": [],
+            "radios": [],
+            "seen": [],
+            "warnings": warnings,
+            "errors": [GATEWAY_UNREACHABLE_ERROR],
+            "generated_at": _now_iso(),
+        }
+
+    nodes = [_degraded_node(result) for result in connected]
+    mac_index = _mac_node_index(nodes)
+    links: list[dict[str, str]] = []
+    merged_warnings = [*warnings, DEGRADED_MESH_WARNING]
+
+    for result, neighbors in _fetch_degraded_neighbors(connected, neighbor_fetcher=neighbor_fetcher):
+        if neighbors.get("ok"):
+            links.extend(_degraded_links(result, neighbors, mac_index))
+            continue
+        label = _result_label(result)
+        merged_warnings.append(f"{label} neighbors unavailable: {_payload_error(neighbors)}")
+
+    return {
+        "ok": False,
+        "code": "gateway_unreachable_partial",
+        "degraded": True,
+        "config": config,
+        "scan_subnet": scan_subnet,
+        "candidates_checked": candidates_checked,
+        "gateway": None,
+        "nodes": nodes,
+        "links": links,
+        "radios": nodes,
+        "seen": connected,
+        "warnings": merged_warnings,
+        "errors": [],
+        "generated_at": _now_iso(),
+    }
+
+
+def _fetch_degraded_neighbors(
+    connected: list[dict[str, Any]],
+    *,
+    neighbor_fetcher: NeighborFetcher,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    workers = min(MAX_WORKERS, max(1, len(connected)))
+    order = {id(result): index for index, result in enumerate(connected)}
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(neighbor_fetcher, result): result for result in connected}
+        for future in as_completed(futures):
+            result = futures[future]
+            try:
+                neighbors = future.result()
+            except Exception as exc:  # noqa: BLE001 - degraded discovery should keep going.
+                neighbors = {"ok": False, "code": "neighbors_failed", "errors": [str(exc)]}
+            pairs.append((result, neighbors))
+
+    return sorted(pairs, key=lambda pair: order[id(pair[0])])
+
+
+def _degraded_node(result: dict[str, Any]) -> dict[str, str]:
+    name = str(result.get("node") or result.get("hostname") or result.get("host") or "")
+    return {
+        "name": name,
+        "hostname": str(result.get("hostname") or result.get("expected_hostname") or ""),
+        "role": str(result.get("role") or ""),
+        "target": str(result.get("target") or ""),
+        "ip": str(result.get("node_ip") or result.get("address") or result.get("host") or ""),
+        "mesh_mac": str(result.get("mesh_mac") or ""),
+        "bat0_mac": str(result.get("bat0_mac") or ""),
+        "status": "reachable",
+    }
+
+
+def _degraded_links(
+    source: dict[str, Any],
+    neighbors: dict[str, Any],
+    mac_index: dict[str, str],
+) -> list[dict[str, str]]:
+    source_name = _result_label(source)
+    source_mac = str(source.get("mesh_mac") or "")
+    neighbor_items = neighbors.get("neighbors") if isinstance(neighbors.get("neighbors"), list) else []
+    links: list[dict[str, str]] = []
+
+    for neighbor in neighbor_items:
+        if not isinstance(neighbor, dict):
+            continue
+        target_mac = str(neighbor.get("mac") or "").strip().lower()
+        if not target_mac:
+            continue
+        target = mac_index.get(target_mac, "")
+        links.append(
+            {
+                "source": source_name,
+                "target": target,
+                "source_mac": source_mac,
+                "target_mac": target_mac,
+                "iface": str(neighbor.get("iface") or ""),
+                "last_seen": str(neighbor.get("last_seen") or ""),
+                "throughput": str(neighbor.get("throughput") or ""),
+                "status": "resolved" if target else "unresolved",
+            }
+        )
+
+    return links
+
+
+def _mac_node_index(nodes: list[dict[str, str]]) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for node in nodes:
+        name = node.get("name") or node.get("hostname") or node.get("ip") or ""
+        for mac_key in ("mesh_mac", "bat0_mac"):
+            mac = str(node.get(mac_key) or "").strip().lower()
+            if mac and name:
+                index[mac] = name
+    return index
+
+
+def _payload_error(payload: dict[str, Any]) -> str:
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors:
+        return str(errors[0])
+    return str(payload.get("code") or "neighbors unavailable")
+
+
+def _result_label(result: dict[str, Any]) -> str:
+    return str(result.get("node") or result.get("hostname") or result.get("host") or "node")
+
+
 def _node_summary(node: dict[str, Any]) -> str:
     parts = [
         str(node.get("hostname") or node.get("expected_hostname") or node.get("host") or ""),
@@ -451,21 +638,31 @@ def _node_summary(node: dict[str, Any]) -> str:
 
 
 def _dedupe_gateways(gateways: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _dedupe_nodes(gateways)
+
+
+def _dedupe_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[str, dict[str, Any]] = {}
-    for gateway in gateways:
+    for node in nodes:
         key = "|".join(
             [
-                str(gateway.get("hostname") or gateway.get("expected_hostname") or "").lower(),
-                str(gateway.get("node_ip") or gateway.get("address") or gateway.get("host") or ""),
+                str(node.get("node") or node.get("hostname") or node.get("expected_hostname") or "").lower(),
+                str(node.get("node_ip") or node.get("address") or node.get("host") or ""),
             ]
         )
         existing = deduped.get(key)
         if existing:
-            sources = sorted({*(str(existing.get("source") or "").split(", ")), *(str(gateway.get("source") or "").split(", "))})
-            existing["source"] = ", ".join(source for source in sources if source)
+            existing["source"] = _merge_sources(existing.get("source"), node.get("source"))
             continue
-        deduped[key] = dict(gateway)
+        deduped[key] = dict(node)
     return list(deduped.values())
+
+
+def _merge_sources(*values: Any) -> str:
+    sources: set[str] = set()
+    for value in values:
+        sources.update(source for source in str(value or "").split(", ") if source)
+    return ", ".join(sorted(sources))
 
 
 def _arp_hosts() -> list[str]:

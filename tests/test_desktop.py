@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -1048,13 +1049,18 @@ def test_desktop_mesh_discovery_uses_gateway_topology_api(monkeypatch):
             "warnings": [],
         }
 
+    def fail_neighbors(_node):
+        raise AssertionError("point fallback should not run when gateway topology succeeds")
+
     payload = mesh.mesh_discover_payload(
         {"config": "examples/three-node-field-mesh.yml", "scanSubnet": False},
         probe=fake_probe,
         topology_fetcher=fake_topology,
+        neighbor_fetcher=fail_neighbors,
     )
 
     assert payload["ok"] is True
+    assert payload.get("degraded") is not True
     assert payload["candidates_checked"] >= 3
     assert payload["gateway"]["hostname"] == "gate01"
     assert [node["name"] for node in payload["nodes"]] == ["gate01", "point01"]
@@ -1144,6 +1150,95 @@ def test_desktop_mesh_discovery_tries_next_gateway_after_topology_failure(monkey
     assert attempts == ["10.41.254.1", "manet01.local"]
 
 
+def test_desktop_mesh_discovery_shows_degraded_points_without_gateway(monkeypatch):
+    monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
+    monkeypatch.setattr(mesh, "_local_subnet_hosts", lambda: [])
+
+    point_payloads = {
+        "10.41.2.1": {
+            "hostname": "point01",
+            "node": "point01",
+            "node_ip": "10.41.2.1",
+            "mesh_mac": "aa:00:00:00:00:01",
+            "bat0_mac": "ba:00:00:00:00:01",
+        },
+        "10.41.3.1": {
+            "hostname": "point02",
+            "node": "point02",
+            "node_ip": "10.41.3.1",
+            "mesh_mac": "aa:00:00:00:00:02",
+            "bat0_mac": "ba:00:00:00:00:02",
+        },
+    }
+
+    def fake_probe(candidate):
+        point = point_payloads.get(candidate.host)
+        if point:
+            return {
+                **candidate.to_dict(),
+                **point,
+                "ok": True,
+                "status": "connected",
+                "role": "point",
+                "target": "rpi4-mm6108-spi",
+                "address": candidate.host,
+                "summary": f"{point['hostname']} / point / {point['node_ip']}",
+            }
+        return {**candidate.to_dict(), "ok": False, "status": "api_unreachable"}
+
+    neighbor_starts: list[str] = []
+    neighbor_start_lock = threading.Lock()
+    all_neighbors_started = threading.Event()
+
+    def fake_neighbors(node):
+        with neighbor_start_lock:
+            neighbor_starts.append(node["node"])
+            if len(neighbor_starts) == len(point_payloads):
+                all_neighbors_started.set()
+        assert all_neighbors_started.wait(1), "neighbor fetches should start in parallel"
+        if node["node"] == "point01":
+            return {
+                "ok": True,
+                "neighbors": [
+                    {
+                        "mac": "aa:00:00:00:00:02",
+                        "iface": "wlan0",
+                        "last_seen": "0.120s",
+                        "throughput": "7.2",
+                    }
+                ],
+            }
+        return {"ok": True, "neighbors": []}
+
+    payload = mesh.mesh_discover_payload(
+        {"config": "examples/three-node-field-mesh.yml", "scanSubnet": False},
+        probe=fake_probe,
+        neighbor_fetcher=fake_neighbors,
+    )
+
+    assert payload["ok"] is False
+    assert payload["degraded"] is True
+    assert payload["code"] == "gateway_unreachable_partial"
+    assert payload["gateway"] is None
+    assert [node["name"] for node in payload["nodes"]] == ["point01", "point02"]
+    assert payload["nodes"][0]["status"] == "reachable"
+    assert payload["links"] == [
+        {
+            "source": "point01",
+            "target": "point02",
+            "source_mac": "aa:00:00:00:00:01",
+            "target_mac": "aa:00:00:00:00:02",
+            "iface": "wlan0",
+            "last_seen": "0.120s",
+            "throughput": "7.2",
+            "status": "resolved",
+        }
+    ]
+    assert payload["errors"] == []
+    assert "Gateway unreachable" in payload["warnings"][0]
+    assert {node["node"] for node in payload["seen"]} == {"point01", "point02"}
+
+
 def test_desktop_mesh_discovery_string_false_does_not_scan_subnet(monkeypatch):
     monkeypatch.setattr(mesh, "_arp_hosts", lambda: [])
     monkeypatch.setattr(
@@ -1187,7 +1282,9 @@ def test_desktop_mesh_discovery_reports_missing_gateway_api(monkeypatch):
 
     assert payload["ok"] is False
     assert payload["code"] == "gateway_api_not_found"
+    assert "Gateway unreachable" in payload["errors"][0]
     assert "topology API" in payload["errors"][0]
+    assert "Reflash" not in payload["errors"][0]
     assert payload["nodes"] == []
 
 
@@ -1859,6 +1956,9 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "appendMeshLog" in text
     assert "meshLogLines" in text
     assert "partial results" in text
+    assert "Scan degraded" in text
+    assert "gateway unreachable" in render_js.read_text()
+    assert "Reachable node APIs did not report active BATMAN neighbors." in render_js.read_text()
     assert "meshDiscover.textContent = busy ? \"Scanning...\" : \"Scan Mesh\"" in text
     assert "meshScanning.hidden = !busy" in text
     assert 'meshRadios.setAttribute("aria-busy", "true")' in text

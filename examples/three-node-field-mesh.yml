@@ -4,14 +4,14 @@ mesh:
   id: field-deployment-alpha
   password: "strong-mesh-password-here"
   channel: 42
-  bandwidth_mhz: 2
+  bandwidth_mhz: 1
   country: US
 
 defaults:
   target: rpi4-mm6108-spi
 
   local_ap:
-    enabled: true
+    enabled: false
     password: "local-ap-password"
 
   management:

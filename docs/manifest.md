@@ -40,7 +40,7 @@ mesh:
 
 WiFi channel for the mesh radio. Valid values depend on the country
 regulatory domain. For the tested `rpi4-mm6108-spi` MM6108 target in the US,
-use channel `42` with `mesh.bandwidth_mhz: 2`.
+use channel `42`.
 
 ```yaml
 mesh:
@@ -50,11 +50,12 @@ mesh:
 ### `mesh.bandwidth_mhz` (required, integer)
 
 Channel bandwidth in MHz. Must be one of: 1, 2, 4, 8.
-For the tested `rpi4-mm6108-spi` MM6108 target in the US, use `2`.
+For range-first `rpi4-mm6108-spi` MM6108 fleets in the US, use `1`.
+Use `2` only when compatibility with an existing `2 MHz` fleet matters.
 
 ```yaml
 mesh:
-  bandwidth_mhz: 2
+  bandwidth_mhz: 1
 ```
 
 ### `mesh.country` (required, string)
@@ -87,16 +88,19 @@ Default local access point settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Whether to create a local WiFi AP |
+| `enabled` | bool | `false` | Whether to create a local WiFi AP |
 | `password` | string | — | AP password (min 8 chars when enabled) |
 | `ssid` | string | `{nodename}-local` | AP SSID (override per node) |
 
 ```yaml
 defaults:
   local_ap:
-    enabled: true
+    enabled: false
     password: "ap-password-here"
 ```
+
+For range-first fleets, keep local APs disabled unless client access is needed.
+Attached client traffic shares mesh airtime.
 
 ### `defaults.management` (object)
 

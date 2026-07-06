@@ -75,13 +75,13 @@ mesh:
   id: my-mesh
   password: "strong-mesh-password"
   channel: 42
-  bandwidth_mhz: 2
+  bandwidth_mhz: 1
   country: US
 
 defaults:
   target: rpi4-mm6108-spi
   local_ap:
-    enabled: true
+    enabled: false
     password: "ap-password"
   management:
     root_password_hash: ""
@@ -114,6 +114,9 @@ nodes:
     local_ap:
       ssid: point01-local
 ```
+
+This starter shape is range-first: it uses `1 MHz` HaLow bandwidth and keeps
+local APs disabled unless you explicitly need client access on a node.
 
 The checked-in starter fleet is
 [`examples/three-node-field-mesh.yml`](examples/three-node-field-mesh.yml).

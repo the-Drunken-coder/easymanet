@@ -21,7 +21,7 @@ VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
 VALID_BANDWIDTHS = {1, 2, 4, 8}
 MM6108_TARGET = "rpi4-mm6108-spi"
-MM6108_US_VALID_MESH = {(42, 2)}
+MM6108_US_VALID_MESH = {(42, 1), (42, 2)}
 VALID_WIFI_ENCRYPTION = {"psk2", "sae", "none", "psk", "psk-mixed"}
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 MESH_NETWORK = ipaddress.ip_network("10.41.0.0/16")
@@ -348,7 +348,8 @@ def _validate_target_mesh_settings(
     if country == "US" and (channel, bandwidth) not in MM6108_US_VALID_MESH:
         result.add_error(
             "mesh.channel/bandwidth_mhz for rpi4-mm6108-spi in US must be "
-            "channel 42 with bandwidth_mhz 2; "
+            "channel 42 with bandwidth_mhz 1 for range-first fleets, "
+            "or bandwidth_mhz 2 for compatibility; "
             f"got channel {channel} with bandwidth_mhz {bandwidth}"
         )
 

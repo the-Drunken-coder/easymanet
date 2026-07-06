@@ -14,7 +14,7 @@ mesh:
   id: test-mesh
   password: "test-password"
   channel: 42
-  bandwidth_mhz: 2
+  bandwidth_mhz: 1
   country: US
 
 defaults:
@@ -81,7 +81,7 @@ def test_missing_mesh_password():
 
 
 def test_invalid_bandwidth():
-    config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: 3")
+    config = VALID_CONFIG.replace("bandwidth_mhz: 1", "bandwidth_mhz: 3")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
@@ -91,7 +91,7 @@ def test_invalid_bandwidth():
 
 
 def test_invalid_bandwidth_5():
-    config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: 5")
+    config = VALID_CONFIG.replace("bandwidth_mhz: 1", "bandwidth_mhz: 5")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
@@ -102,7 +102,7 @@ def test_invalid_bandwidth_5():
 
 def test_mm6108_us_rejects_untested_channel_bandwidth_pair():
     config = VALID_CONFIG.replace("channel: 42", "channel: 36").replace(
-        "bandwidth_mhz: 2",
+        "bandwidth_mhz: 1",
         "bandwidth_mhz: 4",
     )
     path = _write_config(config)
@@ -124,7 +124,7 @@ def test_mesh_channel_must_be_numeric():
 
 
 def test_mesh_bandwidth_must_be_numeric():
-    config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: true")
+    config = VALID_CONFIG.replace("bandwidth_mhz: 1", "bandwidth_mhz: true")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
@@ -381,7 +381,16 @@ def test_mesh_channel_zero_is_rejected():
     m = load_manifest(path)
     result = validate(m)
     assert not result.valid
-    assert any("channel 42 with bandwidth_mhz 2" in e for e in result.errors)
+    assert any("channel 42 with bandwidth_mhz 1" in e for e in result.errors)
+    os.unlink(path)
+
+
+def test_mm6108_us_accepts_compatibility_two_mhz_bandwidth():
+    config = VALID_CONFIG.replace("bandwidth_mhz: 1", "bandwidth_mhz: 2")
+    path = _write_config(config)
+    m = load_manifest(path)
+    result = validate(m)
+    assert result.valid
     os.unlink(path)
 
 

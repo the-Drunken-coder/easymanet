@@ -23,13 +23,13 @@ mesh:
   id: field-deployment-alpha
   password: "replace-with-a-strong-mesh-password"
   channel: 42
-  bandwidth_mhz: 2
+  bandwidth_mhz: 1
   country: US
 
 defaults:
   target: rpi4-mm6108-spi
   local_ap:
-    enabled: true
+    enabled: false
     password: "replace-with-a-local-ap-password"
   management:
     root_password_hash: "replace-with-hashed-password"
@@ -63,7 +63,11 @@ nodes:
       ssid: point01-local
 ```
 
+This sample favors range over convenience: it uses `1 MHz` HaLow bandwidth and
+keeps local APs disabled unless you explicitly enable them.
+
 In this sample, `gate01` uses a Wi-Fi uplink, so its Ethernet port stays on the
 mesh-side `br-ahwlan` network like a point node. If you change a gate to
 `gateway.uplink_interface: eth0`, that Ethernet port becomes the gate WAN uplink
-instead; manage the gate through its local AP or another mesh node.
+instead; manage the gate through another mesh node, or enable the gate local AP
+if you need direct wireless access.

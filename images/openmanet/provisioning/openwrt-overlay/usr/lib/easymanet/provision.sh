@@ -144,9 +144,9 @@ case "$MESH_CHANNEL" in
 esac
 if [ "$NODE_TARGET" = "rpi4-mm6108-spi" ] && [ "$MESH_COUNTRY" = "US" ]; then
     case "${MESH_CHANNEL}:${MESH_BW}" in
-        42:2) ;;
+        42:1|42:2) ;;
         *)
-            echo "FATAL: rpi4-mm6108-spi in US requires mesh.channel 42 and mesh.bandwidth_mhz 2; got channel $MESH_CHANNEL bandwidth $MESH_BW" | tee -a "$LOG_FILE"
+            echo "FATAL: rpi4-mm6108-spi in US requires mesh.channel 42 and mesh.bandwidth_mhz 1 or 2; got channel $MESH_CHANNEL bandwidth $MESH_BW" | tee -a "$LOG_FILE"
             exit 1
             ;;
     esac

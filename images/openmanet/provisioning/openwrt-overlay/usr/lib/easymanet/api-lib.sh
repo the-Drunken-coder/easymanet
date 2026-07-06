@@ -53,17 +53,17 @@ topology_cache_file() {
 }
 
 cache_refresh_interval() {
-    value="${EASYMANET_STATUS_CACHE_INTERVAL:-10}"
+    value="${EASYMANET_STATUS_CACHE_INTERVAL:-30}"
     case "$value" in
-        ""|*[!0-9]*) value=10 ;;
+        ""|*[!0-9]*) value=30 ;;
     esac
     printf '%s' "$value"
 }
 
 cache_stale_after() {
-    value="${EASYMANET_STATUS_CACHE_STALE_AFTER:-30}"
+    value="${EASYMANET_STATUS_CACHE_STALE_AFTER:-90}"
     case "$value" in
-        ""|*[!0-9]*) value=30 ;;
+        ""|*[!0-9]*) value=90 ;;
     esac
     printf '%s' "$value"
 }

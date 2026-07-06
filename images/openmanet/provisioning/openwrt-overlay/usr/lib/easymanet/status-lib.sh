@@ -4,8 +4,8 @@
 # the caller; this file is intentionally a small sourced library, not a daemon.
 
 : "${EASYMANET_STATUS_SCHEMA:=1}"
-: "${EASYMANET_INTERNET_TARGETS:=1.1.1.1 8.8.8.8}"
-: "${EASYMANET_INTERNET_PING_TIMEOUT:=2}"
+: "${EASYMANET_INTERNET_TARGETS:=1.1.1.1}"
+: "${EASYMANET_INTERNET_PING_TIMEOUT:=1}"
 : "${EASYMANET_DISPLAY_INTERVAL:=5}"
 : "${EASYMANET_DISPLAY_TTY:=/dev/tty1}"
 : "${EASYMANET_PROVISIONED_FLAG:=/etc/easymanet/provisioned}"

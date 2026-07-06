@@ -37,7 +37,7 @@ def _policy_parity_config(
     role: str = "gate",
     target: str = "rpi4-mm6108-spi",
     channel: object = 42,
-    bandwidth_mhz: object = 2,
+    bandwidth_mhz: object = 1,
 ) -> str:
     return f"""
 version: 1
@@ -154,6 +154,7 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
         ("unsupported bandwidth", _policy_parity_config(bandwidth_mhz=3), False),
         ("untested US channel", _policy_parity_config(channel=36), False),
         ("non-numeric channel", _policy_parity_config(channel="abc"), False),
+        ("compatibility bandwidth", _policy_parity_config(bandwidth_mhz=2), True),
     ],
 )
 def test_python_validation_and_shell_provision_policy_parity(
@@ -257,7 +258,7 @@ def _gate_provision_json() -> dict:
             "id": "test-mesh",
             "password": "fixture-mesh-key",
             "channel": 42,
-            "bandwidth_mhz": 2,
+            "bandwidth_mhz": 1,
             "country": "US",
         },
         "node": {
@@ -1938,7 +1939,21 @@ def test_provision_reapplies_mesh_channel_after_network_restart(tmp_path):
 
     env = _harness_env(uci_state)
     assert _uci_get(uci_state, "wireless.radio2.channel", env) == "42"
-    assert _uci_get(uci_state, "wireless.radio2.s1g_chanbw", env) == "2"
+    assert _uci_get(uci_state, "wireless.radio2.s1g_chanbw", env) == "1"
+
+
+def test_provision_clears_stale_mesh_txpower_override(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("wireless.radio2.txpower='1'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.radio2.txpower", env) == ""
 
 
 def test_provision_sets_openmanetd_mesh_interface_to_brahwlan(tmp_path):

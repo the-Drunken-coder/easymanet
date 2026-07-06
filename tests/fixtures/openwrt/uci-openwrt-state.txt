@@ -1,6 +1,6 @@
 wireless.radio2.type='morse'
 wireless.radio2.channel='42'
-wireless.radio2.s1g_chanbw='2'
+wireless.radio2.s1g_chanbw='1'
 wireless.radio0.type='mac80211'
 wireless.radio3.type='mac80211'
 wireless.radio3.path='platform/soc/fe300000.mmcnr/mmc_host/mmc1/mmc1:0001/mmc1:0001:1'

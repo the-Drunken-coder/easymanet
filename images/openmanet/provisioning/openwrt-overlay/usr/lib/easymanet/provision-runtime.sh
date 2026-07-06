@@ -102,6 +102,7 @@ configure_mesh_radio_device() {
     uci_set wireless."$radio".channel="$MESH_CHANNEL"
     uci_set wireless."$radio".s1g_chanbw="$MESH_BW"
     uci -q delete wireless."$radio".htmode 2>/dev/null || true
+    uci -q delete wireless."$radio".txpower 2>/dev/null || true
     uci_set wireless."$radio".country="$MESH_COUNTRY"
     uci_set wireless."$radio".bcf="$EM_MESH_BCF"
     uci_set wireless."$radio".disabled="0"

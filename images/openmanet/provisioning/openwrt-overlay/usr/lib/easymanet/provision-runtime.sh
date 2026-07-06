@@ -97,12 +97,29 @@ uci_add_list() {
     uci add_list "$@" >> "$LOG_FILE" 2>&1
 }
 
+clear_stale_mesh_txpower_override() {
+    radio="$1"
+    existing_txpower="$(uci -q get wireless."$radio".txpower 2>/dev/null || true)"
+    case "$existing_txpower" in
+        "")
+            return 0
+            ;;
+        1)
+            uci -q delete wireless."$radio".txpower 2>/dev/null || true
+            echo "Cleared stale mesh txpower override on $radio" >> "$LOG_FILE"
+            ;;
+        *)
+            echo "Keeping explicit mesh txpower override on $radio: $existing_txpower" >> "$LOG_FILE"
+            ;;
+    esac
+}
+
 configure_mesh_radio_device() {
     radio="$1"
     uci_set wireless."$radio".channel="$MESH_CHANNEL"
     uci_set wireless."$radio".s1g_chanbw="$MESH_BW"
     uci -q delete wireless."$radio".htmode 2>/dev/null || true
-    uci -q delete wireless."$radio".txpower 2>/dev/null || true
+    clear_stale_mesh_txpower_override "$radio"
     uci_set wireless."$radio".country="$MESH_COUNTRY"
     uci_set wireless."$radio".bcf="$EM_MESH_BCF"
     uci_set wireless."$radio".disabled="0"

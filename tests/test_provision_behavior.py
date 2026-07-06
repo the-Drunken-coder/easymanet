@@ -1367,6 +1367,98 @@ status_fleet_json "{tmp_path / "missing.txt"}"
     assert {"name": "point01", "status": "UNKNOWN"} in payload
 
 
+def test_status_defaults_use_two_low_timeout_internet_targets(tmp_path):
+    script = f'''
+unset EASYMANET_INTERNET_TARGETS
+unset EASYMANET_INTERNET_PING_TIMEOUT
+unset EASYMANET_STATUS_CACHE_INTERVAL
+unset EASYMANET_STATUS_CACHE_STALE_AFTER
+SCRIPT_DIR="{OVERLAY / "usr" / "lib" / "easymanet"}"
+. "$SCRIPT_DIR/api-lib.sh"
+. "$SCRIPT_DIR/status-lib.sh"
+printf '%s\\n' "$EASYMANET_INTERNET_TARGETS"
+printf '%s\\n' "$EASYMANET_INTERNET_PING_TIMEOUT"
+printf '%s\\n' "$(cache_refresh_interval)"
+printf '%s\\n' "$(cache_stale_after)"
+'''
+
+    result = subprocess.run(
+        ["sh", "-c", script],
+        env={**os.environ, "PATH": f"{HARNESS}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["1.1.1.1 8.8.8.8", "1", "30", "90"]
+
+
+def test_status_defaults_preserve_env_overrides(tmp_path):
+    script = f'''
+SCRIPT_DIR="{OVERLAY / "usr" / "lib" / "easymanet"}"
+. "$SCRIPT_DIR/api-lib.sh"
+. "$SCRIPT_DIR/status-lib.sh"
+printf '%s\\n' "$EASYMANET_INTERNET_TARGETS"
+printf '%s\\n' "$EASYMANET_INTERNET_PING_TIMEOUT"
+printf '%s\\n' "$(cache_refresh_interval)"
+printf '%s\\n' "$(cache_stale_after)"
+'''
+    env = {
+        **os.environ,
+        "PATH": f"{HARNESS}:{os.environ.get('PATH', '')}",
+        "EASYMANET_INTERNET_TARGETS": "203.0.113.10",
+        "EASYMANET_INTERNET_PING_TIMEOUT": "3",
+        "EASYMANET_STATUS_CACHE_INTERVAL": "12",
+        "EASYMANET_STATUS_CACHE_STALE_AFTER": "44",
+    }
+
+    result = subprocess.run(
+        ["sh", "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["203.0.113.10", "3", "12", "44"]
+
+
+def test_status_public_internet_tries_all_default_targets_with_one_second_timeout(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ping_log = tmp_path / "ping.log"
+    _write_executable(
+        bin_dir / "ping",
+        f"""#!/bin/sh
+echo "$@" >> {shlex.quote(str(ping_log))}
+exit 1
+""",
+    )
+    script = f'''
+unset EASYMANET_INTERNET_TARGETS
+unset EASYMANET_INTERNET_PING_TIMEOUT
+SCRIPT_DIR="{OVERLAY / "usr" / "lib" / "easymanet"}"
+. "$SCRIPT_DIR/status-lib.sh"
+status_public_internet
+'''
+
+    result = subprocess.run(
+        ["sh", "-c", script],
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert ping_log.read_text().splitlines() == [
+        "-c 1 -w 1 1.1.1.1",
+        "-c 1 -w 1 8.8.8.8",
+    ]
+
+
 def test_status_cache_once_writes_status_and_topology_snapshots(tmp_path):
     env = _status_env(tmp_path, _point_provision_json())
 
@@ -1942,6 +2034,21 @@ def test_provision_reapplies_mesh_channel_after_network_restart(tmp_path):
     assert _uci_get(uci_state, "wireless.radio2.s1g_chanbw", env) == "1"
 
 
+def test_provision_preserves_two_mhz_compatibility_uci_state(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _point_provision_json()
+    provision_data["mesh"]["bandwidth_mhz"] = 2
+
+    result = _run_provision(prefix, provision_data, uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.radio2.channel", env) == "42"
+    assert _uci_get(uci_state, "wireless.radio2.s1g_chanbw", env) == "2"
+
+
 def test_provision_clears_stale_mesh_txpower_override(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
@@ -1954,6 +2061,20 @@ def test_provision_clears_stale_mesh_txpower_override(tmp_path):
 
     env = _harness_env(uci_state)
     assert _uci_get(uci_state, "wireless.radio2.txpower", env) == ""
+
+
+def test_provision_preserves_explicit_mesh_txpower_override(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    with uci_state.open("a") as state:
+        state.write("wireless.radio2.txpower='17'\n")
+
+    result = _run_provision(prefix, _point_provision_json(), uci_state)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.radio2.txpower", env) == "17"
 
 
 def test_provision_sets_openmanetd_mesh_interface_to_brahwlan(tmp_path):

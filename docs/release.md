@@ -142,6 +142,22 @@ Retention is automatic after a successful image release:
   target or become older than 90 days,
 - never delete the just-published release.
 
+## Experimental Image Testing
+
+For PR or beta image testing, use the authoring repo's manual
+`Build OpenMANET Image` workflow first. Leave release publishing out of the
+loop: the workflow uploads a 7-day image artifact and
+`easymanet-image-release.json` that can be downloaded, verified with
+`python tools/verify.py artifact --artifact ... --release-manifest ...`, and
+flashed into a two-node lab.
+
+Treat that artifact as experimental and checksum-only until hardware evidence
+passes. For radio, provisioning, or first-boot changes, run `tools/verify.py hil`
+against a real gate/point pair and keep the JSON evidence plus support bundle
+with the PR or release notes. Publish a `candidate` image release only after the
+experimental artifact has passed HIL; promote to `stable` only after the
+candidate has the expected field confidence.
+
 ## Diagnostics And Support
 
 Support bundles are exported as redacted `.zip` files from

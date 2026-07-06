@@ -225,6 +225,10 @@ def test_display_status_hook_is_packaged_enabled_and_reported():
     assert '|| { log_cache "failed to source provision-lib.sh"; exit 1; }' in cache_script_text
     assert '|| { log_cache "failed to source api-lib.sh"; exit 1; }' in cache_script_text
     assert '|| { log_cache "failed to source status-lib.sh"; exit 1; }' in cache_script_text
+    assert "EASYMANET_STATUS_CACHE_INTERVAL:=30" in cache_script_text
+    status_lib_text = status_lib.read_text()
+    assert "EASYMANET_INTERNET_TARGETS:=1.1.1.1 8.8.8.8" in status_lib_text
+    assert "EASYMANET_INTERNET_PING_TIMEOUT:=1" in status_lib_text
     assert "EASYMANET_DISPLAY_TTY:=/dev/tty1" in status_lib.read_text()
     assert "render_status_text" in status_lib.read_text()
     assert "status_cache_file" in status_lib.read_text()

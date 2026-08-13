@@ -63,6 +63,7 @@ setInterval(() => {}, 1000);
 async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
+    await testPersistentGroupObservationDoesNotBlockShutdown();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
     await testElevatedTimeoutReapsBeforeCleanup();
@@ -86,6 +87,48 @@ async function testTimeoutReapsProcessTree() {
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /timed out/);
   assertTermSignals(signalFileFor(pidFile));
+  assertProcessTreeGone(pids);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testPersistentGroupObservationDoesNotBlockShutdown() {
+  const pidFile = path.join(tempRoot, "persistent-group-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const originalKill = process.kill;
+  let groupKilled = false;
+
+  process.kill = (pid, signal) => {
+    if (groupKilled && pid === -pids.leader && signal === 0) {
+      return true;
+    }
+    const result = originalKill(pid, signal);
+    if (pid === -pids.leader && signal === "SIGKILL") {
+      groupKilled = true;
+    }
+    return result;
+  };
+
+  let deadlineTimer;
+  try {
+    const deadline = new Promise((_, reject) => {
+      deadlineTimer = setTimeout(
+        () => reject(new Error("Bridge shutdown did not settle after SIGKILL")),
+        2000,
+      );
+    });
+    const shutdownPromise = bridge.shutdownActiveBridgeProcesses();
+    await Promise.race([Promise.all([shutdownPromise, resultPromise]), deadline]);
+  } finally {
+    clearTimeout(deadlineTimer);
+    process.kill = originalKill;
+  }
+
+  const result = await resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /application shutdown/);
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }

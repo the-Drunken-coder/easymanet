@@ -231,7 +231,7 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
     child.kill("SIGTERM");
     if (!(await waitForClose(closePromise, graceMs))) {
       child.kill("SIGKILL");
-      await closePromise;
+      await waitForClose(closePromise, graceMs);
     }
     return;
   }
@@ -239,10 +239,11 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   signalProcessGroup(pid, "SIGTERM");
   if (!(await waitForProcessGroupExit(pid, graceMs))) {
     signalProcessGroup(pid, "SIGKILL");
-    await waitForProcessGroupExit(pid);
   }
-  await closePromise;
-  await waitForProcessGroupExit(pid);
+  await Promise.all([
+    waitForClose(closePromise, graceMs),
+    waitForProcessGroupExit(pid, graceMs),
+  ]);
 }
 
 function signalProcessGroup(pid, signal) {

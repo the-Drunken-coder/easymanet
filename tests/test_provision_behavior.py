@@ -361,17 +361,18 @@ esac
     stub.chmod(0o755)
 
 
-def _write_uhttpd_stub(prefix: Path) -> None:
+def _write_uhttpd_stub(prefix: Path, *, fail_restart: bool = False) -> None:
     init_dir = prefix / "etc" / "init.d"
     init_dir.mkdir(parents=True, exist_ok=True)
     state_file = prefix / "var" / "uhttpd-state"
     stub = init_dir / "uhttpd"
+    restart_result = "\n    exit 1" if fail_restart else ""
     stub.write_text(
         f"""#!/bin/sh
 state_file="{state_file}"
 case "$1" in
   enable) echo enabled >> "$state_file" ;;
-  restart) echo restarted >> "$state_file" ;;
+  restart) echo restarted >> "$state_file"{restart_result} ;;
   start) echo started >> "$state_file" ;;
 esac
 """
@@ -445,19 +446,71 @@ esac
     stub.chmod(0o755)
 
 
-def _write_network_channel_rewrite_stub(prefix: Path, channel: int) -> None:
+def _write_network_stub(
+    prefix: Path,
+    *,
+    restart_channel: int | None = None,
+    fail_restart: bool = False,
+) -> None:
     init_dir = prefix / "etc" / "init.d"
     init_dir.mkdir(parents=True, exist_ok=True)
+    state_file = prefix / "var" / "network-state"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    marker_file = prefix / "etc" / "easymanet" / "provisioned"
+    rewrite_channel = (
+        f'uci set wireless.radio2.channel="{restart_channel}"'
+        if restart_channel is not None
+        else ":"
+    )
+    restart_result = "exit 1" if fail_restart else ""
     stub = init_dir / "network"
     stub.write_text(
         f"""#!/bin/sh
+state_file="{state_file}"
+marker_file="{marker_file}"
 case "$1" in
-  enable) ;;
-  restart) uci set wireless.radio2.channel="{channel}" ;;
+  enable) echo enabled >> "$state_file" ;;
+  restart)
+    if [ -s "$marker_file" ]; then
+      echo marker-present-before-restart >> "$state_file"
+    else
+      echo marker-absent-before-restart >> "$state_file"
+    fi
+    echo restarted >> "$state_file"
+    {rewrite_channel}
+    {restart_result}
+    ;;
 esac
 """
     )
     stub.chmod(0o755)
+
+
+def _write_wifi_stub(prefix: Path, *, fail_reload: bool = False) -> None:
+    bin_dir = prefix / "usr" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    state_file = prefix / "var" / "wifi-state"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    reload_result = "\n    exit 1" if fail_reload else ""
+    stub = bin_dir / "wifi"
+    stub.write_text(
+        f"""#!/bin/sh
+state_file="{state_file}"
+case "$1" in
+  reload) echo reloaded >> "$state_file"{reload_result} ;;
+esac
+"""
+    )
+    stub.chmod(0o755)
+
+
+def _write_failing_date_stub(prefix: Path) -> Path:
+    bin_dir = prefix / "usr" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "date"
+    stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    return stub
 
 
 def _write_openmanetd_config_stub(prefix: Path) -> Path:
@@ -497,12 +550,20 @@ def _run_provision(
     boot_json.write_text(json.dumps(provision_data, indent=2))
 
     _write_dropbear_stub(prefix)
+    network_init = prefix / "etc" / "init.d" / "network"
+    if not network_init.exists():
+        _write_network_stub(prefix)
+    wifi_enabled = provision_data.get("node", {}).get("gateway", {}).get("wifi", {}).get("enabled")
+    wifi_command = prefix / "usr" / "bin" / "wifi"
+    if wifi_enabled is True and not wifi_command.exists():
+        _write_wifi_stub(prefix)
     network_stub = HARNESS / "network-stub.sh"
     env = _harness_env(uci_state)
     env["EASYMANET_PREFIX"] = str(prefix)
     env["EASYMANET_NETWORK_HELPERS"] = str(network_stub)
     if extra_env:
         env.update(extra_env)
+    env["PATH"] = f"{wifi_command.parent}:{env['PATH']}"
 
     return subprocess.run(
         ["sh", str(PROVISION_SCRIPT)],
@@ -552,6 +613,9 @@ def test_provision_gate_node_smoke(tmp_path):
     provisioned = (prefix / "etc" / "easymanet" / "provisioned").read_text()
     assert "hostname: gate01" in provisioned
     assert "role: gate" in provisioned
+    network_state = (prefix / "var" / "network-state").read_text()
+    assert "marker-absent-before-restart" in network_state
+    assert "marker-present-before-restart" not in network_state
 
 
 def test_host_and_openwrt_preserve_safe_yaml_scalar_content(tmp_path):
@@ -787,6 +851,94 @@ def test_provision_missing_led_status_service_is_nonfatal(tmp_path):
     assert "EasyMANET display status init script not found" in (
         prefix / "var" / "log" / "easymanet.log"
     ).read_text()
+
+
+def test_provision_missing_optional_wifi_command_is_degraded(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (prefix / "etc" / "easymanet" / "provisioned").exists()
+    assert "wifi command not found; continuing without immediate wireless reload" in (
+        prefix / "var" / "log" / "easymanet.log"
+    ).read_text()
+
+
+def test_provision_network_failure_defers_marker_and_retries(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _write_network_stub(prefix, fail_restart=True)
+
+    first = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    marker = prefix / "etc" / "easymanet" / "provisioned"
+    boot_json = prefix / "boot" / "easymanet" / "provision.json"
+    assert first.returncode != 0
+    assert "activation failed: network restart command failed" in first.stdout
+    assert not marker.exists()
+    assert boot_json.exists()
+
+    _write_network_stub(prefix)
+    second = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    assert second.returncode == 0, second.stderr + second.stdout
+    assert marker.exists()
+
+
+def test_provision_marker_write_failure_defers_marker_and_retries(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    failing_date = _write_failing_date_stub(prefix)
+
+    first = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    marker = prefix / "etc" / "easymanet" / "provisioned"
+    boot_json = prefix / "boot" / "easymanet" / "provision.json"
+    assert first.returncode != 0
+    assert "failed to write provisioning marker" in first.stdout
+    assert not marker.exists()
+    assert not list(marker.parent.glob("provisioned.tmp.*"))
+    assert boot_json.exists()
+
+    failing_date.unlink()
+    second = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    assert second.returncode == 0, second.stderr + second.stdout
+    assert marker.exists()
+
+
+def test_provision_configured_api_failure_defers_marker(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _copy_api_overlay(prefix)
+    _write_uhttpd_stub(prefix, fail_restart=True)
+
+    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+
+    assert result.returncode != 0
+    assert "activation failed: uhttpd restart command failed" in result.stdout
+    assert not (prefix / "etc" / "easymanet" / "provisioned").exists()
+    assert (prefix / "boot" / "easymanet" / "provision.json").exists()
+
+
+def test_provision_configured_wifi_failure_defers_marker(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    _write_wifi_stub(prefix, fail_reload=True)
+
+    result = _run_provision(prefix, _wifi_gate_provision_json(), uci_state)
+
+    assert result.returncode != 0
+    assert "activation failed: wifi reload command failed" in result.stdout
+    assert not (prefix / "etc" / "easymanet" / "provisioned").exists()
+    assert (prefix / "boot" / "easymanet" / "provision.json").exists()
 
 
 def test_provision_gate_node_starts_status_cache_when_present(tmp_path):
@@ -1811,7 +1963,7 @@ topology_live_json_body
     assert "scratch directory" in payload["errors"][0]
 
 
-def test_topology_api_bounds_offline_peer_probes(tmp_path):
+def test_topology_api_bounds_peer_probes_without_false_missing(tmp_path):
     provision_data = _gate_provision_json()
     provision_data["fleet"] = {
         "nodes": [
@@ -1874,8 +2026,52 @@ exit 1
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert request_log.read_text().count("/v1/identity") == 1
+    point01 = next(node for node in payload["nodes"] if node["name"] == "point01")
+    point02 = next(node for node in payload["nodes"] if node["name"] == "point02")
+    assert point01["status"] == "offline"
+    assert point02["status"] == "unknown"
     assert "point01 did not answer topology API at 10.41.2.1" in payload["warnings"]
     assert "point02 skipped after topology probe limit (1)" in payload["warnings"]
+
+
+def test_status_fleet_keeps_capped_peer_unknown(tmp_path):
+    provision_json = tmp_path / "provision.json"
+    provision_json.write_text(json.dumps(_two_node_gate_provision_json()))
+    missing_count = tmp_path / "missing-count"
+    topology = json.dumps(
+        {
+            "ok": True,
+            "nodes": [
+                {"name": "gate01", "status": "online"},
+                {"name": "point01", "status": "unknown"},
+                {"name": "point02", "status": "offline"},
+            ],
+        }
+    )
+    env = _harness_env(
+        tmp_path / "uci-state",
+        {
+            "EASYMANET_PROVISION_JSON": str(provision_json),
+            "PROVISION_JSON": str(provision_json),
+        },
+    )
+    result = _run_sh(
+        f'''
+. "{OVERLAY / 'usr/lib/easymanet/provision-lib.sh'}"
+. "{OVERLAY / 'usr/lib/easymanet/api-lib.sh'}"
+. "{OVERLAY / 'usr/lib/easymanet/status-lib.sh'}"
+status_fleet_json_from_topology "{missing_count}" {shlex.quote(topology)}
+''',
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(result.stdout) == [
+        {"name": "gate01", "status": "OK"},
+        {"name": "point01", "status": "UNKNOWN"},
+        {"name": "point02", "status": "MISSING"},
+    ]
+    assert missing_count.read_text() == "missing\n"
 
 
 def test_topology_api_does_not_skip_peer_after_self_neighbors(tmp_path):
@@ -2052,7 +2248,7 @@ def test_provision_reapplies_mesh_channel_after_network_restart(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
     _seed_wireless_radios(uci_state)
-    _write_network_channel_rewrite_stub(prefix, 36)
+    _write_network_stub(prefix, restart_channel=36)
     provision_data = _point_provision_json()
 
     result = _run_provision(prefix, provision_data, uci_state)

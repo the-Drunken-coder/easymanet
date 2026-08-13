@@ -66,7 +66,7 @@ echo "=== EasyMANET provisioning started $(date) ===" >> "$LOG_FILE"
 # shellcheck source=provision-runtime.sh
 . "$SCRIPT_DIR/provision-runtime.sh"
 
-if [ -f "$PROVISIONED_FLAG" ]; then
+if [ -s "$PROVISIONED_FLAG" ]; then
     echo "Already provisioned, skipping." >> "$LOG_FILE"
     exit 0
 fi
@@ -566,26 +566,43 @@ EOF
     umask "$old_umask"
 fi
 
+activation_failure() {
+    echo "FATAL: activation failed: $1" | tee -a "$LOG_FILE"
+    exit 1
+}
+
+require_init_action() {
+    init_script="$1"
+    service_name="$2"
+    action="$3"
+    if [ ! -x "$init_script" ]; then
+        activation_failure "$service_name init script not found"
+    fi
+    if ! "$init_script" "$action" >> "$LOG_FILE" 2>&1; then
+        activation_failure "$service_name $action command failed"
+    fi
+}
+
 network_init="$(_prefix_path /etc/init.d/network)"
-if [ -x "$network_init" ]; then
-    "$network_init" enable 2>/dev/null || true
-    "$network_init" restart 2>/dev/null || true
-fi
+require_init_action "$network_init" network enable
+require_init_action "$network_init" network restart
 if [ "$EASYMANET_API_CONFIGURED" = "1" ]; then
     uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
-    if [ -x "$uhttpd_init" ]; then
-        echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
-        "$uhttpd_init" enable 2>/dev/null || true
-        "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
-    else
-        echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
-    fi
+    echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
+    require_init_action "$uhttpd_init" uhttpd enable
+    require_init_action "$uhttpd_init" uhttpd restart
 fi
 echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
 configure_mesh_radio_device "$MESH_RADIO"
 uci_commit wireless
 if command -v wifi >/dev/null 2>&1; then
-    wifi reload "$MESH_RADIO" >> "$LOG_FILE" 2>&1 || true
+    if ! wifi reload "$MESH_RADIO" >> "$LOG_FILE" 2>&1; then
+        activation_failure "wifi reload command failed"
+    fi
+elif [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
+    activation_failure "configured Wi-Fi uplink requires wifi command"
+else
+    echo "WARNING: wifi command not found; continuing without immediate wireless reload" >> "$LOG_FILE"
 fi
 mesh11sd_init="$(_prefix_path /etc/init.d/mesh11sd)"
 if [ -x "$mesh11sd_init" ]; then
@@ -596,12 +613,27 @@ if [ -x "$openmanetd_init" ]; then
     "$openmanetd_init" enable 2>/dev/null || true
 fi
 
-{
-    date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date
+provisioned_tmp="${PROVISIONED_FLAG}.tmp.$$"
+if ! provisioned_at="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to write provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if ! {
+    printf '%s\n' "$provisioned_at"
     echo "hostname: $HOSTNAME"
     echo "role: $NODE_ROLE"
     echo "ip: $NODE_IP"
-} > "$PROVISIONED_FLAG"
+} > "$provisioned_tmp"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to write provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if ! mv "$provisioned_tmp" "$PROVISIONED_FLAG"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to publish provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
 
 status_cache_init="$(_prefix_path /etc/init.d/easymanet-status-cache)"
 if [ -x "$status_cache_init" ]; then

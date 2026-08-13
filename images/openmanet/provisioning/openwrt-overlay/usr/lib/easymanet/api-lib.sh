@@ -554,7 +554,8 @@ topology_live_json_body() {
             neighbors="$(neighbors_json_body)"
         elif [ -n "$peer_ip" ]; then
             if [ "$peer_probes" -ge "$MAX_TOPOLOGY_PEER_PROBES" ]; then
-                status="offline"
+                # This peer was not probed, so it must not be reported missing.
+                status="unknown"
                 echo "$peer_name skipped after topology probe limit ($MAX_TOPOLOGY_PEER_PROBES)" >> "$warnings_file"
             else
                 peer_probes=$((peer_probes + 1))

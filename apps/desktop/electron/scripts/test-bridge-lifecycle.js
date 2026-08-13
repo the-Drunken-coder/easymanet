@@ -64,6 +64,7 @@ async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
     await testPersistentGroupObservationDoesNotBlockShutdown();
+    await testTerminationFailureSettlesShutdown();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
     await testElevatedTimeoutReapsBeforeCleanup();
@@ -130,6 +131,38 @@ async function testPersistentGroupObservationDoesNotBlockShutdown() {
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
   assertProcessTreeGone(pids);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testTerminationFailureSettlesShutdown() {
+  const pidFile = path.join(tempRoot, "termination-failure-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const originalKill = process.kill;
+
+  process.kill = (pid, signal) => {
+    if (pid === -pids.leader && signal === "SIGTERM") {
+      const error = new Error("permission denied");
+      error.code = "EACCES";
+      throw error;
+    }
+    return originalKill(pid, signal);
+  };
+
+  let result;
+  try {
+    await bridge.shutdownActiveBridgeProcesses();
+    result = await resultPromise;
+  } finally {
+    process.kill = originalKill;
+    originalKill(-pids.leader, "SIGKILL");
+  }
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /application shutdown/);
+  assert.match(result.errors[1], /cleanup failed: permission denied/);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 

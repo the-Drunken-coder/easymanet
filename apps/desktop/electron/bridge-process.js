@@ -138,8 +138,11 @@ function runTrackedProcess(launch, handlers) {
         )
           .then(() => finish(payload))
           .catch((error) => {
-            operation.terminating = null;
-            throw error;
+            finish({
+              ...payload,
+              ok: false,
+              errors: [...payload.errors, `Bridge process cleanup failed: ${error.message}`],
+            });
           });
       }
       return operation.terminating;

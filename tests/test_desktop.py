@@ -2074,7 +2074,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
-    assert "meshRadioCard" in render_js.read_text()
+    assert "meshNodeRow" in render_js.read_text()
+    assert "meshLinkRow" in render_js.read_text()
     assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
     assert "untrusted official" in render_js.read_text()
@@ -2085,7 +2086,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "mesh-scanning" in styles.read_text()
     assert "mesh-grid" in styles.read_text()
     assert "topology-view" in styles.read_text()
-    assert "topology-link" in styles.read_text()
+    assert "data-table" in styles.read_text()
     assert "@media print" in styles.read_text()
 
 

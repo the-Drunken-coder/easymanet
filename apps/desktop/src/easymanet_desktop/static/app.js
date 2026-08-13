@@ -3,10 +3,10 @@
 const {
   escapeHtml,
   formatBytes,
-  imageItem,
-  diskCard,
+  imageRow,
+  diskRow,
   validationMarkup,
-  planCardElements,
+  planTableElements,
   meshDiscoveryMarkup,
   meshTopologyView,
 } = window.EMRender;
@@ -39,7 +39,7 @@ const configInput = $("config-path");
 const chooseConfig = $("choose-config");
 const openFleetsFolder = $("open-fleets-folder");
 const nodeSelect = $("node-name");
-const nodeRoleChip = $("node-role");
+const nodeRoleStatus = $("node-role");
 const validationOutput = $("validation-output");
 const imageCount = $("image-count");
 const checkImageUpdatesButton = $("check-image-updates");
@@ -71,7 +71,6 @@ const exportSupportBundle = $("export-support-bundle");
 const flashStatus = $("flash-status");
 const flashStatusText = $("flash-status-text");
 const flashProgress = $("flash-progress");
-const progressFill = $("progress-fill");
 const progressText = $("progress-text");
 const flashPlan = $("flash-plan");
 const consoleWrap = $("console-wrap");
@@ -79,7 +78,7 @@ const flashOutput = $("flash-output");
 const copyFlashLog = $("copy-flash-log");
 const copySudo = $("copy-sudo");
 const meshDiscoveryForm = $("mesh-discovery-form");
-const meshStatusChip = $("mesh-status-chip");
+const meshStatus = $("mesh-status");
 const meshConfigSource = $("mesh-config-source");
 const meshScanSubnet = $("mesh-scan-subnet");
 const meshDiscover = $("mesh-discover");
@@ -345,9 +344,9 @@ function renderImageState(imagePayload) {
   const entries = Object.entries(imagePayload || {});
   state.images = imagePayload || {};
   imageCount.textContent = `${entries.length}`;
-  images.innerHTML = entries
-    .map(([target, image]) => imageItem(target, imageWithUpdate(target, image)))
-    .join("");
+  images.innerHTML = entries.length
+    ? entries.map(([target, image]) => imageRow(target, imageWithUpdate(target, image))).join("")
+    : tableMessageRow("No image targets found", 5);
 }
 
 function imageWithUpdate(target, image) {
@@ -464,7 +463,7 @@ async function refreshDisks({ renderIfUnchanged, reportErrors }) {
     const payload = await getDisks(showAllDisks.checked);
     if (!payload.ok) {
       if (reportErrors) {
-        disks.innerHTML = `<div class="inline-error">${escapeHtml((payload.errors || []).join("\n"))}</div>`;
+        disks.innerHTML = tableMessageRow((payload.errors || []).join("\n"), 5, "inline-error");
       }
       state.diskDevice = "";
       updateFlashControls();
@@ -490,7 +489,7 @@ function renderDisksPayload(payload, signature = diskInventorySignature(payload.
   const diskRecords = payload.disks || [];
   state.diskSignature = signature;
   if (!diskRecords.length) {
-    disks.innerHTML = `<div class="empty-state slim"><p class="empty-title">No disks found</p><p class="empty-meta">Insert an SD card, then refresh.</p></div>`;
+    disks.innerHTML = tableMessageRow("No disks found. Insert an SD card, then refresh.", 5);
     state.diskDevice = "";
     updateFlashControls();
     return;
@@ -498,7 +497,7 @@ function renderDisksPayload(payload, signature = diskInventorySignature(payload.
   if (state.diskDevice && !diskRecords.some((disk) => disk.device === state.diskDevice)) {
     state.diskDevice = "";
   }
-  disks.innerHTML = diskRecords.map((disk) => diskCard(disk, state.diskDevice)).join("");
+  disks.innerHTML = diskRecords.map((disk) => diskRow(disk, state.diskDevice)).join("");
   updateFlashControls();
 }
 
@@ -759,8 +758,9 @@ function setMeshBusy(busy) {
 }
 
 function setMeshStatus(tone, label) {
-  meshStatusChip.textContent = label;
-  meshStatusChip.className = `chip ${tone}`;
+  meshStatus.textContent = label;
+  meshStatus.className = "status-text";
+  meshStatus.dataset.tone = tone;
 }
 
 function resetMeshLog() {
@@ -910,12 +910,12 @@ function updateRoleDefaultSsh() {
   const role = selectedNodeRole();
   if (!role) {
     sshAutoHint.textContent = "role default";
-    nodeRoleChip.hidden = true;
+    nodeRoleStatus.hidden = true;
     return;
   }
   sshAutoHint.textContent = roleSshHint(role);
-  nodeRoleChip.textContent = role;
-  nodeRoleChip.hidden = false;
+  nodeRoleStatus.textContent = role;
+  nodeRoleStatus.hidden = false;
 }
 
 function setStep(stepEl, done) {
@@ -957,7 +957,7 @@ function updateFlashControls() {
   startFlash.disabled = !ready || needsPassword || state.flashBusy;
   flashPanel.classList.toggle("ready", ready && !needsPassword && !state.flashBusy);
   flashPanel.classList.toggle("busy", state.flashBusy);
-  summaryNode.textContent = node || "—";
+  summaryNode.textContent = node || "Not selected";
   selectedDisk.textContent = state.diskDevice || "None";
 
   let tone = "subtle";
@@ -979,7 +979,8 @@ function updateFlashControls() {
     label = "ready";
   }
   flashReady.textContent = label;
-  flashReady.className = `chip ${tone}`;
+  flashReady.className = "status-text";
+  flashReady.dataset.tone = tone;
   updateFlashReview({ node, ready, needsPassword, label, tone });
 }
 
@@ -995,7 +996,8 @@ function updateFlashReview({ node, ready, needsPassword, label, tone }) {
   reviewImage.textContent = state.planImageSummary || imageReadinessSummary(state.images);
   eraseWarning.hidden = !state.diskDevice;
   reviewStatus.textContent = label;
-  reviewStatus.className = `chip ${tone}`;
+  reviewStatus.className = "status-text";
+  reviewStatus.dataset.tone = tone;
   reviewNode.classList.toggle("pending", !node);
   reviewDisk.classList.toggle("pending", !state.diskDevice);
   reviewImage.classList.toggle("pending", !state.planImageSummary && !imagesFullyCached(state.images));
@@ -1003,7 +1005,7 @@ function updateFlashReview({ node, ready, needsPassword, label, tone }) {
   reviewWanApi.classList.toggle("pending", !selectedWanApiApplicable());
   if (ready && !needsPassword && !state.flashBusy) {
     reviewStatus.textContent = state.planImageSummary ? "reviewed" : "ready";
-    reviewStatus.className = `chip ${state.planImageSummary ? "ok" : tone}`;
+    reviewStatus.dataset.tone = state.planImageSummary ? "ok" : tone;
   }
 }
 
@@ -1092,34 +1094,30 @@ function setBusy(busy) {
 
 function setFlashStatus(tone, message) {
   flashStatus.hidden = false;
-  flashStatus.className = `flash-status ${tone}`;
+  flashStatus.dataset.tone = tone;
   flashStatusText.textContent = message;
   updateCopyFlashLogVisibility();
 }
 
 function setProgress({ label = "", percent = null, detail = "", indeterminate = false } = {}) {
   flashProgress.hidden = false;
-  if (indeterminate || percent === null) {
-    flashProgress.classList.add("indeterminate");
-    progressFill.style.width = "100%";
-  } else {
-    flashProgress.classList.remove("indeterminate");
-    progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  }
-  progressText.textContent = detail ? `${label} · ${detail}` : label;
+  const boundedPercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  flashProgress.dataset.state = indeterminate || boundedPercent === null ? "active" : "measured";
+  flashProgress.dataset.percent = boundedPercent === null ? "" : String(Math.round(boundedPercent));
+  progressText.textContent = detail ? `${label}: ${detail}` : label;
   updateCopyFlashLogVisibility();
 }
 
 function hideProgress() {
   flashProgress.hidden = true;
-  flashProgress.classList.remove("indeterminate");
-  progressFill.style.width = "0";
+  delete flashProgress.dataset.state;
+  delete flashProgress.dataset.percent;
   updateCopyFlashLogVisibility();
 }
 
-function renderPlanCard(payload) {
+function renderPlanTable(payload) {
   flashPlan.hidden = false;
-  flashPlan.replaceChildren(...planCardElements(payload));
+  flashPlan.replaceChildren(...planTableElements(payload));
   updateCopyFlashLogVisibility();
 }
 
@@ -1205,7 +1203,7 @@ function renderFlashEvent(event) {
     return;
   }
   if (type === "plan") {
-    renderPlanCard(event);
+    renderPlanTable(event);
   }
   if (type === "inject_started") {
     setProgress({ label: "Writing boot payload", indeterminate: true });
@@ -1234,13 +1232,13 @@ function renderPlanResult(payload) {
     state.planSignature = currentFlashSignature();
     state.planImageSummary = planImageSummary(payload);
     setFlashStatus("ok", "Dry run complete. No changes were made.");
-    renderPlanCard(payload);
+    renderPlanTable(payload);
   } else {
     state.planSignature = "";
     state.planImageSummary = "";
     setFlashStatus("bad", (payload.errors || [])[0] || "Could not build the flash plan");
     if (payload.plan && Object.keys(payload.plan).length) {
-      renderPlanCard(payload);
+      renderPlanTable(payload);
     }
   }
   updateFlashControls();
@@ -1300,15 +1298,19 @@ function renderStateError(error) {
   fleetEmpty.hidden = false;
   imageCount.textContent = "0";
   state.images = {};
-  images.innerHTML = `<div class="inline-error">${escapeHtml(errorMessage(error))}</div>`;
+  images.innerHTML = tableMessageRow(errorMessage(error), 5, "inline-error");
   updateFlashControls();
 }
 
 function renderDiskError(error) {
-  disks.innerHTML = `<div class="inline-error">${escapeHtml(errorMessage(error))}</div>`;
+  disks.innerHTML = tableMessageRow(errorMessage(error), 5, "inline-error");
   state.diskDevice = "";
   selectedDisk.textContent = "None";
   updateFlashControls();
+}
+
+function tableMessageRow(message, colspan, className = "") {
+  return `<tr class="table-message ${className}"><td colspan="${colspan}">${escapeHtml(message)}</td></tr>`;
 }
 
 function handleNodeLoadError(error) {

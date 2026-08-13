@@ -433,17 +433,20 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   context.renderFlash({ ok: false, canceled: true, warnings: [], errors: [] });
   const statusOnlyOutputActivatesLayout = element("flash-panel").classList.contains("has-output")
     && element("console-wrap").hidden === true;
+  const canceledFlashStatusUsesSemanticTone = element("flash-status").dataset.tone === "warn";
   context.renderFlashEvent({ level: "info", message: "copyable flash log" });
   await element("copy-flash-log").listeners.click();
   context.renderFlashEvent({ event_type: "dd_progress", bytes: 1024 });
   const flashLogCopyFeedbackSurvivesRefresh = element("copy-flash-log").textContent === "Copied";
+  const progressUsesStaticState = element("flash-progress").dataset.state === "active"
+    && element("progress-text").textContent.startsWith("Writing image:");
   context.resetConsole();
   context.clearPlan();
   element("flash-status").hidden = true;
   element("flash-status-text").textContent = "";
   element("flash-progress").hidden = true;
   element("progress-text").textContent = "";
-  context.renderPlanCard({
+  context.renderPlanTable({
     plan: {
       node: "<img src=x onerror=alert(1)>",
       device: "/dev/disk-test",
@@ -492,7 +495,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const meshBusy = element("mesh-discover").textContent === "Scanning..."
     && element("mesh-discover").disabled === true
     && element("mesh-scanning").hidden === false
-    && element("mesh-radios").attributes["aria-busy"] === "true";
+    && element("mesh-radios").attributes["aria-busy"] === "true"
+    && element("mesh-status").dataset.tone === "warn";
   meshResolvers.shift()({ ok: true, nodes: [], links: [], candidates_checked: 0 });
   await meshPromise;
   const meshRestored = element("mesh-discover").textContent === "Scan Mesh"
@@ -511,7 +515,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const diagnosticsRunUsesSelectedFleet = diagnosticsCalls.length === 1
     && diagnosticsCalls[0].config === "/tmp/EasyMANET/Fleets/field.yml";
   const diagnosticsOutputRendered = element("diagnostics-output").textContent === "diagnostics summary"
-    && element("diagnostics-result").textContent === "ready";
+    && element("diagnostics-result").textContent === "ready"
+    && element("diagnostics-status").dataset.tone === "subtle";
   await element("diagnostics-copy").listeners.click();
   const diagnosticsSummaryCopied = copiedTexts.includes("diagnostics summary");
 
@@ -552,7 +557,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     queuedStarted,
     queuedCheckLatestPreserved,
     statusOnlyOutputActivatesLayout,
+    canceledFlashStatusUsesSemanticTone,
     flashLogCopyFeedbackSurvivesRefresh,
+    progressUsesStaticState,
     planPayloadTextOnly,
     sshEnabledHint,
     sshDisabledHint,
@@ -604,7 +611,9 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "queuedStarted": True,
         "queuedCheckLatestPreserved": True,
         "statusOnlyOutputActivatesLayout": True,
+        "canceledFlashStatusUsesSemanticTone": True,
         "flashLogCopyFeedbackSurvivesRefresh": True,
+        "progressUsesStaticState": True,
         "planPayloadTextOnly": True,
         "sshEnabledHint": True,
         "sshDisabledHint": True,
@@ -618,3 +627,40 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "diagnosticsOutputRendered": True,
         "diagnosticsSummaryCopied": True,
     }
+
+
+def test_desktop_renderer_table_first_static_contract():
+    """Keep the selected table-first UI free of decorative and moving chrome."""
+    root = Path(__file__).resolve().parents[1]
+    static = root / "apps" / "desktop" / "src" / "easymanet_desktop" / "static"
+    markup = (static / "index.html").read_text()
+    renderer = (static / "render.js").read_text()
+    controller = (static / "app.js").read_text()
+    styles = (static / "styles.css").read_text()
+    diagnostics = (static / "diagnostics.js").read_text()
+
+    assert '<main class="workspace">' in markup
+    assert 'aria-label="Workspace sections" role="tablist"' in markup
+    assert 'role="tabpanel"' in markup
+    assert 'aria-label="Available target disks"' in markup
+    assert 'aria-label="Image cache state"' in markup
+    assert 'aria-label="Flash operation state"' in markup
+    assert 'aria-label="Discovered mesh nodes"' in renderer
+    assert 'role="status" aria-live="polite"' in markup
+    assert '<th scope="row">' in markup
+    assert 'class="status-text" data-tone=' in renderer
+    assert 'flashProgress.dataset.state' in controller
+    assert 'flashProgress.dataset.percent' in controller
+    assert 'meshDiscoverySeq' in controller
+    assert 'isCurrentMeshDiscovery' in controller
+    assert 'diagnosticsStatus.dataset.tone' in diagnostics
+
+    ui_sources = "\n".join((markup, renderer, controller, styles, diagnostics))
+    assert "\u2014" not in ui_sources
+    assert "&mdash;" not in ui_sources
+    assert "@keyframes" not in styles
+    assert "animation:" not in styles
+    assert "animation-" not in styles
+    assert "progress-fill" not in ui_sources
+    assert "class=\"card" not in ui_sources
+    assert "class=\"chip" not in ui_sources

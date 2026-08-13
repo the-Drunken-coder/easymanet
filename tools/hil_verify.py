@@ -1027,6 +1027,7 @@ def _write_support_bundle(
     boot_report = args.gate_boot_report or args.point_boot_report
     result = create_support_bundle(
         config=str(config_snapshot),
+        config_display=str(payload["config"]["path"]),
         node="",
         boot_report=boot_report,
         include_mesh=not topology.get("skipped", False),

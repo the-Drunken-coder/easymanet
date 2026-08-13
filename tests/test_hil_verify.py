@@ -703,7 +703,9 @@ def test_flash_acceptance_uses_one_config_snapshot_when_source_changes_between_f
     with zipfile.ZipFile(payload["support_bundle_path"]) as bundle:
         bundled_config = bundle.read("fleet/redacted-config.yml").decode()
         bundled_result = json.loads(bundle.read("flash/result.json"))
+        bundle_metadata = json.loads(bundle.read("support-bundle.json"))
     assert bundled_config == redact_text(original.decode())
+    assert bundle_metadata["config"] == str(config.resolve())
     assert bundled_result["config"]["path"] == str(config.resolve())
     assert bundled_result["config"]["sha256"] == hashlib.sha256(original).hexdigest()
 

@@ -152,7 +152,7 @@ let imageUpdateResolvers = [];
 let holdState = false;
 let stateResolvers = [];
 let holdMesh = false;
-let resolveMesh = null;
+let meshResolvers = [];
 let flashCallback = null;
 let copiedTexts = [];
 let diagnosticsCalls = [];
@@ -245,9 +245,7 @@ const nativeApi = {
   },
   discoverMesh() {
     if (holdMesh) {
-      return new Promise((resolve) => {
-        resolveMesh = resolve;
-      });
+      return new Promise((resolve) => meshResolvers.push(resolve));
     }
     return Promise.resolve({ ok: true, nodes: [], links: [], candidates_checked: 0 });
   },
@@ -495,7 +493,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && element("mesh-discover").disabled === true
     && element("mesh-scanning").hidden === false
     && element("mesh-radios").attributes["aria-busy"] === "true";
-  resolveMesh({ ok: true, nodes: [], links: [], candidates_checked: 0 });
+  meshResolvers.shift()({ ok: true, nodes: [], links: [], candidates_checked: 0 });
   await meshPromise;
   const meshRestored = element("mesh-discover").textContent === "Scan Mesh"
     && element("mesh-discover").disabled === false
@@ -516,6 +514,23 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && element("diagnostics-result").textContent === "ready";
   await element("diagnostics-copy").listeners.click();
   const diagnosticsSummaryCopied = copiedTexts.includes("diagnostics summary");
+
+  element("config-path").value = "/tmp/EasyMANET/Fleets/fleet-a.yml";
+  const staleMeshPromise = context.discoverMesh();
+  await flush();
+  context.selectFleetSource("/tmp/EasyMANET/Fleets/fleet-b.yml");
+  await flush();
+  meshResolvers.shift()({
+    ok: true,
+    nodes: [{ name: "fleet-a-node", role: "point", status: "online" }],
+    links: [],
+    candidates_checked: 1,
+  });
+  await staleMeshPromise;
+  const staleMeshResponseSuppressed = context.window.EMState.meshNodes.length === 0
+    && element("mesh-summary").hidden === true
+    && element("mesh-discover").disabled === false
+    && !("aria-busy" in element("mesh-radios").attributes);
 
   process.stdout.write(JSON.stringify({
     registeredFlashCallback: typeof flashCallback === "function",
@@ -546,6 +561,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     meshRestored,
     meshLogAvailable,
     meshLogCopied,
+    staleMeshResponseSuppressed,
     diagnosticsRunUsesSelectedFleet,
     diagnosticsOutputRendered,
     diagnosticsSummaryCopied,
@@ -597,6 +613,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "meshRestored": True,
         "meshLogAvailable": True,
         "meshLogCopied": True,
+        "staleMeshResponseSuppressed": True,
         "diagnosticsRunUsesSelectedFleet": True,
         "diagnosticsOutputRendered": True,
         "diagnosticsSummaryCopied": True,

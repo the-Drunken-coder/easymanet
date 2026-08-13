@@ -27,6 +27,8 @@ const {
 const { emptyMeshMarkup } = window.EMMesh;
 const diagnostics = window.EMDiagnostics;
 
+let meshDiscoverySeq = 0;
+
 const workspacePath = $("workspace-path");
 const fleetFolder = $("fleet-folder");
 const fleetEmpty = $("fleet-empty");
@@ -664,9 +666,10 @@ function resetNodeSelect(label) {
 }
 
 async function discoverMesh() {
+  const config = configInput.value.trim();
+  const sequence = ++meshDiscoverySeq;
   state.meshHasScanned = true;
   resetMeshLog();
-  const config = configInput.value.trim();
   appendMeshLog("info", "Scan started.");
   appendMeshLog("info", `Fleet source: ${config || "none"}`);
   appendMeshLog("info", meshScanSubnet.checked ? "Local network scan enabled." : "Local network scan disabled.");
@@ -679,16 +682,29 @@ async function discoverMesh() {
       config,
       scanSubnet: meshScanSubnet.checked,
     });
+    if (!isCurrentMeshDiscovery(sequence, config)) {
+      return;
+    }
     appendMeshDiscoveryResult(response);
     renderMeshDiscovery(response);
   } catch (error) {
+    if (!isCurrentMeshDiscovery(sequence, config)) {
+      return;
+    }
     const message = errorMessage(error);
     appendMeshLog("error", message);
     renderMeshDiscovery({ ok: false, errors: [message], nodes: [], links: [], candidates_checked: 0 });
   } finally {
+    if (!isCurrentMeshDiscovery(sequence, config)) {
+      return;
+    }
     meshRadios.removeAttribute("aria-busy");
     setMeshBusy(false);
   }
+}
+
+function isCurrentMeshDiscovery(sequence, config) {
+  return sequence === meshDiscoverySeq && config === configInput.value.trim();
 }
 
 function renderMeshDiscovery(payload) {
@@ -712,6 +728,7 @@ function renderMeshDiscovery(payload) {
 }
 
 function resetMeshDiscovery() {
+  meshDiscoverySeq += 1;
   state.meshHasScanned = false;
   state.meshNodes = [];
   state.meshLinks = [];
@@ -720,7 +737,9 @@ function resetMeshDiscovery() {
   meshSummary.innerHTML = "";
   meshRadios.className = "mesh-grid";
   meshRadios.innerHTML = emptyMeshMarkup("No topology found", "Run Scan Mesh to refresh this view.");
+  meshRadios.removeAttribute("aria-busy");
   setMeshStatus("subtle", "idle");
+  setMeshBusy(false);
   resetMeshLog();
 }
 

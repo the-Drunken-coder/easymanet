@@ -133,39 +133,44 @@ function terminateElevatedBridge(child) {
 
 function stageElevatedFlashInputs(validated, plan) {
   const root = fs.mkdtempSync(path.join(elevatedTempRoot(), "easymanet-flash-"));
-  const inputDir = path.join(root, "input");
-  const sourceDir = path.join(root, "src");
-  const workspaceDir = path.join(root, "workspace");
-  fs.mkdirSync(inputDir, {recursive: true});
-  fs.mkdirSync(sourceDir, {recursive: true});
-  fs.mkdirSync(workspaceDir, {recursive: true});
+  try {
+    const inputDir = path.join(root, "input");
+    const sourceDir = path.join(root, "src");
+    const workspaceDir = path.join(root, "workspace");
+    fs.mkdirSync(inputDir, {recursive: true});
+    fs.mkdirSync(sourceDir, {recursive: true});
+    fs.mkdirSync(workspaceDir, {recursive: true});
 
-  const configPath = path.join(inputDir, path.basename(validated.config) || "fleet.yml");
-  fs.copyFileSync(validated.config, configPath);
-  fs.chmodSync(configPath, 0o600);
+    const configPath = path.join(inputDir, path.basename(validated.config) || "fleet.yml");
+    fs.copyFileSync(validated.config, configPath);
+    fs.chmodSync(configPath, 0o600);
 
-  const sourceImagePath = String((plan.image || {}).cached_path || (plan.image || {}).path || "");
-  let imagePath = "";
-  if (sourceImagePath && !sourceImagePath.startsWith("<")) {
-    imagePath = path.join(inputDir, path.basename(sourceImagePath));
-    fs.copyFileSync(sourceImagePath, imagePath);
-    fs.chmodSync(imagePath, 0o644);
+    const sourceImagePath = String((plan.image || {}).cached_path || (plan.image || {}).path || "");
+    let imagePath = "";
+    if (sourceImagePath && !sourceImagePath.startsWith("<")) {
+      imagePath = path.join(inputDir, path.basename(sourceImagePath));
+      fs.copyFileSync(sourceImagePath, imagePath);
+      fs.chmodSync(imagePath, 0o644);
+    }
+
+    copyPythonPackage(path.join(repoRoot, "packages", "core", "src", "easymanet"), path.join(sourceDir, "easymanet"));
+    copyPythonPackage(path.join(repoRoot, "apps", "cli", "src", "easymanet_cli"), path.join(sourceDir, "easymanet_cli"));
+    copyPythonPackage(
+      path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop"),
+      path.join(sourceDir, "easymanet_desktop")
+    );
+
+    return {
+      root,
+      configPath,
+      imagePath,
+      sourceRoots: [sourceDir],
+      workspaceDir,
+    };
+  } catch (error) {
+    cleanupElevatedStage({root});
+    throw error;
   }
-
-  copyPythonPackage(path.join(repoRoot, "packages", "core", "src", "easymanet"), path.join(sourceDir, "easymanet"));
-  copyPythonPackage(path.join(repoRoot, "apps", "cli", "src", "easymanet_cli"), path.join(sourceDir, "easymanet_cli"));
-  copyPythonPackage(
-    path.join(repoRoot, "apps", "desktop", "src", "easymanet_desktop"),
-    path.join(sourceDir, "easymanet_desktop")
-  );
-
-  return {
-    root,
-    configPath,
-    imagePath,
-    sourceRoots: [sourceDir],
-    workspaceDir,
-  };
 }
 
 function copyPythonPackage(from, to) {

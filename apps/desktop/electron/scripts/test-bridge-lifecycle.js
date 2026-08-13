@@ -158,6 +158,7 @@ async function testPersistentGroupObservationDelaysAppQuit() {
   const pids = await readPids(pidFile);
   fixturePids.push(pids);
   const originalKill = process.kill;
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
   let groupKilled = false;
   let postKillProbes = 0;
   const app = new EventEmitter();
@@ -166,6 +167,7 @@ async function testPersistentGroupObservationDelaysAppQuit() {
   app.quit = () => {
     quitCalls += 1;
   };
+  Object.defineProperty(process, "platform", {value: "darwin"});
   loadMain(app, bridge);
 
   process.kill = (pid, signal) => {
@@ -192,6 +194,7 @@ async function testPersistentGroupObservationDelaysAppQuit() {
     assert.equal(quitCalls, 0);
   } finally {
     process.kill = originalKill;
+    Object.defineProperty(process, "platform", originalPlatform);
   }
 
   const result = await resultPromise;

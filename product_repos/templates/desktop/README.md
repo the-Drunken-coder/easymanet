@@ -9,7 +9,8 @@ boot or network evidence.
 
 The generated desktop repo now includes the Electron shell, the Python bridge,
 and the GitHub Actions release plumbing needed to build packaged artifacts for
-macOS and Windows from checked-in source.
+macOS from checked-in source. Packaged desktop artifacts are currently
+macOS-only; the Python/CLI runtime separately supports macOS and Linux.
 
 ## Release Flow
 

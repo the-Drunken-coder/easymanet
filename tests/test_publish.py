@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -116,21 +117,51 @@ def test_export_copy_paths_fails_on_missing_sources(tmp_path):
         export_mod._copy_paths(source_root, surface_dir, ["missing.yml"])
 
 
-def test_export_copy_paths_ignores_dependency_artifacts(tmp_path):
+def track_paths(repo_root, *paths):
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", *paths], cwd=repo_root, check=True)
+
+
+def test_export_copy_paths_selects_only_tracked_files(tmp_path):
     source_root = tmp_path / "source"
     surface_dir = tmp_path / "surface"
-    node_modules = source_root / "apps" / "desktop" / "electron" / "node_modules" / "pkg"
-    node_modules.mkdir(parents=True)
-    (node_modules / "index.js").write_text("module.exports = {};\n")
     app_file = source_root / "apps" / "desktop" / "electron" / "main.js"
     app_file.parent.mkdir(parents=True, exist_ok=True)
     app_file.write_text("console.log('ok');\n")
+    track_paths(source_root, "apps/desktop/electron/main.js")
+    untracked = source_root / "apps" / "desktop" / "electron" / "local-only.js"
+    untracked.write_text("console.log('local only');\n")
     surface_dir.mkdir()
 
     copied = export_mod._copy_paths(source_root, surface_dir, ["apps/desktop"])
 
     assert "apps/desktop/electron/main.js" in copied
-    assert not (surface_dir / "apps" / "desktop" / "electron" / "node_modules").exists()
+    assert (surface_dir / "apps" / "desktop" / "electron" / "main.js").exists()
+    assert not (surface_dir / "apps" / "desktop" / "electron" / "local-only.js").exists()
+
+
+def test_export_copy_paths_rejects_paths_outside_the_repository(tmp_path):
+    source_root = tmp_path / "source"
+    surface_dir = tmp_path / "surface"
+    source_root.mkdir()
+    surface_dir.mkdir()
+
+    with pytest.raises(ValueError, match="relative to the repository"):
+        export_mod._copy_paths(source_root, surface_dir, ["../outside"])
+
+
+def test_export_copy_paths_rejects_tracked_symbolic_links(tmp_path):
+    source_root = tmp_path / "source"
+    surface_dir = tmp_path / "surface"
+    source_dir = source_root / "apps" / "desktop"
+    source_dir.mkdir(parents=True)
+    (source_dir / "local-only.js").write_text("console.log('local only');\n")
+    (source_dir / "linked.js").symlink_to("local-only.js")
+    track_paths(source_root, "apps/desktop/linked.js")
+    surface_dir.mkdir()
+
+    with pytest.raises(ValueError, match="cannot be symbolic links"):
+        export_mod._copy_paths(source_root, surface_dir, ["apps/desktop"])
 
 
 def test_repo_root_fails_loudly_when_sentinels_are_missing(tmp_path, monkeypatch):

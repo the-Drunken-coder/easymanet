@@ -24,6 +24,7 @@ from easymanet_publish.surfaces import (  # noqa: E402
     project_version,
     render_surface_pyproject,
     selected_surface_specs,
+    tracked_files,
 )
 
 DEFAULT_OWNER = "the-Drunken-coder"
@@ -74,19 +75,7 @@ def selected_specs(product: str) -> list[RepoSpec]:
 
 
 def tracked_files_for(rel_path: str) -> tuple[str, ...]:
-    source = ROOT / rel_path
-    if not source.exists():
-        raise FileNotFoundError(f"Source path does not exist: {rel_path}")
-
-    files = tuple(
-        line
-        for line in git_output(["ls-files", "--", rel_path]).splitlines()
-        if line
-    )
-    if files:
-        return files
-
-    raise FileNotFoundError(f"Source path has no tracked files: {rel_path}")
+    return tracked_files(ROOT, rel_path)
 
 
 def copy_source_path(rel_path: str, target_root: Path) -> None:
@@ -102,11 +91,12 @@ def copy_template_tree(spec: RepoSpec, target_root: Path) -> None:
     if not template_dir.is_dir():
         raise FileNotFoundError(f"Template directory does not exist: {template_dir}")
 
-    for src in sorted(template_dir.rglob("*")):
-        if src.is_file():
-            dest = target_root / src.relative_to(template_dir)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
+    template_path = template_dir.relative_to(ROOT).as_posix()
+    for tracked_file in tracked_files_for(template_path):
+        src = ROOT / tracked_file
+        dest = target_root / src.relative_to(template_dir)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
 
 
 def write_text_file(path: Path, contents: str) -> None:

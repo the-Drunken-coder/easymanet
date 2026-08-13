@@ -10,7 +10,8 @@ public product repositories as generated release surfaces.
 - `the-Drunken-coder/easymanet-cli`: installable CLI and automation surface.
 - `the-Drunken-coder/easymanet-desktop`: local-first desktop operator-console
   surface with Electron sources, a bundled bridge build, and desktop release
-  workflows for macOS and Windows artifacts.
+  workflows. Packaged desktop artifacts are currently macOS-only. The
+  Python/CLI runtime separately supports macOS and Linux.
 
 ## Local Publish Preview
 

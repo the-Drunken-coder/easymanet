@@ -20,11 +20,3 @@ mac:
     - dmg
     - zip
   identity: null
-win:
-  target:
-    - nsis
-    - zip
-nsis:
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true

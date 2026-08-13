@@ -25,21 +25,9 @@ permissions:
 
 jobs:
   build:
-    name: Build desktop app (${{ matrix.label }})
-    runs-on: ${{ matrix.runner }}
+    name: Build macOS desktop app
+    runs-on: macos-14
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            label: macos
-            artifact_name: macos
-            build_args: --mac dmg zip
-          - runner: windows-2022
-            label: windows
-            artifact_name: windows
-            build_args: --win nsis zip
 
     steps:
       - name: Check out repository
@@ -81,7 +69,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           PYTHON: python
         run: |
-          npm --prefix apps/desktop/electron run dist -- ${{ matrix.build_args }}
+          npm --prefix apps/desktop/electron run dist -- --mac dmg zip
 
       - name: Generate platform artifact manifest
         shell: bash
@@ -90,7 +78,7 @@ jobs:
           SOURCE_REPO: ${{ inputs.source_repo }}
           SOURCE_REF: ${{ inputs.source_ref }}
           SOURCE_SHA: ${{ inputs.source_sha }}
-          PLATFORM_LABEL: ${{ matrix.label }}
+          PLATFORM_LABEL: macos
         run: |
           python - <<'PY'
           import datetime as dt
@@ -100,7 +88,7 @@ jobs:
           from pathlib import Path
 
           dist = Path("apps/desktop/electron/dist")
-          suffixes = (".dmg", ".zip", ".exe")
+          suffixes = (".dmg", ".zip")
           artifacts = []
           for path in sorted(dist.iterdir()):
               if not path.is_file() or not path.name.endswith(suffixes):
@@ -135,11 +123,10 @@ jobs:
       - name: Upload platform artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: easymanet-desktop-${{ matrix.artifact_name }}
+          name: easymanet-desktop-macos
           path: |
             apps/desktop/electron/dist/*.dmg
             apps/desktop/electron/dist/*.zip
-            apps/desktop/electron/dist/*.exe
             apps/desktop/electron/dist/easymanet-desktop-*-manifest.json
           retention-days: 14
           if-no-files-found: error
@@ -180,8 +167,8 @@ jobs:
           {
             echo "EasyMANET desktop packaged release."
             echo
-            echo "Includes macOS and Windows Electron artifacts with a bundled Python bridge."
-            echo "Disk discovery and flashing flows use the packaged macOS and Windows backend support."
+            echo "Includes macOS Electron artifacts with a bundled Python bridge."
+            echo "Packaged desktop artifacts are currently macOS-only. The Python/CLI runtime separately supports macOS and Linux."
             echo
             echo "Generated from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_SHA})."
           } > "$notes"

@@ -2221,11 +2221,12 @@ def test_electron_shell_files_exist():
     assert '"ensure-image"' not in bridge_text
     assert "ensureCachedImageForElevatedFlash" not in electron_text
     assert '"ensure-image"' not in electron_text
-    assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in electron_text
-    assert "const effectiveTimeoutMs = timeoutMs + 60000" in electron_text
+    assert "runTrackedProcess" in electron_text
+    assert "return result.finally(() => cleanupElevatedStage(options.stage))" in electron_text
+    assert "const authenticationGraceMs = options.authenticationGraceMs ?? 60000" in electron_text
     assert "after ${effectiveTimeoutMs / 1000}s" in electron_text
     assert "EasyMANET Flash Helper.app" not in electron_text
-    assert 'spawn(sudo.command, sudo.args' in electron_text
+    assert "command: sudo.command" in electron_text
     assert "Mac administrator password is required for flashing" in electron_text
     assert "with administrator privileges" not in electron_text
     assert 'spawn("osascript"' not in electron_text

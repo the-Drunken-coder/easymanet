@@ -597,7 +597,15 @@ async function loadNodesForSelectedFleet(preferredNode = "") {
   }
 
   resetNodeSelect("Loading nodes...");
-  const response = await postJson("/api/validate", { config, node: "" });
+  let response;
+  try {
+    response = await postJson("/api/validate", { config, node: "" });
+  } catch (error) {
+    if (seq !== state.nodeLoadSeq) {
+      return;
+    }
+    throw error;
+  }
   if (seq !== state.nodeLoadSeq) {
     return;
   }

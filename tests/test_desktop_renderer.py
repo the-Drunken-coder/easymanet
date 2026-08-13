@@ -153,6 +153,8 @@ let holdState = false;
 let stateResolvers = [];
 let holdMesh = false;
 let meshResolvers = [];
+let holdValidate = false;
+let validateResolvers = [];
 let flashCallback = null;
 let copiedTexts = [];
 let diagnosticsCalls = [];
@@ -229,7 +231,7 @@ const nativeApi = {
     return Promise.resolve({ ok: true, disks: [] });
   },
   validate() {
-    return Promise.resolve({
+    const payload = {
       ok: true,
       nodes: ["gate01"],
       node_roles: { gate01: "gate" },
@@ -242,7 +244,11 @@ const nativeApi = {
           ethernet_mesh_access: false,
         },
       },
-    });
+    };
+    if (holdValidate) {
+      return new Promise((resolve, reject) => validateResolvers.push({ resolve, reject }));
+    }
+    return Promise.resolve(payload);
   },
   discoverMesh() {
     if (holdMesh) {
@@ -540,6 +546,28 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     && element("mesh-discover").disabled === false
     && !("aria-busy" in element("mesh-radios").attributes);
 
+  holdValidate = true;
+  const staleFleetPromise = context.selectFleetSource("/tmp/EasyMANET/Fleets/fleet-a.yml");
+  await flush();
+  const currentFleetPromise = context.selectFleetSource("/tmp/EasyMANET/Fleets/fleet-b.yml");
+  await flush();
+  const staleValidation = validateResolvers.shift();
+  const currentValidation = validateResolvers.shift();
+  currentValidation.resolve({
+    ok: true,
+    nodes: ["fleet-b-node"],
+    node_roles: { "fleet-b-node": "point" },
+    node_access: { "fleet-b-node": { management_ip: "10.41.2.1" } },
+  });
+  await currentFleetPromise;
+  staleValidation.reject(new Error("stale fleet validation failed"));
+  await staleFleetPromise;
+  const staleFleetRejectionSuppressed = element("config-path").value === "/tmp/EasyMANET/Fleets/fleet-b.yml"
+    && element("node-name").options.some((option) => option.value === "fleet-b-node")
+    && element("node-name").disabled === false
+    && !element("validation-output").innerHTML.includes("stale fleet validation failed");
+  holdValidate = false;
+
   process.stdout.write(JSON.stringify({
     registeredFlashCallback: typeof flashCallback === "function",
     startupImageUpdateChecked,
@@ -572,6 +600,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     meshLogAvailable,
     meshLogCopied,
     staleMeshResponseSuppressed,
+    staleFleetRejectionSuppressed,
     diagnosticsRunUsesSelectedFleet,
     diagnosticsOutputRendered,
     diagnosticsSummaryCopied,
@@ -626,6 +655,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
         "meshLogAvailable": True,
         "meshLogCopied": True,
         "staleMeshResponseSuppressed": True,
+        "staleFleetRejectionSuppressed": True,
         "diagnosticsRunUsesSelectedFleet": True,
         "diagnosticsOutputRendered": True,
         "diagnosticsSummaryCopied": True,

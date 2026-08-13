@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -390,6 +391,81 @@ def test_preview_and_remote_generation_share_tracked_inputs(monkeypatch, tmp_pat
         assert not (remote / path).exists()
 
 
+def test_publish_rejects_tracked_changes_not_in_source_commit(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    readme = repo / "README.md"
+    readme.write_text("committed\n")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    source_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    readme.write_text("dirty\n")
+    monkeypatch.setattr(publish, "ROOT", repo)
+
+    with pytest.raises(SystemExit, match="must be committed"):
+        publish.validate_source_commit(source_sha)
+
+
+def test_publish_materializes_exact_commit_bytes(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = repo / "script.sh"
+    script.write_text("committed\n")
+    script.chmod(0o755)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "script.sh"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    source_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    script.write_text("dirty\n")
+    monkeypatch.setattr(publish, "ROOT", repo)
+
+    snapshot = publish.materialize_source_commit(source_sha, tmp_path / "snapshot")
+
+    assert (snapshot / "script.sh").read_text() == "committed\n"
+    assert os.access(snapshot / "script.sh", os.X_OK)
+
+
 def test_remote_url_never_embeds_publish_token(monkeypatch):
     publish = load_publish_module()
     monkeypatch.setenv("EASYMANET_PUBLIC_REPO_TOKEN", "secret-token")
@@ -613,6 +689,12 @@ def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):
     dispatches = []
 
     monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
+    monkeypatch.setattr(
+        publish,
+        "materialize_source_commit",
+        lambda _source_sha, _destination: ROOT,
+    )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
     monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: "published-sha")
@@ -631,6 +713,12 @@ def test_main_dispatches_when_push_has_no_changes(monkeypatch, tmp_path):
     dispatches = []
 
     monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
+    monkeypatch.setattr(
+        publish,
+        "materialize_source_commit",
+        lambda _source_sha, _destination: ROOT,
+    )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
     monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: None)

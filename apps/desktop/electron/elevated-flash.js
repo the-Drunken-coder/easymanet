@@ -1,9 +1,8 @@
-const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { flashBridgeTimeoutMs, repoRoot } = require("./constants");
 const { elevatedBridgeCommand, elevatedBridgeEnv, elevatedTempRoot, sudoBridgeCommand } = require("./environment");
-const { runBridgeStreaming } = require("./bridge-process");
+const { runBridgeStreaming, runTrackedProcess } = require("./bridge-process");
 const { parseElevatedBridgeOutput, processBridgeStreamBuffer, processBridgeStreamLine, sendBridgeFlashEvent } = require("./stream");
 const { flashArgs } = require("./validation");
 
@@ -35,100 +34,61 @@ async function runFlashWithAdministratorPrivileges(validated, options = {}) {
 }
 
 function runBridgeWithAdministratorPrivileges(args, options = {}) {
-  return new Promise((resolve) => {
-    let bridge;
-    try {
-      bridge = elevatedBridgeCommand(args, options.stage);
-    } catch (error) {
-      cleanupElevatedStage(options.stage);
-      resolve({ ok: false, errors: [error.message] });
-      return;
-    }
+  let bridge;
+  let sudo;
+  try {
+    bridge = elevatedBridgeCommand(args, options.stage);
+    sudo = sudoBridgeCommand(bridge);
+  } catch (error) {
+    cleanupElevatedStage(options.stage);
+    return Promise.resolve({ ok: false, errors: [error.message] });
+  }
 
-    const timeoutMs = options.timeoutMs || flashBridgeTimeoutMs;
-    const effectiveTimeoutMs = timeoutMs + 60000;
-    const sudo = sudoBridgeCommand(bridge);
-    const child = spawn(sudo.command, sudo.args, {
-      cwd: bridge.cwd || elevatedTempRoot(),
-      env: elevatedBridgeEnv(bridge.env || {}),
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    });
-    const state = {
-      stdout: "",
-      fullStdout: "",
-      stderr: "",
-      finalPayload: null,
-    };
-    let settled = false;
-
-    const finish = (payload) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      cleanupElevatedStage(options.stage);
-      resolve(payload);
-    };
-
-    const timer = setTimeout(() => {
-      terminateElevatedBridge(child);
-      finish({ ok: false, errors: [`Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`] });
-    }, effectiveTimeoutMs);
-
-    child.stdout.on("data", (chunk) => {
-      const text = chunk.toString();
-      state.fullStdout += text;
-      state.stdout += text;
-      state.stdout = processBridgeStreamBuffer(state.stdout, options.webContents, (payload) => {
-        state.finalPayload = payload;
-      });
-    });
-    child.stderr.on("data", (chunk) => {
-      state.stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      finish({ ok: false, errors: [error.message] });
-    });
-    child.on("close", () => {
-      const remaining = state.stdout.trim();
-      if (remaining) {
-        processBridgeStreamLine(remaining, options.webContents, (payload) => {
+  const timeoutMs = options.timeoutMs || flashBridgeTimeoutMs;
+  const authenticationGraceMs = options.authenticationGraceMs ?? 60000;
+  const effectiveTimeoutMs = timeoutMs + authenticationGraceMs;
+  const result = runTrackedProcess(
+    {
+      command: sudo.command,
+      args: sudo.args,
+      options: {
+        cwd: bridge.cwd || elevatedTempRoot(),
+        env: elevatedBridgeEnv(bridge.env || {}),
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    },
+    {
+      timeoutMs: effectiveTimeoutMs,
+      timeoutMessage: `Administrator flash timed out after ${effectiveTimeoutMs / 1000}s`,
+      terminationGraceMs: options.terminationGraceMs,
+      onSpawn: (child) => {
+        child.stdin.on("error", () => {
+          // Process close reports authentication or launch failures.
+        });
+        child.stdin.end(`${options.adminPassword || ""}\n`);
+      },
+      onStdout: (state, chunk) => {
+        state.stdout += chunk;
+        state.stdout = processBridgeStreamBuffer(state.stdout, options.webContents, (payload) => {
           state.finalPayload = payload;
         });
-      }
-      if (state.finalPayload) {
-        finish(state.finalPayload);
-        return;
-      }
-      finish(parseElevatedBridgeOutput(state.fullStdout, state.stderr, options.webContents));
-    });
-    child.stdin.write(`${options.adminPassword || ""}\n`);
-    child.stdin.end();
-  });
-}
-
-function terminateElevatedBridge(child) {
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, "SIGTERM");
-      const killTimer = setTimeout(() => {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-        } catch (_error) {
-          // Process already exited.
+      },
+      onClose: (state, finish) => {
+        const remaining = state.stdout.trim();
+        if (remaining) {
+          processBridgeStreamLine(remaining, options.webContents, (payload) => {
+            state.finalPayload = payload;
+          });
         }
-      }, 5000);
-      if (typeof killTimer.unref === "function") {
-        killTimer.unref();
-      }
-      return;
-    } catch (_error) {
-      // Fall through to killing the wrapper process.
-    }
-  }
-  child.kill("SIGTERM");
+        if (state.finalPayload) {
+          finish(state.finalPayload);
+          return;
+        }
+        finish(parseElevatedBridgeOutput(state.fullStdout, state.stderr, options.webContents));
+      },
+    },
+  );
+  return result.finally(() => cleanupElevatedStage(options.stage));
 }
 
 function stageElevatedFlashInputs(validated, plan) {

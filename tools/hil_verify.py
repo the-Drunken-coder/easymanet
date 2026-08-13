@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -201,55 +202,58 @@ def run_hil(
     image = _empty_image_evidence()
     config_path = resolve_fleet_config(args.config)
     config_evidence = _empty_config_evidence(config_path)
-
-    manifest, config_evidence = _load_manifest_for_result(
-        config_path,
-        checks,
-        errors,
-    )
     gate = None
     point = None
-    if manifest is not None:
-        gate = _node_spec(
-            manifest,
-            args.gate_node,
-            "gate",
-            args.gate_ip,
-            args.gate_device,
-            args.gate_ssh_enabled,
-            args.gate_boot_report,
-            checks,
-            errors,
-        )
-        point = _node_spec(
-            manifest,
-            args.point_node,
-            "point",
-            args.point_ip,
-            args.point_device,
-            args.point_ssh_enabled,
-            args.point_boot_report,
-            checks,
-            errors,
-        )
+    reuse_image = _empty_image_evidence()
 
-    if gate is not None and point is not None:
-        reuse_requested = any(not spec.device for spec in (gate, point))
-        reuse_image = _empty_image_evidence()
-        if not args.dry_run and reuse_requested:
-            reuse_image = _validate_reuse_image(args, checks, errors)
-            image = reuse_image
-        if not errors:
-            for spec in (gate, point):
-                if spec.device:
-                    result = _flash_node(args, spec)
-                    flash_results[spec.name] = result.to_dict(include_events=True)
-                    _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
-                    if not result.ok:
-                        errors.extend(result.errors)
-                else:
-                    flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
-                    _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
+    with tempfile.TemporaryDirectory(prefix="easymanet-hil-config-") as temp_dir:
+        config_snapshot = Path(temp_dir) / "fleet.yml"
+        manifest, config_evidence = _load_manifest_for_result(
+            config_path,
+            config_snapshot,
+            checks,
+            errors,
+        )
+        if manifest is not None:
+            gate = _node_spec(
+                manifest,
+                args.gate_node,
+                "gate",
+                args.gate_ip,
+                args.gate_device,
+                args.gate_ssh_enabled,
+                args.gate_boot_report,
+                checks,
+                errors,
+            )
+            point = _node_spec(
+                manifest,
+                args.point_node,
+                "point",
+                args.point_ip,
+                args.point_device,
+                args.point_ssh_enabled,
+                args.point_boot_report,
+                checks,
+                errors,
+            )
+
+        if gate is not None and point is not None:
+            reuse_requested = any(not spec.device for spec in (gate, point))
+            if not args.dry_run and reuse_requested:
+                reuse_image = _validate_reuse_image(args, checks, errors)
+                image = reuse_image
+            if not errors:
+                for spec in (gate, point):
+                    if spec.device:
+                        result = _flash_node(args, spec, config_snapshot)
+                        flash_results[spec.name] = result.to_dict(include_events=True)
+                        _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
+                        if not result.ok:
+                            errors.extend(result.errors)
+                    else:
+                        flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
+                        _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
 
     if args.dry_run and args.base_image and args.image_sha256:
         image = _validate_declared_image(args, checks, errors, check_name="declared image identity")
@@ -627,43 +631,34 @@ def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace
 
 def _load_manifest_for_result(
     config_path: Path,
+    snapshot_path: Path,
     checks: list[dict[str, Any]],
     errors: list[str],
 ) -> tuple[Manifest | None, dict[str, Any]]:
     evidence = _empty_config_evidence(config_path)
     try:
-        before = config_path.read_bytes()
+        config_bytes = config_path.read_bytes()
+        snapshot_path.write_bytes(config_bytes)
+        snapshot_path.chmod(0o400)
     except OSError as exc:
-        message = f"Could not read fleet config bytes: {exc}"
+        message = f"Could not snapshot fleet config bytes: {exc}"
         errors.append(message)
         _add_check(checks, "fleet config identity", False, message)
         return None, evidence
 
     evidence.update(
         {
-            "sha256": hashlib.sha256(before).hexdigest(),
-            "size_bytes": len(before),
+            "sha256": hashlib.sha256(config_bytes).hexdigest(),
+            "size_bytes": len(config_bytes),
         }
     )
     try:
-        manifest = load_manifest(str(config_path))
+        manifest = load_manifest(str(snapshot_path))
     except ManifestError as exc:
         errors.append(str(exc))
         _add_check(checks, "fleet config loads", False, str(exc))
         return None, evidence
 
-    try:
-        after = config_path.read_bytes()
-    except OSError as exc:
-        message = f"Could not re-read fleet config bytes: {exc}"
-        errors.append(message)
-        _add_check(checks, "fleet config identity", False, message)
-        return None, evidence
-    if before != after:
-        message = "Fleet config changed while HIL inputs were being loaded."
-        errors.append(message)
-        _add_check(checks, "fleet config identity", False, message)
-        return None, evidence
     evidence["stable"] = True
     _add_check(
         checks,
@@ -729,11 +724,11 @@ def _node_spec(
     )
 
 
-def _flash_node(args: argparse.Namespace, spec: NodeSpec):
+def _flash_node(args: argparse.Namespace, spec: NodeSpec, config_snapshot: Path):
     enable_ssh, disable_ssh = _ssh_flash_overrides(spec)
     return run_flash_workflow(
         FlashOptions(
-            config=args.config,
+            config=str(config_snapshot),
             node=spec.name,
             device=spec.device,
             base_image=args.base_image or None,

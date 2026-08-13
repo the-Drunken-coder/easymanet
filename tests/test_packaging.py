@@ -164,35 +164,47 @@ def test_release_smoke_surfaces_packaging_command_failure(monkeypatch):
     assert exc_info.value.code == 23
 
 
-def test_release_smoke_cleans_generated_build_metadata(tmp_path, monkeypatch):
+def test_release_smoke_builds_from_temporary_tracked_source(tmp_path, monkeypatch):
     release_smoke = _load_release_smoke_module()
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "easymanet"\nversion = "0.2.4"\n'
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
     wheelhouse = tmp_path / "wheelhouse"
     wheel = wheelhouse / "easymanet-0.2.4-py3-none-any.whl"
+    source_paths = []
 
-    def fake_run(*args, **kwargs):
-        del args, kwargs
-        (repo_root / "build").mkdir()
-        (repo_root / "easymanet.egg-info").mkdir()
+    def fake_run(command, **kwargs):
+        del kwargs
+        source_paths.append(Path(command[-1]))
+        assert source_paths[-1] != repo_root
+        assert (source_paths[-1] / "pyproject.toml").is_file()
+        wheelhouse.mkdir(parents=True, exist_ok=True)
+        wheel.touch()
 
     monkeypatch.setattr(release_smoke, "run", fake_run)
-    monkeypatch.setattr(release_smoke, "built_wheels", lambda *_args: [wheel])
 
     assert release_smoke.build_wheel(repo_root, tmp_path) == wheel
-    assert not (repo_root / "build").exists()
-    assert not (repo_root / "easymanet.egg-info").exists()
+    assert not source_paths[0].exists()
 
 
-def test_release_smoke_cleans_build_metadata_after_failure(tmp_path, monkeypatch):
+def test_release_smoke_preserves_existing_source_build_content(tmp_path, monkeypatch):
     release_smoke = _load_release_smoke_module()
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    build_dir = repo_root / "build"
+    build_dir.mkdir(parents=True)
+    keep = build_dir / "keep.txt"
+    keep.write_text("operator content\n")
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "easymanet"\nversion = "0.2.4"\n'
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
 
-    def fake_run(*args, **kwargs):
-        del args, kwargs
-        (repo_root / "build").mkdir()
-        (repo_root / "easymanet.egg-info").mkdir()
+    def fake_run(*_args, **_kwargs):
         raise SystemExit(23)
 
     monkeypatch.setattr(release_smoke, "run", fake_run)
@@ -201,8 +213,7 @@ def test_release_smoke_cleans_build_metadata_after_failure(tmp_path, monkeypatch
         release_smoke.build_wheel(repo_root, tmp_path)
 
     assert exc_info.value.code == 23
-    assert not (repo_root / "build").exists()
-    assert not (repo_root / "easymanet.egg-info").exists()
+    assert keep.read_text() == "operator content\n"
 
 
 def test_release_smoke_run_passes_timeout_to_subprocess(monkeypatch):

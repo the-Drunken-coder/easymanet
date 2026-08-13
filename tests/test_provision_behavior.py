@@ -846,6 +846,39 @@ def test_provision_local_ap_attaches_to_openmanet_mesh_bridge(tmp_path):
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 
+def test_provision_requested_local_ap_missing_radio_retries(tmp_path):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    uci_state.write_text("wireless.radio2.type='morse'\n")
+    provision_data = _gate_provision_json()
+    provision_data["node"]["local_ap"] = {
+        "enabled": True,
+        "ssid": "gate01-local",
+        "password": "local-password",
+    }
+
+    first = _run_provision(prefix, provision_data, uci_state)
+
+    marker = prefix / "etc" / "easymanet" / "provisioned"
+    boot_json = prefix / "boot" / "easymanet" / "provision.json"
+    assert first.returncode != 0
+    assert "activation failed: local_ap enabled but no mac80211 wifi-device was found" in first.stdout
+    assert not marker.exists()
+    assert boot_json.exists()
+
+    with uci_state.open("a") as state:
+        state.write("wireless.radio3.type='mac80211'\n")
+        state.write("wireless.radio3.path='platform/mmc_host/mmc1'\n")
+        state.write("wireless.radio3.band='2g'\n")
+    second = _run_provision(prefix, provision_data, uci_state)
+
+    assert second.returncode == 0, second.stderr + second.stdout
+    assert marker.exists()
+    assert not boot_json.exists()
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "wireless.ap0.device", env) == "radio3"
+
+
 def test_provision_gate_node_starts_led_status_when_present(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"

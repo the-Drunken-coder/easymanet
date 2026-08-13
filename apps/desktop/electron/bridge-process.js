@@ -54,24 +54,39 @@ function runBridgeStreaming(args, options = {}) {
 }
 
 function runBridgeProcess(args, handlers) {
+  if (bridgeShutdownStarted) {
+    return Promise.resolve({ ok: false, errors: ["EasyMANET bridge is shutting down"] });
+  }
+  let bridge;
+  try {
+    bridge = bridgeCommand(args);
+  } catch (error) {
+    return Promise.resolve({ ok: false, errors: [error.message] });
+  }
+  return runTrackedProcess(
+    {
+      command: bridge.command,
+      args: bridge.args,
+      options: {
+        cwd: bridgeWorkingDirectory(),
+        env: bridgeEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    },
+    handlers,
+  );
+}
+
+function runTrackedProcess(launch, handlers) {
   return new Promise((resolve) => {
     if (bridgeShutdownStarted) {
       resolve({ ok: false, errors: ["EasyMANET bridge is shutting down"] });
       return;
     }
-    let bridge;
-    try {
-      bridge = bridgeCommand(args);
-    } catch (error) {
-      resolve({ ok: false, errors: [error.message] });
-      return;
-    }
     let child;
     try {
-      child = spawn(bridge.command, bridge.args, {
-        cwd: bridgeWorkingDirectory(),
-        env: bridgeEnv(),
-        stdio: ["ignore", "pipe", "pipe"],
+      child = spawn(launch.command, launch.args, {
+        ...launch.options,
         detached: process.platform !== "win32",
       });
     } catch (error) {
@@ -85,12 +100,12 @@ function runBridgeProcess(args, handlers) {
       finalPayload: null,
     };
     let settled = false;
-    let closed = false;
     let timer = null;
     let resolveClose;
     const closePromise = new Promise((closeResolve) => {
       resolveClose = closeResolve;
     });
+    child.once("close", resolveClose);
     const operation = {
       child,
       closePromise,
@@ -109,14 +124,6 @@ function runBridgeProcess(args, handlers) {
       }
       activeBridgeProcesses.delete(operation);
       resolve(payload);
-    };
-
-    const markClosed = () => {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      resolveClose();
     };
 
     const terminate = (payload) => {
@@ -150,7 +157,7 @@ function runBridgeProcess(args, handlers) {
     timer = setTimeout(() => {
       terminateInBackground({
         ok: false,
-        errors: [`EasyMANET bridge timed out after ${timeoutMs / 1000}s`],
+        errors: [handlers.timeoutMessage || `EasyMANET bridge timed out after ${timeoutMs / 1000}s`],
       });
     }, timeoutMs);
 
@@ -164,14 +171,12 @@ function runBridgeProcess(args, handlers) {
     });
     child.on("error", (error) => {
       if (!child.pid) {
-        markClosed();
         finish({ ok: false, errors: [error.message] });
         return;
       }
       terminateInBackground({ ok: false, errors: [error.message] });
     });
     child.on("close", () => {
-      markClosed();
       if (operation.terminating) {
         return;
       }
@@ -188,6 +193,13 @@ function runBridgeProcess(args, handlers) {
         finish({ ok: false, errors: [error.message] });
       }
     });
+    if (handlers.onSpawn) {
+      try {
+        handlers.onSpawn(child);
+      } catch (error) {
+        terminateInBackground({ ok: false, errors: [error.message] });
+      }
+    }
   });
 }
 
@@ -290,5 +302,6 @@ module.exports = {
   runBridgeJson,
   runBridgeProcess,
   runBridgeStreaming,
+  runTrackedProcess,
   shutdownActiveBridgeProcesses,
 };

@@ -592,9 +592,10 @@ def test_attribution_gaps_preserve_observation_but_block_acceptance(missing_attr
     assert "Behavioral HIL passed" in scope["detail"]
 
 
-def test_manifest_mutation_is_recorded_before_hardware_work(tmp_path, monkeypatch):
+def test_manifest_snapshot_is_stable_when_source_changes_during_load(tmp_path, monkeypatch):
     source = hil_verify.REPO_ROOT / "examples" / "three-node-field-mesh.yml"
     config = tmp_path / "fleet.yml"
+    snapshot = tmp_path / "snapshot.yml"
     original = source.read_bytes()
     config.write_bytes(original)
     real_load_manifest = hil_verify.load_manifest
@@ -610,16 +611,93 @@ def test_manifest_mutation_is_recorded_before_hardware_work(tmp_path, monkeypatc
 
     manifest, evidence = hil_verify._load_manifest_for_result(
         config,
+        snapshot,
         checks,
         errors,
     )
 
-    assert manifest is None
+    assert manifest is not None
+    assert snapshot.read_bytes() == original
     assert evidence["sha256"] == hashlib.sha256(original).hexdigest()
-    assert evidence["stable"] is False
-    assert errors == ["Fleet config changed while HIL inputs were being loaded."]
-    assert checks[-1]["name"] == "fleet config identity"
-    assert checks[-1]["ok"] is False
+    assert evidence["stable"] is True
+    assert errors == []
+    assert any(
+        check["name"] == "fleet config identity" and check["ok"] is True
+        for check in checks
+    )
+
+
+def test_flash_acceptance_uses_one_config_snapshot_when_source_changes_between_flashes(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    monkeypatch.setattr(hil_verify, "_git_provenance", _clean_provenance)
+    source = hil_verify.REPO_ROOT / "examples" / "three-node-field-mesh.yml"
+    config = tmp_path / "fleet.yml"
+    original = source.read_bytes()
+    changed = original + b"\n# changed between flashes\n"
+    config.write_bytes(original)
+    artifact, sha256 = _image_artifact(tmp_path)
+    flashed_configs: list[bytes] = []
+    flashed_config_paths: list[Path] = []
+
+    class FakeFlashResult:
+        ok = True
+        errors = []
+
+        def __init__(self, node):
+            self.node = node
+
+        def to_dict(self, include_events=False):
+            return {
+                "ok": True,
+                "node": self.node,
+                "image": {"path": str(artifact), "sha256": sha256},
+                "events": [] if include_events else None,
+            }
+
+    def fake_flash(options):
+        flashed_config_paths.append(Path(options.config))
+        flashed_configs.append(Path(options.config).read_bytes())
+        if options.node == "gate01":
+            config.write_bytes(changed)
+        return FakeFlashResult(options.node)
+
+    monkeypatch.setattr(hil_verify, "run_flash_workflow", fake_flash)
+    monkeypatch.setattr(hil_verify, "_probe_node", lambda *_args: {"ok": True})
+    monkeypatch.setattr(hil_verify, "_probe_topology", lambda *_args: {"ok": True})
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            str(config),
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--gate-device",
+            "/dev/disk4",
+            "--point-device",
+            "/dev/disk5",
+            "--point-ssh-enabled",
+            "--allow-flash",
+            "--yes",
+            "--skip-boot-prompt",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(
+        args,
+        sleep_fn=lambda _seconds: None,
+        now_fn=_now,
+    )
+
+    assert config.read_bytes() == changed
+    assert flashed_config_paths[0] == flashed_config_paths[1]
+    assert flashed_config_paths[0] != config
+    assert flashed_configs == [original, original]
+    assert payload["config"]["path"] == str(config.resolve())
+    assert payload["config"]["sha256"] == hashlib.sha256(original).hexdigest()
+    assert payload["evidence_scope"]["physical_acceptance"] is True
 
 
 def test_reuse_rejects_missing_local_artifact_before_probes(tmp_path, monkeypatch):

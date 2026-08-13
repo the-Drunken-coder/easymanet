@@ -238,6 +238,11 @@ if json_bool management api_wan_enabled; then
     API_WAN_ENABLED=1
 fi
 
+activation_failure() {
+    echo "FATAL: activation failed: $1" | tee -a "$LOG_FILE"
+    exit 1
+}
+
 echo "Setting hostname to $HOSTNAME..." >> "$LOG_FILE"
 uci_set system.@system[0].hostname="$HOSTNAME"
 uci_set system.@system[0].timezone="UTC"
@@ -314,7 +319,7 @@ if [ "$LOCAL_AP_ENABLED" -eq 1 ]; then
         uci_set wireless.ap0.encryption="$EM_LOCAL_AP_ENCRYPTION"
         uci_set wireless.ap0.key="$LOCAL_AP_PASSWORD"
     else
-        echo "WARNING: local_ap enabled but no mac80211 wifi-device was found; skipping local AP" >> "$LOG_FILE"
+        activation_failure "local_ap enabled but no mac80211 wifi-device was found"
     fi
 fi
 
@@ -578,11 +583,6 @@ EOF
     fi
     umask "$old_umask"
 fi
-
-activation_failure() {
-    echo "FATAL: activation failed: $1" | tee -a "$LOG_FILE"
-    exit 1
-}
 
 require_init_action() {
     init_script="$1"

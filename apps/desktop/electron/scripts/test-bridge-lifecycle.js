@@ -7,8 +7,10 @@ const path = require("node:path");
 
 const electronRoot = path.resolve(__dirname, "..");
 const bridgeProcessPath = path.join(electronRoot, "bridge-process.js");
+const elevatedFlashPath = path.join(electronRoot, "elevated-flash.js");
 const environmentPath = path.join(electronRoot, "environment.js");
 const mainPath = path.join(electronRoot, "main.js");
+const validationPath = path.join(electronRoot, "validation.js");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "easymanet-bridge-lifecycle-"));
 const fixturePath = path.join(tempRoot, "inert-process-tree.js");
 const fixturePids = [];
@@ -21,6 +23,8 @@ const fs = require("node:fs");
 const pidFile = process.argv[2];
 const signalFile = process.argv[3];
 const exitAfterSpawn = process.argv[4] === "exit-after-spawn";
+const leaderTitle = process.argv[5] || "python";
+const stageMarker = process.argv[6] || "";
 const childSource = (title) => \`
   const fs = require("node:fs");
   const signalFile = \${JSON.stringify(signalFile)};
@@ -29,8 +33,14 @@ const childSource = (title) => \`
   process.stdout.write("ready\\\\n");
   setInterval(() => {}, 1000);
 \`;
-process.title = "python";
-process.on("SIGTERM", () => fs.appendFileSync(signalFile, "python:TERM\\n"));
+process.title = leaderTitle;
+process.on("SIGTERM", () => {
+  fs.appendFileSync(signalFile, leaderTitle + ":TERM\\n");
+  if (stageMarker) {
+    const state = fs.existsSync(stageMarker) ? "PRESENT" : "MISSING";
+    fs.appendFileSync(signalFile, leaderTitle + ":STAGE_" + state + "\\n");
+  }
+});
 const childStdio = ["ignore", "pipe", "ignore"];
 const gzip = spawn(process.execPath, ["-e", childSource("gzip")], {stdio: childStdio});
 const dd = spawn(process.execPath, ["-e", childSource("dd")], {stdio: childStdio});
@@ -55,6 +65,8 @@ async function main() {
     await testTimeoutReapsProcessTree();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
+    await testElevatedTimeoutReapsBeforeCleanup();
+    await testAppQuitReapsElevatedProcessTree();
   }
   await testShutdownClosesBridgeAdmissionWhenIdle();
   await testMainClosesBridgeAdmissionBeforeQuitting();
@@ -109,6 +121,73 @@ async function testUnexpectedParentExitReapsProcessTree() {
   assertDescendantTermSignals(signalFileFor(pidFile));
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testElevatedTimeoutReapsBeforeCleanup() {
+  const pidFile = path.join(tempRoot, "elevated-timeout-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const elevated = loadElevatedFlash(pidFile, bridge);
+  const stage = createElevatedStage("timeout");
+  const resultPromise = elevated.runBridgeWithAdministratorPrivileges([], {
+    adminPassword: "test-password",
+    authenticationGraceMs: 0,
+    stage,
+    terminationGraceMs: 250,
+    timeoutMs: 1500,
+  });
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+
+  assert.equal(bridge.hasActiveBridgeProcesses(), true);
+  assert.equal(fs.existsSync(stage.root), true);
+  const result = await resultPromise;
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /Administrator flash timed out/);
+  assertElevatedTermSignals(signalFileFor(pidFile));
+  assertProcessTreeGone(pids);
+  assert.equal(fs.existsSync(stage.root), false);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testAppQuitReapsElevatedProcessTree() {
+  const pidFile = path.join(tempRoot, "elevated-quit-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const elevated = loadElevatedFlash(pidFile, bridge);
+  const stage = createElevatedStage("quit");
+  const resultPromise = elevated.runBridgeWithAdministratorPrivileges([], {
+    adminPassword: "test-password",
+    authenticationGraceMs: 0,
+    stage,
+    terminationGraceMs: 250,
+    timeoutMs: 10000,
+  });
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const app = new EventEmitter();
+  let quitCalls = 0;
+  app.whenReady = () => new Promise(() => {});
+  app.quit = () => {
+    quitCalls += 1;
+  };
+  loadMain(app, bridge);
+
+  const quit = quitEvent();
+  app.emit("before-quit", quit);
+
+  assert.equal(quit.prevented, true);
+  assert.equal(quitCalls, 0);
+  assert.equal(fs.existsSync(stage.root), true);
+  const result = await resultPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /application shutdown/);
+  assertElevatedTermSignals(signalFileFor(pidFile));
+  assertProcessTreeGone(pids);
+  assert.equal(fs.existsSync(stage.root), false);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+  assert.equal(quitCalls, 1);
 }
 
 async function testShutdownClosesBridgeAdmissionWhenIdle() {
@@ -188,6 +267,93 @@ async function testMainClosesBridgeAdmissionBeforeQuitting() {
   assert.equal(finalQuit.prevented, false);
 }
 
+function loadElevatedFlash(pidFile, bridge) {
+  const previousEnvironment = require.cache[environmentPath];
+  const previousBridge = require.cache[bridgeProcessPath];
+  const previousValidation = require.cache[validationPath];
+  require.cache[environmentPath] = {
+    id: environmentPath,
+    filename: environmentPath,
+    loaded: true,
+    exports: {
+      elevatedBridgeCommand: (_args, stage) => ({
+        cwd: tempRoot,
+        env: {},
+        stageMarker: path.join(stage.root, "staged-input"),
+      }),
+      elevatedBridgeEnv: () => ({...process.env}),
+      elevatedTempRoot: () => tempRoot,
+      sudoBridgeCommand: (bridge) => ({
+        command: process.execPath,
+        args: [fixturePath, pidFile, signalFileFor(pidFile), "", "sudo", bridge.stageMarker],
+      }),
+    },
+  };
+  require.cache[bridgeProcessPath] = {
+    id: bridgeProcessPath,
+    filename: bridgeProcessPath,
+    loaded: true,
+    exports: bridge,
+  };
+  require.cache[validationPath] = {
+    id: validationPath,
+    filename: validationPath,
+    loaded: true,
+    exports: {flashArgs: () => []},
+  };
+  delete require.cache[elevatedFlashPath];
+  try {
+    return require(elevatedFlashPath);
+  } finally {
+    if (previousEnvironment) {
+      require.cache[environmentPath] = previousEnvironment;
+    } else {
+      delete require.cache[environmentPath];
+    }
+    if (previousBridge) {
+      require.cache[bridgeProcessPath] = previousBridge;
+    } else {
+      delete require.cache[bridgeProcessPath];
+    }
+    if (previousValidation) {
+      require.cache[validationPath] = previousValidation;
+    } else {
+      delete require.cache[validationPath];
+    }
+  }
+}
+
+function loadMain(app, bridge) {
+  const originalLoad = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === "electron") {
+      return { app, BrowserWindow: { getAllWindows: () => [] } };
+    }
+    if (parent && parent.filename === mainPath && request === "./bridge-process") {
+      return bridge;
+    }
+    if (parent && parent.filename === mainPath && request === "./ipc") {
+      return { registerIpc: () => {} };
+    }
+    if (parent && parent.filename === mainPath && request === "./window") {
+      return { createWindow: () => {}, setDockIcon: () => {} };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    delete require.cache[mainPath];
+    require(mainPath);
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+function createElevatedStage(label) {
+  const root = fs.mkdtempSync(path.join(tempRoot, `${label}-stage-`));
+  fs.writeFileSync(path.join(root, "staged-input"), "must survive until process exit");
+  return {root};
+}
+
 function loadBridgeProcess(pidFile, fixtureMode = "") {
   const previousEnvironment = require.cache[environmentPath];
   require.cache[environmentPath] = {
@@ -246,6 +412,12 @@ function assertTermSignals(signalFile) {
   assert.equal(fs.existsSync(signalFile), true, `no SIGTERM was handled: ${signalFile}`);
   const signals = fs.readFileSync(signalFile, "utf8").trim().split("\n").sort();
   assert.deepEqual(signals, ["dd:TERM", "gzip:TERM", "python:TERM"]);
+}
+
+function assertElevatedTermSignals(signalFile) {
+  assert.equal(fs.existsSync(signalFile), true, `no SIGTERM was handled: ${signalFile}`);
+  const signals = fs.readFileSync(signalFile, "utf8").trim().split("\n").sort();
+  assert.deepEqual(signals, ["dd:TERM", "gzip:TERM", "sudo:STAGE_PRESENT", "sudo:TERM"]);
 }
 
 function assertDescendantTermSignals(signalFile) {

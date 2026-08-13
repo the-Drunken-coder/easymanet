@@ -11,6 +11,8 @@ import shutil
 import subprocess
 from pathlib import Path
 import sys
+import tarfile
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,22 +80,45 @@ def tracked_files_for(rel_path: str) -> tuple[str, ...]:
     return tracked_files(ROOT, rel_path)
 
 
-def copy_source_path(rel_path: str, target_root: Path) -> None:
-    for tracked_file in tracked_files_for(rel_path):
-        src = ROOT / tracked_file
+def source_files(source_root: Path, rel_path: str) -> tuple[str, ...]:
+    if source_root.resolve() == ROOT.resolve():
+        return tracked_files_for(rel_path)
+
+    source = source_root / rel_path
+    if source.is_file():
+        return (rel_path,)
+    if not source.is_dir():
+        raise FileNotFoundError(f"Source path does not exist: {rel_path}")
+    files = tuple(
+        path.relative_to(source_root).as_posix()
+        for path in sorted(source.rglob("*"))
+        if path.is_file()
+    )
+    if not files:
+        raise FileNotFoundError(f"Source path has no files: {rel_path}")
+    return files
+
+
+def copy_source_path(rel_path: str, target_root: Path, source_root: Path) -> None:
+    for tracked_file in source_files(source_root, rel_path):
+        src = source_root / tracked_file
+        if src.is_symlink():
+            raise ValueError(f"Tracked surface files cannot be symbolic links: {tracked_file}")
         dest = target_root / tracked_file
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
 
 
-def copy_template_tree(spec: RepoSpec, target_root: Path) -> None:
-    template_dir = spec.template_dir(ROOT)
+def copy_template_tree(spec: RepoSpec, target_root: Path, source_root: Path) -> None:
+    template_dir = spec.template_dir(source_root)
     if not template_dir.is_dir():
         raise FileNotFoundError(f"Template directory does not exist: {template_dir}")
 
-    template_path = template_dir.relative_to(ROOT).as_posix()
-    for tracked_file in tracked_files_for(template_path):
-        src = ROOT / tracked_file
+    template_path = template_dir.relative_to(source_root).as_posix()
+    for tracked_file in source_files(source_root, template_path):
+        src = source_root / tracked_file
+        if src.is_symlink():
+            raise ValueError(f"Tracked surface files cannot be symbolic links: {tracked_file}")
         dest = target_root / src.relative_to(template_dir)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
@@ -121,22 +146,77 @@ not drift from the shared EasyMANET model.
 """
 
 
-def generate_repo(spec: RepoSpec, output_dir: Path, source_ref: str, source_sha: str) -> Path:
+def generate_repo(
+    spec: RepoSpec,
+    output_dir: Path,
+    source_ref: str,
+    source_sha: str,
+    source_root: Path | None = None,
+) -> Path:
+    source_root = source_root or ROOT
     repo_dir = output_dir / spec.repo_name
     if repo_dir.exists():
         shutil.rmtree(repo_dir)
     repo_dir.mkdir(parents=True)
 
     for rel_path in spec.source_paths:
-        copy_source_path(rel_path, repo_dir)
+        copy_source_path(rel_path, repo_dir, source_root)
 
-    copy_template_tree(spec, repo_dir)
+    copy_template_tree(spec, repo_dir, source_root)
     write_text_file(
         repo_dir / "pyproject.toml",
-        render_surface_pyproject(spec, project_version(ROOT / "pyproject.toml")),
+        render_surface_pyproject(spec, project_version(source_root / "pyproject.toml")),
     )
     write_text_file(repo_dir / "REPO_GENERATION.md", generation_metadata(spec, source_ref, source_sha))
     return repo_dir
+
+
+def validate_source_commit(source_sha: str) -> str:
+    resolved_sha = git_output(["rev-parse", f"{source_sha}^{{commit}}"], cwd=ROOT)
+    head_sha = git_output(["rev-parse", "HEAD"], cwd=ROOT)
+    if resolved_sha != head_sha:
+        raise SystemExit(
+            f"Source commit {resolved_sha} does not match checked-out HEAD {head_sha}"
+        )
+
+    for diff_args in (["diff", "--quiet"], ["diff", "--cached", "--quiet"]):
+        result = run(["git", *diff_args], cwd=ROOT, check=False)
+        if result.returncode != 0:
+            raise SystemExit(
+                "Tracked source changes must be committed before generating public repositories"
+            )
+    return resolved_sha
+
+
+def materialize_source_commit(source_sha: str, destination: Path) -> Path:
+    archive_path = destination / "source.tar"
+    source_root = destination / "source"
+    source_root.mkdir(parents=True)
+    run(
+        ["git", "archive", "--format=tar", "--output", str(archive_path), source_sha],
+        cwd=ROOT,
+    )
+
+    with tarfile.open(archive_path, "r") as archive:
+        for member in archive.getmembers():
+            relative = Path(member.name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Git archive contained an unsafe path: {member.name}")
+            target = source_root / relative
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise ValueError(f"Git archive contained a non-file entry: {member.name}")
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError(f"Git archive file could not be read: {member.name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            target.chmod(member.mode & 0o777)
+    archive_path.unlink()
+    return source_root
 
 
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:
@@ -346,33 +426,51 @@ def main() -> int:
         raise SystemExit("--dispatch requires --push so release provenance matches published repo contents")
 
     source_ref = args.source_ref or git_output(["branch", "--show-current"]) or "unknown"
-    source_sha = args.source_sha or git_output(["rev-parse", "HEAD"])
+    requested_source_sha = args.source_sha or git_output(["rev-parse", "HEAD"])
+    source_sha = validate_source_commit(requested_source_sha)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     payload = build_payload(args, source_ref, source_sha)
-    for spec in selected_specs(args.product):
-        generated_dir = generate_repo(spec, args.output_dir, source_ref, source_sha)
-        print(f"generated {spec.repo_name}: {generated_dir}")
+    with tempfile.TemporaryDirectory(prefix="easymanet-publish-source-") as temp_dir:
+        source_root = materialize_source_commit(source_sha, Path(temp_dir))
+        for spec in selected_specs(args.product):
+            generated_dir = generate_repo(
+                spec,
+                args.output_dir,
+                source_ref,
+                source_sha,
+                source_root,
+            )
+            print(f"generated {spec.repo_name}: {generated_dir}")
 
-        if args.create_missing and not github_repo_exists(args.remote_owner, spec):
-            create_github_repo(args.remote_owner, spec)
-            print(f"created {args.remote_owner}/{spec.repo_name}")
+            if args.create_missing and not github_repo_exists(args.remote_owner, spec):
+                create_github_repo(args.remote_owner, spec)
+                print(f"created {args.remote_owner}/{spec.repo_name}")
 
-        commit_sha = None
-        publish_synced = False
-        if args.push:
-            commit_sha = sync_to_remote(args.remote_owner, spec, generated_dir, args.output_dir, source_sha)
-            publish_synced = True
-            if commit_sha:
-                print(f"pushed {args.remote_owner}/{spec.repo_name}@{commit_sha}")
-            else:
-                print(f"no changes for {args.remote_owner}/{spec.repo_name}")
+            commit_sha = None
+            publish_synced = False
+            if args.push:
+                commit_sha = sync_to_remote(
+                    args.remote_owner,
+                    spec,
+                    generated_dir,
+                    args.output_dir,
+                    source_sha,
+                )
+                publish_synced = True
+                if commit_sha:
+                    print(f"pushed {args.remote_owner}/{spec.repo_name}@{commit_sha}")
+                else:
+                    print(f"no changes for {args.remote_owner}/{spec.repo_name}")
 
-        if args.dispatch and publish_synced:
-            dispatch_release(args.remote_owner, spec, payload)
-            print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.repo_name}")
-        elif args.dispatch:
-            print(f"skipped dispatch for {args.remote_owner}/{spec.repo_name}: publish sync did not run")
+            if args.dispatch and publish_synced:
+                dispatch_release(args.remote_owner, spec, payload)
+                print(f"dispatched {spec.dispatch_event} to {args.remote_owner}/{spec.repo_name}")
+            elif args.dispatch:
+                print(
+                    f"skipped dispatch for {args.remote_owner}/{spec.repo_name}: "
+                    "publish sync did not run"
+                )
 
     return 0
 

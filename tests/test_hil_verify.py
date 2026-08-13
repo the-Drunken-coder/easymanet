@@ -1,3 +1,5 @@
+import hashlib
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +17,12 @@ def _now():
 
 def _api_result(host, endpoint, payload, *, ok=True):
     return diagnostics.ApiResult(ok=ok, host=host, endpoint=endpoint, payload=payload, error="" if ok else "down")
+
+
+def _image_artifact(tmp_path, contents=b"firmware"):
+    artifact = tmp_path / "openmanet.img.gz"
+    artifact.write_bytes(contents)
+    return artifact, hashlib.sha256(contents).hexdigest()
 
 
 def test_parse_args_refuses_flash_without_guardrails():
@@ -126,6 +134,7 @@ def test_parse_args_requires_ssh_for_throughput_smoke(capsys):
 
 def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    artifact, sha256 = _image_artifact(tmp_path)
     args = hil_verify.parse_args(
         [
             "--config",
@@ -134,6 +143,10 @@ def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
             "gate01",
             "--point-node",
             "point01",
+            "--base-image",
+            str(artifact),
+            "--image-sha256",
+            sha256,
             "--dry-run",
         ]
     )
@@ -148,6 +161,18 @@ def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     assert Path(payload["support_bundle_path"]).is_file()
     assert payload["nodes"] == {}
     assert "Dry run skipped hardware" in payload["warnings"][0]
+    assert payload["schema_version"] == 2
+    assert payload["image"]["artifact_path"] == str(artifact.resolve())
+    assert payload["image"]["sha256"] == sha256
+    assert payload["image"]["trust"]["status"] == "checksum-only"
+    assert payload["evidence_scope"] == {
+        "kind": "synthetic-dry-run",
+        "simulation": False,
+        "calibration": False,
+        "physical_acceptance": False,
+        "detail": "Dry-run evidence does not probe hardware or establish physical acceptance.",
+    }
+    assert json.loads(result_path.read_text()) == payload
 
 
 def test_role_mismatch_skips_flash(tmp_path, monkeypatch):
@@ -227,6 +252,7 @@ def test_unsafe_ip_override_stops_before_throughput_command(tmp_path, monkeypatc
 
 def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    artifact, sha256 = _image_artifact(tmp_path)
     events = []
 
     class FakeFlashResult:
@@ -242,6 +268,12 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
                 "code": "ok",
                 "node": self.node,
                 "plan": {"device": f"/dev/{self.node}"},
+                "image": {
+                    "path": str(artifact),
+                    "sha256": sha256,
+                    "trust_status": "verified",
+                    "source": "official",
+                },
                 "events": [] if include_events else None,
             }
 
@@ -307,10 +339,14 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     assert payload["ok"] is True
     assert events[:4] == ["flash gate01", "flash point01", "prompt", "sleep 90"]
     assert any(check["name"] == "post-flash boot handoff confirmed" and check["ok"] for check in payload["checks"])
+    assert payload["image"]["node_image_identity"] == "flashed"
+    assert payload["image"]["sha256"] == sha256
+    assert payload["evidence_scope"]["physical_acceptance"] is True
 
 
 def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    artifact, sha256 = _image_artifact(tmp_path)
     calls = []
     slept = []
 
@@ -360,6 +396,10 @@ def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):
             "gate01",
             "--point-node",
             "point01",
+            "--base-image",
+            str(artifact),
+            "--image-sha256",
+            sha256,
             "--point-ssh-enabled",
             "--wait-seconds",
             "90",
@@ -380,6 +420,152 @@ def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):
     assert payload["nodes"]["point01"]["boot_report"]["ok"] is True
     assert Path(payload["result_path"]).is_file()
     assert Path(payload["support_bundle_path"]).is_file()
+    assert payload["image"] == {
+        "artifact_path": str(artifact.resolve()),
+        "artifact_id": f"sha256:{sha256}",
+        "sha256": sha256,
+        "local_digest_verified": True,
+        "node_image_identity": "not-attested",
+        "trust": hil_verify.image_trust_payload(hil_verify.custom_trust()),
+    }
+
+
+def test_git_provenance_records_clean_runner_and_source_shas(monkeypatch):
+    sha256 = "a" * 40
+
+    def fake_git_output(args):
+        return sha256 if args == ["rev-parse", "HEAD"] else ""
+
+    monkeypatch.setattr(hil_verify, "_git_output", fake_git_output)
+
+    provenance = hil_verify._git_provenance()
+
+    assert provenance["runner"]["git_sha"] == sha256
+    assert provenance["source"]["git_sha"] == sha256
+    assert provenance["runner"]["dirty"] is False
+    assert provenance["source"]["dirty"] is False
+
+
+def test_git_provenance_records_dirty_state_without_claiming_clean(monkeypatch):
+    sha256 = "b" * 40
+
+    def fake_git_output(args):
+        if args == ["rev-parse", "HEAD"]:
+            return sha256
+        return " M tools/hil_verify.py\n?? local-evidence.json"
+
+    monkeypatch.setattr(hil_verify, "_git_output", fake_git_output)
+
+    provenance = hil_verify._git_provenance()
+
+    assert provenance["runner"]["git_sha"] == sha256
+    assert provenance["source"]["git_sha"] == sha256
+    assert provenance["runner"]["dirty"] is True
+    assert provenance["source"]["dirty"] is True
+
+
+def test_reuse_rejects_missing_local_artifact_before_probes(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("reuse must verify image identity before probes")
+
+    monkeypatch.setattr(hil_verify, "fetch_node_api", fail_fetch)
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--base-image",
+            str(tmp_path / "missing.img.gz"),
+            "--image-sha256",
+            hashlib.sha256(b"firmware").hexdigest(),
+            "--point-ssh-enabled",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(args, now_fn=_now)
+
+    assert payload["ok"] is False
+    assert payload["nodes"] == {}
+    assert any("Image artifact not found" in error for error in payload["errors"])
+    assert any(check["name"] == "reuse image identity" and not check["ok"] for check in payload["checks"])
+
+
+def test_reuse_rejects_stale_or_mismatched_local_artifact_before_probes(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    artifact, _sha256 = _image_artifact(tmp_path, b"old firmware")
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("reuse must verify image identity before probes")
+
+    monkeypatch.setattr(hil_verify, "fetch_node_api", fail_fetch)
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--base-image",
+            str(artifact),
+            "--image-sha256",
+            hashlib.sha256(b"current firmware").hexdigest(),
+            "--point-ssh-enabled",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(args, now_fn=_now)
+
+    assert payload["ok"] is False
+    assert payload["nodes"] == {}
+    assert payload["image"]["local_digest_verified"] is False
+    assert any("reuse image identity failed" in error.lower() for error in payload["errors"])
+
+
+def test_mixed_flash_and_reuse_requires_image_identity_before_flash_or_probes(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+
+    def fail_flash(*_args, **_kwargs):
+        raise AssertionError("mixed mode must verify reuse identity before flashing")
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("mixed mode must verify reuse identity before probes")
+
+    monkeypatch.setattr(hil_verify, "run_flash_workflow", fail_flash)
+    monkeypatch.setattr(hil_verify, "fetch_node_api", fail_fetch)
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--gate-device",
+            "/dev/disk4",
+            "--point-ssh-enabled",
+            "--allow-flash",
+            "--yes",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(args, now_fn=_now)
+
+    assert payload["ok"] is False
+    assert payload["flash"] == {}
+    assert payload["nodes"] == {}
+    assert any("Reuse requires --base-image" in error for error in payload["errors"])
 
 
 def test_real_run_requires_boot_report_when_point_ssh_is_disabled(capsys):

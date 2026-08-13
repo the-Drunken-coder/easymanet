@@ -36,14 +36,16 @@ from easymanet.diagnostics import (  # noqa: E402
     fetch_node_api,
 )
 from easymanet.flash import FlashOptions, run_flash_workflow  # noqa: E402
+from easymanet.download import normalize_sha256, verify_image_sha256  # noqa: E402
 from easymanet.manifest import Manifest, ManifestError, load_manifest  # noqa: E402
 from easymanet.provision import ResolvedNode, resolve_node_model  # noqa: E402
+from easymanet.release_trust import custom_trust, image_trust_payload  # noqa: E402
 from easymanet.support_bundle import create_support_bundle  # noqa: E402
 from easymanet.validate import validate, validate_ip  # noqa: E402
 from easymanet.workspace import diagnostics_dir, ensure_workspace, resolve_fleet_config  # noqa: E402
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_WAIT_SECONDS = 120
 MIN_WAIT_SECONDS = 90
 MAX_WAIT_SECONDS = 120
@@ -193,6 +195,8 @@ def run_hil(
     nodes: dict[str, Any] = {}
     topology: dict[str, Any] = {"ok": False, "skipped": True}
     throughput: dict[str, Any] = {"ok": None, "skipped": True}
+    provenance = _git_provenance()
+    image = _empty_image_evidence()
     config_path = resolve_fleet_config(args.config)
 
     manifest = _load_manifest_for_result(config_path, checks, errors)
@@ -223,21 +227,33 @@ def run_hil(
         )
 
     if gate is not None and point is not None:
-        for spec in (gate, point):
-            if spec.device:
-                result = _flash_node(args, spec)
-                flash_results[spec.name] = result.to_dict(include_events=True)
-                _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
-                if not result.ok:
-                    errors.extend(result.errors)
-            else:
-                flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
-                _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
+        reuse_requested = any(not spec.device for spec in (gate, point))
+        reuse_image = _empty_image_evidence()
+        if not args.dry_run and reuse_requested:
+            reuse_image = _validate_reuse_image(args, checks, errors)
+            image = reuse_image
+        if not errors:
+            for spec in (gate, point):
+                if spec.device:
+                    result = _flash_node(args, spec)
+                    flash_results[spec.name] = result.to_dict(include_events=True)
+                    _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
+                    if not result.ok:
+                        errors.extend(result.errors)
+                else:
+                    flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
+                    _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
+
+    if args.dry_run and args.base_image and args.image_sha256:
+        image = _validate_declared_image(args, checks, errors, check_name="declared image identity")
+    elif _has_device(args) and flash_results:
+        flashed_image = _flash_image_evidence(flash_results, checks, errors)
+        image = _mixed_image_evidence(reuse_image, flashed_image, checks, errors)
 
     flash_failed = any(not result.get("ok") for result in flash_results.values())
     if args.dry_run:
         warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
-    elif not flash_failed and gate is not None and point is not None:
+    elif not errors and not flash_failed and gate is not None and point is not None:
         ready_to_probe = True
         if _has_device(args):
             ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
@@ -261,6 +277,9 @@ def run_hil(
         "gate_node": args.gate_node,
         "point_node": args.point_node,
         "wait_seconds": 0 if args.dry_run else args.wait_seconds,
+        "provenance": provenance,
+        "image": image,
+        "evidence_scope": _evidence_scope(mode, ok),
         "flash": flash_results,
         "nodes": nodes,
         "topology": topology,
@@ -275,6 +294,205 @@ def run_hil(
     payload["support_bundle_path"] = bundle_path
     _write_json(result_path, payload)
     return payload
+
+
+def _git_provenance() -> dict[str, Any]:
+    try:
+        git_sha = _git_output(["rev-parse", "HEAD"])
+        status = _git_output(["status", "--porcelain=v1", "--untracked-files=all"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = f"Git provenance unavailable: {exc}"
+        return {
+            "runner": {"git_sha": "", "dirty": None, "detail": detail},
+            "source": {"git_sha": "", "dirty": None, "detail": detail},
+        }
+
+    dirty = bool(status)
+    return {
+        "runner": {
+            "git_sha": git_sha,
+            "dirty": dirty,
+            "path": str(Path(__file__).resolve()),
+        },
+        "source": {
+            "git_sha": git_sha,
+            "dirty": dirty,
+            "path": str(REPO_ROOT),
+        },
+    }
+
+
+def _git_output(args: list[str]) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout.strip()
+
+
+def _empty_image_evidence() -> dict[str, Any]:
+    return {
+        "artifact_path": "",
+        "artifact_id": "",
+        "sha256": "",
+        "local_digest_verified": False,
+        "node_image_identity": "not-attested",
+        "trust": {},
+    }
+
+
+def _validate_reuse_image(
+    args: argparse.Namespace,
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    if not args.base_image or not args.image_sha256:
+        message = "Reuse requires --base-image and --image-sha256 before probes can run."
+        errors.append(message)
+        _add_check(checks, "reuse image identity", False, message)
+        return _empty_image_evidence()
+
+    return _validate_declared_image(args, checks, errors, check_name="reuse image identity")
+
+
+def _validate_declared_image(
+    args: argparse.Namespace,
+    checks: list[dict[str, Any]],
+    errors: list[str],
+    *,
+    check_name: str,
+) -> dict[str, Any]:
+    evidence = _empty_image_evidence()
+    evidence["trust"] = image_trust_payload(custom_trust())
+
+    artifact = Path(args.base_image).expanduser().resolve()
+    try:
+        sha256 = normalize_sha256(args.image_sha256)
+        if not artifact.is_file():
+            raise FileNotFoundError(f"Image artifact not found: {artifact}")
+        verify_image_sha256(artifact, sha256)
+    except (OSError, ValueError) as exc:
+        message = f"{check_name} failed: {exc}"
+        errors.append(message)
+        _add_check(checks, check_name, False, message)
+        return evidence
+
+    evidence.update(
+        {
+            "artifact_path": str(artifact),
+            "artifact_id": f"sha256:{sha256}",
+            "sha256": sha256,
+            "local_digest_verified": True,
+        }
+    )
+    _add_check(checks, check_name, True, f"{artifact}; sha256={sha256}")
+    return evidence
+
+
+def _flash_image_evidence(
+    flash_results: dict[str, Any],
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    images = [
+        result.get("image")
+        for result in flash_results.values()
+        if result.get("ok") and result.get("mode") != "reuse"
+    ]
+    if not images or not all(isinstance(image, dict) for image in images):
+        message = "Flash image identity was not available from the flash workflow."
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    image = images[0]
+    path = str(image.get("path", ""))
+    sha256 = str(image.get("sha256", ""))
+    if not path or not sha256:
+        message = "Flash image identity is missing its local artifact path or SHA-256."
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    try:
+        artifact = Path(path).expanduser().resolve()
+        normalized_sha256 = normalize_sha256(sha256)
+    except ValueError as exc:
+        message = f"Flash image identity failed: {exc}"
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    identity = (str(artifact), normalized_sha256)
+    for other in images[1:]:
+        other_path = Path(str(other.get("path", ""))).expanduser().resolve()
+        try:
+            other_sha256 = normalize_sha256(str(other.get("sha256", "")))
+        except ValueError:
+            other_sha256 = ""
+        if (str(other_path), other_sha256) != identity:
+            message = "Flash nodes did not use the same image identity."
+            errors.append(message)
+            _add_check(checks, "flash image identity", False, message)
+            return _empty_image_evidence()
+
+    trust_keys = (
+        "trust_status",
+        "source",
+        "channel",
+        "release_tag",
+        "image_status",
+        "manifest_url",
+        "manifest_signature_verified",
+    )
+    trust = {key: image[key] for key in trust_keys if key in image}
+    _add_check(checks, "flash image identity", True, f"{artifact}; sha256={normalized_sha256}")
+    return {
+        "artifact_path": str(artifact),
+        "artifact_id": f"sha256:{normalized_sha256}",
+        "sha256": normalized_sha256,
+        "local_digest_verified": True,
+        "node_image_identity": "flashed",
+        "trust": trust,
+    }
+
+
+def _mixed_image_evidence(
+    reuse_image: dict[str, Any],
+    flashed_image: dict[str, Any],
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    if not reuse_image["local_digest_verified"]:
+        return flashed_image
+    if reuse_image["sha256"] != flashed_image["sha256"]:
+        message = "Reused node image does not match the flashed image identity."
+        errors.append(message)
+        _add_check(checks, "mixed image identity", False, message)
+        return _empty_image_evidence()
+
+    evidence = dict(reuse_image)
+    evidence["node_image_identity"] = "mixed"
+    _add_check(checks, "mixed image identity", True, f"sha256={reuse_image['sha256']}")
+    return evidence
+
+
+def _evidence_scope(mode: str, ok: bool) -> dict[str, Any]:
+    physical = mode in {"flash", "reuse"}
+    return {
+        "kind": "physical-hil" if physical else "synthetic-dry-run",
+        "simulation": False,
+        "calibration": False,
+        "physical_acceptance": physical and ok,
+        "detail": (
+            "Physical acceptance is limited to the configured gate/point pair and this record."
+            if physical
+            else "Dry-run evidence does not probe hardware or establish physical acceptance."
+        ),
+    }
 
 
 def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

@@ -64,15 +64,29 @@ not a per-PR requirement:
 ```
 
 To reuse already-flashed nodes, omit `--gate-device` and `--point-device`; pass
-`--gate-ip` or `--point-ip` only when the fleet IPs are not the active probe
-addresses. Flashing never auto-selects disks and will not write media unless a
-device, `--allow-flash`, and `--yes` are all present. The runner waits 90-120
-seconds after the operator confirms that flashed media is inserted and the nodes
-are booting, probes the node API, checks SSH where enabled, verifies mesh
-visibility and support codes, checks boot-report availability, optionally runs
-iperf3 throughput smoke, and writes both JSON evidence and a redacted support
-bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt` only for
-lab fixtures where flashed media is automatically booted before probing.
+the exact local `--base-image` and its `--image-sha256` as well. Any run that
+reuses even one node verifies that local artifact before flashing or probing and
+fails closed for missing or mismatched identity. A mixed flash/reuse run also
+requires the flashed and reused artifact digests to match. Reuse evidence proves
+the local artifact only, not the identity of an already-running node. Without a
+verified release-trust object on the HIL input, its trust state is recorded
+honestly as `checksum-only` rather than as an official-release claim.
+
+Pass `--gate-ip` or `--point-ip` only when the fleet IPs are not the active
+probe addresses. Flashing never auto-selects disks and will not write media
+unless a device, `--allow-flash`, and `--yes` are all present. The runner waits
+90-120 seconds after the operator confirms that flashed media is inserted and
+the nodes are booting, probes the node API, checks SSH where enabled, verifies
+mesh visibility and support codes, checks boot-report availability, optionally
+runs iperf3 throughput smoke, and writes both JSON evidence and a redacted
+support bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt`
+only for lab fixtures where flashed media is automatically booted before probing.
+
+HIL schema v2 records exact runner/source Git SHAs and whether that worktree was
+dirty. A dry run is synthetic evidence only: it is neither calibration nor
+physical acceptance. A successful physical HIL record is limited to its named
+gate/point pair and artifact identity; it does not establish simulation parity,
+calibration results, fleet-wide acceptance, or a general radio-range claim.
 
 Flashed media is sensitive until first boot completes: `provision.json` is
 written in cleartext on the boot volume until provisioning succeeds, and the

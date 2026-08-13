@@ -125,6 +125,21 @@ and Sigstore/cosign signature bundle. Custom local images and custom URLs are
 still allowed with an explicit SHA-256, but they are treated as
 checksum-only/user-supplied rather than official.
 
+Official manifest acceptance is fail closed. The manifest must explicitly use
+schema version 2 and status `current`; its release tag and `stable` or
+`candidate` channel must match the GitHub release. Missing, unknown, unsafe,
+superseded, and revoked dispositions are rejected.
+
+The downloader fetches the fixed
+`easymanet-image-release.json.sigstore.json` asset and verifies its signature
+over the exact manifest bytes before parsing any manifest metadata. The
+certificate must come from GitHub Actions for
+`the-Drunken-coder/easymanet-images/.github/workflows/image-release.yml` on
+`main`, running on a GitHub-hosted runner from a `workflow_dispatch` event.
+After that succeeds, the image artifact's separate GitHub provenance
+attestation must match the same repository and signer workflow. Neither check
+can override a rejected manifest disposition.
+
 The image release workflow generates release notes with OpenCode Go when the
 public image repository has an `OPENCODE_GO_API_KEY` secret. `OPENCODE_API_KEY`
 is also accepted for teams that keep one OpenCode key name across tools. The

@@ -15,16 +15,17 @@ from urllib.parse import urlparse
 from ._download_integrity import SHA256_PATTERN, normalize_sha256
 from .release_trust import (
     CUSTOM_TRUST_STATUS,
+    IMAGE_RELEASE_BUNDLE_ASSET,
+    IMAGE_RELEASE_MANIFEST_ASSET,
+    OFFICIAL_IMAGE_REPO,
     ReleaseTrust,
     custom_trust,
     trust_from_manifest,
     untrusted_release,
+    verify_release_manifest_bundle,
 )
 
-IMAGE_RELEASE_MANIFEST_ASSETS = {
-    "easymanet-image-release.json",
-    "easymanet-images.json",
-}
+IMAGE_RELEASE_MANIFEST_ASSETS = {IMAGE_RELEASE_MANIFEST_ASSET}
 CANDIDATE_TAG_RE = re.compile(r"^images-v\d+\.\d+\.\d+-candidate\.\d+$")
 
 _GITHUB_API_ERRORS = (
@@ -50,6 +51,7 @@ class ImageRef(NamedTuple):
     release_tag: str = ""
     image_status: str = "current"
     manifest_url: str = ""
+    manifest_signature_verified: bool = False
     expected_repo: str = ""
     attestation_subject_digest: str = ""
     warnings: tuple[str, ...] = ()
@@ -63,6 +65,7 @@ class ImageRef(NamedTuple):
             "release_tag": self.release_tag,
             "image_status": self.image_status,
             "manifest_url": self.manifest_url,
+            "manifest_signature_verified": self.manifest_signature_verified,
             "expected_repo": self.expected_repo,
             "attestation_subject_digest": self.attestation_subject_digest,
             "warnings": list(self.warnings),
@@ -125,12 +128,20 @@ def _check_github_release(repo: str, target: str, *, channel: str = "stable") ->
     for release in releases:
         if not release:
             continue
-        manifest_result = _pick_manifest_release_asset(release, target, expected_repo=repo)
-        if manifest_result:
-            if channel != "candidate" or manifest_result.channel == "candidate":
+        official = repo == OFFICIAL_IMAGE_REPO
+        if official:
+            manifest_result = _pick_manifest_release_asset(
+                release,
+                target,
+                expected_repo=OFFICIAL_IMAGE_REPO,
+                expected_channel=channel,
+            )
+            if manifest_result:
                 return manifest_result
         result = _pick_release_asset(release, target)
         if result:
+            if not official:
+                return result
             return result._replace(
                 source="official",
                 trust_status="untrusted",
@@ -159,15 +170,19 @@ def _pick_manifest_release_asset(
     target: str,
     *,
     expected_repo: str = "",
+    expected_channel: str = "stable",
 ) -> Optional[ImageRef]:
     assets = release.get("assets", [])
+    bundle_url = _asset_download_url(assets, IMAGE_RELEASE_BUNDLE_ASSET)
+    if not bundle_url:
+        return None
     for asset in assets:
         if asset.get("name") not in IMAGE_RELEASE_MANIFEST_ASSETS:
             continue
         manifest_url = asset.get("browser_download_url")
         if not manifest_url:
             continue
-        manifest = _fetch_release_manifest(manifest_url)
+        manifest = _fetch_release_manifest(manifest_url, bundle_url)
         if not manifest:
             continue
         ref = _image_ref_from_release_manifest(
@@ -176,21 +191,51 @@ def _pick_manifest_release_asset(
             target,
             release_version=str(release.get("tag_name", "") or ""),
             expected_repo=expected_repo,
+            expected_channel=expected_channel,
             manifest_url=manifest_url,
+            manifest_signature_verified=True,
         )
         if ref:
             return ref
     return None
 
 
-def _fetch_release_manifest(url: str) -> Optional[dict]:
+def _asset_download_url(assets: list[dict[str, Any]], name: str) -> str:
+    for asset in assets:
+        if asset.get("name") == name:
+            return str(asset.get("browser_download_url") or "")
+    return ""
+
+
+def _fetch_release_asset(url: str) -> Optional[bytes]:
     try:
         _validate_download_url(url)
         with _urlopen_with_retries(url, timeout=30) as resp:
-            return json.loads(resp.read().decode())
+            return resp.read()
     except _GITHUB_API_ERRORS as exc:
-        _debug_note(f"image release manifest lookup failed for {url}: {exc}")
+        _debug_note(f"image release trust asset lookup failed for {url}: {exc}")
         return None
+
+
+def _fetch_release_manifest(manifest_url: str, bundle_url: str) -> Optional[dict[str, Any]]:
+    manifest_bytes = _fetch_release_asset(manifest_url)
+    bundle_bytes = _fetch_release_asset(bundle_url)
+    if manifest_bytes is None or bundle_bytes is None:
+        return None
+    try:
+        verify_release_manifest_bundle(manifest_bytes, bundle_bytes)
+    except Exception as exc:  # noqa: BLE001 - every trust failure is fail-closed.
+        _debug_note(f"image release manifest signature verification failed: {exc}")
+        return None
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _debug_note(f"verified image release manifest is not valid JSON: {exc}")
+        return None
+    if not isinstance(manifest, dict):
+        _debug_note("verified image release manifest is not a JSON object")
+        return None
+    return manifest
 
 
 def _image_ref_from_release_manifest(
@@ -199,11 +244,15 @@ def _image_ref_from_release_manifest(
     target: str,
     release_version: str = "",
     expected_repo: str = "",
+    expected_channel: str = "stable",
     manifest_url: str = "",
+    manifest_signature_verified: bool = False,
 ) -> Optional[ImageRef]:
     if manifest.get("target") != target:
         return None
     artifact = manifest.get("artifact", {})
+    if not isinstance(artifact, dict):
+        return None
     filename = artifact.get("filename", "")
     sha256 = artifact.get("sha256", "")
     if not filename or not sha256:
@@ -225,9 +274,11 @@ def _image_ref_from_release_manifest(
                 manifest,
                 assets,
                 expected_repo=expected_repo,
+                expected_channel=expected_channel,
                 target=target,
                 release_tag=version,
                 manifest_url=manifest_url,
+                manifest_signature_verified=manifest_signature_verified,
             )
             return _image_ref(
                 version,
@@ -243,9 +294,11 @@ def _manifest_trust(
     assets: list[dict],
     *,
     expected_repo: str,
+    expected_channel: str,
     target: str,
     release_tag: str,
     manifest_url: str,
+    manifest_signature_verified: bool,
 ) -> ReleaseTrust:
     if not expected_repo:
         return custom_trust(channel=str(manifest.get("channel") or ""), release_tag=release_tag)
@@ -254,9 +307,11 @@ def _manifest_trust(
             manifest,
             assets=assets,
             expected_repo=expected_repo,
+            expected_channel=expected_channel,
             target=target,
             release_tag=release_tag,
             manifest_url=manifest_url,
+            manifest_signature_verified=manifest_signature_verified,
         )
     except Exception as exc:  # noqa: BLE001 - trust failures are returned as data.
         return untrusted_release(str(exc), manifest_url=manifest_url, release_tag=release_tag)
@@ -273,6 +328,7 @@ def _image_ref(version: str, url: str, sha256: str, *, trust: ReleaseTrust) -> I
         release_tag=trust.release_tag,
         image_status=trust.image_status,
         manifest_url=trust.manifest_url,
+        manifest_signature_verified=trust.manifest_signature_verified,
         expected_repo=trust.expected_repo,
         attestation_subject_digest=trust.attestation_subject_digest,
         warnings=trust.warnings,

@@ -57,14 +57,17 @@ easymanet flash \
 Steps:
 1. Validate config.
 2. Render `provision.json` for the selected node.
-3. Enforce disk safety checks (or require `--force`).
+3. Enforce disk safety checks (or require `--force`) and retain the checked
+   device-instance identity.
 4. Unmount all partitions of the target device.
-5. Stream (decompress if `.gz`) the image to the raw device via `dd`.
+5. Revalidate the same device instance, open it once, and stream (decompress if
+   `.gz`) the image through that bound handle.
 6. Wipe stale overlay data on partition 2 (when layout is detected; see
    [Security](#security) and [Stale overlay wipe](#stale-overlay-wipe)).
 7. Mount the FAT boot partition.
-8. Write `/easymanet/provision.json`.
-9. Unmount and eject.
+8. Atomically write and sync `/easymanet/provision.json` and any boot-command
+   update before replacing the previous file.
+9. Unmount and eject. An owned boot-volume cleanup failure makes the flash fail.
 
 ### Fleet roster changes
 
@@ -143,11 +146,14 @@ Wi-Fi.
 - `--yes` is required. Use `--dry-run` to preview.
 - `--force` overrides all blocking disk warnings (system disk, large
   fixed disk, device not in the default list).
+- `--force` does not override a device-instance change. If the selected path is
+  replaced or reused after the safety check, EasyMANET refuses to write.
 
 ### Post-flash
 
-After successful flash and boot-payload staging, the drive is ejected. Remove it
-and insert into the Raspberry Pi.
+After successful flash and boot-payload staging, the drive is ejected. With
+`--no-eject`, EasyMANET still unmounts the whole device and reports success only
+after that unmount succeeds. Remove it and insert it into the Raspberry Pi.
 
 ### Ethernet access by role
 
@@ -186,6 +192,8 @@ Same command as macOS. Streams the image with `gzip | dd` or `dd`.
   drive before retrying.
 - `--yes` is required.
 - `--force` overrides all blocking warnings.
+- `--force` never bypasses device-instance revalidation immediately before the
+  bound write.
 
 ### Permissions
 

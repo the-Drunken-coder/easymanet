@@ -128,12 +128,13 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_download_image(target, version, url, sha256, force=False, emit=None):
+    def fake_download_image(target, version, url, sha256, force=False, emit=None, *, trust):
         assert target == "rpi4-mm6108-spi"
         assert version == "images-v0.2.4"
         assert url == "https://example.test/openmanet.img.gz"
         assert sha256 == "a" * 64
         assert force is False
+        assert trust["source"] == "custom"
         image_path.write_bytes(b"firmware")
         if emit:
             emit({"type": "download_completed", "message": f"Saved: {image_path}", "path": str(image_path)})
@@ -156,6 +157,42 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
     assert result.plan["base_image"] == str(image_path)
     assert "download_completed" in [event.event_type for event in events]
     assert events[-1].event_type == "plan"
+
+
+def test_prepare_flash_workflow_rejects_legacy_downloader_without_trust(monkeypatch):
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    _guard_flash_execution_steps(monkeypatch)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        flash,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.4",
+            url="https://example.test/openmanet.img.gz",
+            sha256="a" * 64,
+        ),
+    )
+
+    def legacy_download_image(target, version, url, sha256, force=False, emit=None):
+        del target, version, url, sha256, force, emit
+        raise AssertionError("legacy downloader must not be called without trust")
+
+    monkeypatch.setattr(flash, "download_image", legacy_download_image)
+
+    result = flash.prepare_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            yes=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.IMAGE
+    assert "unexpected keyword argument 'trust'" in result.errors[0]
 
 
 def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):

@@ -1,13 +1,19 @@
 """Tests for boot-partition staging."""
 
 import json
+import os
 import plistlib
 import stat
 
+import pytest
+
 from easymanet.inject import (
+    InjectError,
+    _atomic_write_text,
     _cleanup_mount,
     _find_boot_mount,
     _find_boot_partition,
+    _fix_usb_boot_root,
     inject,
     inject_dry_run_info,
 )
@@ -231,7 +237,7 @@ def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
     assert all("cmdline.txt" not in path for path, _ok in results)
 
 
-def test_cleanup_mount_reports_failed_linux_unmount(monkeypatch, tmp_path, capsys):
+def test_cleanup_mount_propagates_failed_linux_unmount(monkeypatch, tmp_path):
     mount_point = tmp_path / "boot"
     mount_point.mkdir()
 
@@ -243,8 +249,91 @@ def test_cleanup_mount_reports_failed_linux_unmount(monkeypatch, tmp_path, capsy
     monkeypatch.setattr("easymanet.inject.is_linux", lambda: True)
     monkeypatch.setattr("easymanet.inject.subprocess.run", lambda *_a, **_k: Result())
 
-    _cleanup_mount("/dev/disk4", str(mount_point), True)
+    with pytest.raises(InjectError, match="busy"):
+        _cleanup_mount("/dev/disk4", str(mount_point), True)
 
-    captured = capsys.readouterr()
-    assert "umount failed" in captured.err
     assert mount_point.exists()
+
+
+def test_inject_propagates_owned_boot_volume_cleanup_failure(monkeypatch, tmp_path):
+    path = _write_config(tmp_path, VALID_CONFIG)
+    manifest = load_manifest(path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), True),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda *_args: (_ for _ in ()).throw(InjectError("owned volume is busy")),
+    )
+
+    with pytest.raises(InjectError, match="owned volume is busy"):
+        inject("/dev/disk4", manifest, "node01")
+
+
+def test_atomic_write_fsyncs_same_directory_temp_before_replace(monkeypatch, tmp_path):
+    target = tmp_path / "provision.json"
+    events = []
+    real_replace = os.replace
+
+    monkeypatch.setattr(
+        "easymanet.inject.os.fsync",
+        lambda _fd: events.append("fsync"),
+    )
+
+    def record_replace(source, destination):
+        source_path = os.fspath(source)
+        assert os.path.dirname(source_path) == os.fspath(tmp_path)
+        events.append("replace")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("easymanet.inject.os.replace", record_replace)
+
+    _atomic_write_text(target, "sensitive payload", mode=0o600)
+
+    assert target.read_text() == "sensitive payload"
+    assert events == ["fsync", "replace"]
+    assert not list(tmp_path.glob(".provision.json.*.tmp"))
+
+
+def test_atomic_write_replace_failure_preserves_destination_and_cleans_temp(
+    monkeypatch, tmp_path
+):
+    target = tmp_path / "provision.json"
+    target.write_text("previous payload")
+
+    monkeypatch.setattr(
+        "easymanet.inject.os.replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("replace failed")),
+    )
+
+    with pytest.raises(OSError, match="replace failed"):
+        _atomic_write_text(target, "new payload", mode=0o600)
+
+    assert target.read_text() == "previous payload"
+    assert not list(tmp_path.glob(".provision.json.*.tmp"))
+
+
+def test_cmdline_atomic_failure_preserves_original_and_cleans_temp(monkeypatch, tmp_path):
+    original = "console=tty1 root=/dev/sda2 rootwait\n"
+    cmdline = tmp_path / "cmdline.txt"
+    cmdline.write_text(original)
+    (tmp_path / "partuuid.txt").write_text("a1b2c3d4\n")
+    real_replace = os.replace
+
+    def fail_cmdline_replace(source, destination):
+        if os.fspath(destination) == os.fspath(cmdline):
+            raise OSError("cmdline replace failed")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("easymanet.inject.os.replace", fail_cmdline_replace)
+
+    with pytest.raises(OSError, match="cmdline replace failed"):
+        _fix_usb_boot_root(tmp_path)
+
+    assert cmdline.read_text() == original
+    assert (tmp_path / "cmdline.txt.easymanet.bak").read_text() == original
+    assert not list(tmp_path.glob(".cmdline.txt.*.tmp"))

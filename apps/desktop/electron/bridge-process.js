@@ -3,6 +3,11 @@ const { bridgeTimeoutMs, flashBridgeTimeoutMs } = require("./constants");
 const { bridgeCommand, bridgeEnv, bridgeWorkingDirectory } = require("./environment");
 const { parseBridgeJsonOutput, processBridgeStreamBuffer, processBridgeStreamLine } = require("./stream");
 
+const activeBridgeProcesses = new Set();
+const processExitPollMs = 25;
+const terminationGraceMs = 5000;
+let bridgeShutdownStarted = false;
+
 function runBridge(args, options = {}) {
   return runBridgeJson(args, { timeoutMs: options.timeoutMs || bridgeTimeoutMs });
 }
@@ -50,6 +55,10 @@ function runBridgeStreaming(args, options = {}) {
 
 function runBridgeProcess(args, handlers) {
   return new Promise((resolve) => {
+    if (bridgeShutdownStarted) {
+      resolve({ ok: false, errors: ["EasyMANET bridge is shutting down"] });
+      return;
+    }
     let bridge;
     try {
       bridge = bridgeCommand(args);
@@ -57,11 +66,18 @@ function runBridgeProcess(args, handlers) {
       resolve({ ok: false, errors: [error.message] });
       return;
     }
-    const child = spawn(bridge.command, bridge.args, {
-      cwd: bridgeWorkingDirectory(),
-      env: bridgeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = spawn(bridge.command, bridge.args, {
+        cwd: bridgeWorkingDirectory(),
+        env: bridgeEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      resolve({ ok: false, errors: [error.message] });
+      return;
+    }
     const state = {
       stdout: "",
       fullStdout: "",
@@ -69,20 +85,73 @@ function runBridgeProcess(args, handlers) {
       finalPayload: null,
     };
     let settled = false;
+    let closed = false;
+    let timer = null;
+    let resolveClose;
+    const closePromise = new Promise((closeResolve) => {
+      resolveClose = closeResolve;
+    });
+    const operation = {
+      child,
+      closePromise,
+      terminationGraceMs: handlers.terminationGraceMs || terminationGraceMs,
+      terminating: null,
+    };
+    activeBridgeProcesses.add(operation);
 
     const finish = (payload) => {
       if (settled) {
         return;
       }
       settled = true;
-      clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
+      activeBridgeProcesses.delete(operation);
       resolve(payload);
     };
 
+    const markClosed = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      resolveClose();
+    };
+
+    const terminate = (payload) => {
+      if (settled) {
+        return Promise.resolve();
+      }
+      if (!operation.terminating) {
+        operation.terminating = terminateBridgeProcessTree(
+          child,
+          closePromise,
+          operation.terminationGraceMs,
+        )
+          .then(() => finish(payload))
+          .catch((error) => {
+            operation.terminating = null;
+            throw error;
+          });
+      }
+      return operation.terminating;
+    };
+    operation.terminate = terminate;
+
+    const terminateInBackground = (payload) => {
+      terminate(payload).catch((error) => {
+        const prefix = state.stderr ? "\n" : "";
+        state.stderr += `${prefix}Bridge process cleanup failed: ${error.message}`;
+      });
+    };
+
     const timeoutMs = handlers.timeoutMs;
-    const timer = setTimeout(() => {
-      child.kill();
-      finish({ ok: false, errors: [`EasyMANET bridge timed out after ${timeoutMs / 1000}s`] });
+    timer = setTimeout(() => {
+      terminateInBackground({
+        ok: false,
+        errors: [`EasyMANET bridge timed out after ${timeoutMs / 1000}s`],
+      });
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
@@ -94,17 +163,125 @@ function runBridgeProcess(args, handlers) {
       state.stderr += chunk.toString();
     });
     child.on("error", (error) => {
-      finish({ ok: false, errors: [error.message] });
+      if (!child.pid) {
+        markClosed();
+        finish({ ok: false, errors: [error.message] });
+        return;
+      }
+      terminateInBackground({ ok: false, errors: [error.message] });
     });
     child.on("close", () => {
-      handlers.onClose(state, finish);
+      markClosed();
+      if (operation.terminating) {
+        return;
+      }
+      try {
+        handlers.onClose(state, finish);
+      } catch (error) {
+        finish({ ok: false, errors: [error.message] });
+      }
     });
   });
 }
 
+async function shutdownActiveBridgeProcesses() {
+  bridgeShutdownStarted = true;
+  while (activeBridgeProcesses.size > 0) {
+    const operations = [...activeBridgeProcesses];
+    await Promise.all(
+      operations.map((operation) => operation.terminate({
+        ok: false,
+        errors: ["EasyMANET bridge stopped during application shutdown"],
+      })),
+    );
+  }
+}
+
+function hasActiveBridgeProcesses() {
+  return activeBridgeProcesses.size > 0;
+}
+
+async function terminateBridgeProcessTree(child, closePromise, graceMs) {
+  const pid = child.pid;
+  if (!pid) {
+    await closePromise;
+    return;
+  }
+
+  if (process.platform === "win32") {
+    child.kill("SIGTERM");
+    if (!(await waitForClose(closePromise, graceMs))) {
+      child.kill("SIGKILL");
+      await closePromise;
+    }
+    return;
+  }
+
+  signalProcessGroup(pid, "SIGTERM");
+  if (!(await waitForProcessGroupExit(pid, graceMs))) {
+    signalProcessGroup(pid, "SIGKILL");
+    await waitForProcessGroupExit(pid);
+  }
+  await closePromise;
+  await waitForProcessGroupExit(pid);
+}
+
+function signalProcessGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs = null) {
+  const deadline = timeoutMs === null ? null : Date.now() + timeoutMs;
+  while (processGroupExists(pid)) {
+    if (deadline !== null && Date.now() >= deadline) {
+      return false;
+    }
+    await delay(processExitPollMs);
+  }
+  return true;
+}
+
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") {
+      return false;
+    }
+    if (error.code === "EPERM") {
+      return true;
+    }
+    throw error;
+  }
+}
+
+async function waitForClose(closePromise, timeoutMs) {
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const closed = closePromise.then(() => true);
+  const result = await Promise.race([closed, timedOut]);
+  clearTimeout(timer);
+  return result;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 module.exports = {
+  hasActiveBridgeProcesses,
   runBridge,
   runBridgeJson,
   runBridgeProcess,
   runBridgeStreaming,
+  shutdownActiveBridgeProcesses,
 };

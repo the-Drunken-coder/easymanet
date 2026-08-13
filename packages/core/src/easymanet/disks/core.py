@@ -4,6 +4,7 @@ import os
 import stat
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ._common import (
@@ -24,6 +25,97 @@ def _is_block_device(path: str) -> bool:
         return stat.S_ISBLK(os.stat(path).st_mode)
     except OSError:
         return False
+
+
+@dataclass(frozen=True)
+class DeviceIdentity:
+    """Identity of one OS device node and its current attachment instance."""
+
+    path: str
+    filesystem_device: int
+    inode: int
+    raw_device: int
+    changed_ns: int
+    created_ns: int
+    generation: int
+    diskseq: str = ""
+
+
+def capture_device_identity(path: str) -> DeviceIdentity:
+    return _identity_from_stat(path, os.stat(path))
+
+
+def assert_device_identity(expected: DeviceIdentity) -> None:
+    try:
+        actual = capture_device_identity(expected.path)
+    except OSError as exc:
+        raise ValueError(
+            f"Device identity could not be revalidated for {expected.path}."
+        ) from exc
+    if actual != expected:
+        raise ValueError(
+            f"Device identity changed for {expected.path}; refusing to write."
+        )
+
+
+def open_device_for_write(
+    expected: DeviceIdentity,
+    *,
+    companions: Tuple[DeviceIdentity, ...] = (),
+) -> int:
+    """Open the expected node once and prove the path still names that object."""
+    identities = (expected, *companions)
+    for identity in identities:
+        assert_device_identity(identity)
+
+    flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(expected.path, flags)
+    try:
+        if _identity_from_stat(expected.path, os.fstat(fd)) != expected:
+            raise ValueError(
+                f"Opened device does not match the checked identity for {expected.path}."
+            )
+        for identity in identities:
+            assert_device_identity(identity)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _identity_from_stat(path: str, result: os.stat_result) -> DeviceIdentity:
+    diskseq = _linux_diskseq(result)
+    if (
+        sys.platform.startswith("linux")
+        and stat.S_ISBLK(result.st_mode)
+        and not diskseq
+    ):
+        raise OSError(f"Could not read a stable Linux disk sequence for {path}.")
+    return DeviceIdentity(
+        path=path,
+        filesystem_device=result.st_dev,
+        inode=result.st_ino,
+        raw_device=result.st_rdev,
+        changed_ns=result.st_ctime_ns,
+        created_ns=int(getattr(result, "st_birthtime", 0) * 1_000_000_000),
+        generation=getattr(result, "st_gen", 0),
+        diskseq=diskseq,
+    )
+
+
+def _linux_diskseq(result: os.stat_result) -> str:
+    if not sys.platform.startswith("linux") or not stat.S_ISBLK(result.st_mode):
+        return ""
+    major = os.major(result.st_rdev)
+    minor = os.minor(result.st_rdev)
+    try:
+        with open(
+            f"/sys/dev/block/{major}:{minor}/diskseq",
+            encoding="utf-8",
+        ) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
 
 
 def list_disks(include_all: bool = False) -> List[DiskInfo]:

@@ -622,9 +622,17 @@ function signalFileFor(pidFile) {
 function processExists(pid) {
   try {
     process.kill(pid, 0);
+    if (process.platform === "linux") {
+      const processStat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const commandEnd = processStat.lastIndexOf(")");
+      const state = processStat.slice(commandEnd + 2).split(" ")[0];
+      if (state === "Z" || state === "X") {
+        return false;
+      }
+    }
     return true;
   } catch (error) {
-    if (error.code === "ESRCH") {
+    if (error.code === "ENOENT" || error.code === "ESRCH") {
       return false;
     }
     throw error;

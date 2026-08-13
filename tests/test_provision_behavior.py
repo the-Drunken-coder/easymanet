@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from easymanet.manifest import load_manifest
 from easymanet.render import render_dict
@@ -153,7 +154,6 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
         ("unsupported target", _policy_parity_config(target="rpi5"), False),
         ("unsupported bandwidth", _policy_parity_config(bandwidth_mhz=3), False),
         ("untested US channel", _policy_parity_config(channel=36), False),
-        ("non-numeric channel", _policy_parity_config(channel="abc"), False),
     ],
 )
 def test_python_validation_and_shell_provision_policy_parity(
@@ -552,6 +552,128 @@ def test_provision_gate_node_smoke(tmp_path):
     provisioned = (prefix / "etc" / "easymanet" / "provisioned").read_text()
     assert "hostname: gate01" in provisioned
     assert "role: gate" in provisioned
+
+
+def test_host_and_openwrt_preserve_safe_yaml_scalar_content(tmp_path):
+    scalar = "  ops 'east' / west \\ \"quoted\"  "
+    fleet = {
+        "version": 1,
+        "mesh": {
+            "id": scalar,
+            "password": scalar,
+            "channel": 42,
+            "bandwidth_mhz": 2,
+            "country": "US",
+        },
+        "defaults": {
+            "target": "rpi4-mm6108-spi",
+            "local_ap": {"enabled": False},
+            "management": {
+                "root_password_hash": "",
+                "ssh_authorized_keys": [],
+            },
+        },
+        "nodes": {
+            scalar: {
+                "role": "gate",
+                "hostname": "gate01",
+                "ip": "10.41.1.1",
+                "gateway": {
+                    "enabled": True,
+                    "uplink_interface": "eth0",
+                },
+            }
+        },
+    }
+    fleet_path = tmp_path / "fleet.yml"
+    fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False))
+    manifest = load_manifest(str(fleet_path))
+    validation = validate(manifest, node_name=scalar)
+    assert validation.valid, validation.errors
+
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    openmanetd_config = _write_openmanetd_config_stub(prefix)
+    provision_data = render_dict(manifest, scalar)
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    rendered = yaml.safe_load(openmanetd_config.read_text())
+    assert rendered["mesh"]["id"] == scalar
+    assert rendered["mesh"]["password"] == scalar
+    assert rendered["node"]["name"] == scalar
+
+
+def test_host_and_openwrt_preserve_point_management_wifi_semantics(tmp_path):
+    fleet = {
+        "version": 1,
+        "mesh": {
+            "id": "field-mesh",
+            "password": "mesh-password",
+            "channel": 42,
+            "bandwidth_mhz": 2,
+            "country": "US",
+        },
+        "defaults": {
+            "target": "rpi4-mm6108-spi",
+            "local_ap": {"enabled": False},
+            "management": {
+                "root_password_hash": "",
+                "ssh_authorized_keys": [],
+            },
+        },
+        "nodes": {
+            "gate01": {
+                "role": "gate",
+                "hostname": "gate01",
+                "ip": "10.41.1.1",
+                "gateway": {"uplink_interface": "eth0"},
+            },
+            "point01": {
+                "hostname": "point01",
+                "ip": "10.41.2.1",
+                "gateway": {
+                    "uplink_interface": "wifi",
+                    "wifi": {
+                        "enabled": True,
+                        "ssid": "operator-wifi",
+                        "password": "operator-password",
+                    },
+                },
+            },
+        },
+    }
+    fleet_path = tmp_path / "fleet.yml"
+    fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False))
+    manifest = load_manifest(str(fleet_path))
+    validation = validate(manifest, node_name="point01")
+    assert validation.valid, validation.errors
+
+    provision_data = render_dict(manifest, "point01")
+    gateway = provision_data["node"]["gateway"]
+    assert gateway["enabled"] is False
+    assert gateway["wifi"]["enabled"] is True
+
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    env = _harness_env(uci_state)
+    assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "client"
+    assert _uci_get(uci_state, "wireless.wan0.mode", env) == "sta"
+    assert _uci_get(uci_state, "network.wan.proto", env) == "dhcp"
+    assert _uci_get(uci_state, "dhcp.ahwlan.ignore", env) == "1"
+    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
+    assert _uci_get(uci_state, "firewall.mesh_wan_forwarding.src", env) == ""
+    assert _uci_get(
+        uci_state,
+        "mesh11sd.mesh_params.mesh_gate_announcements",
+        env,
+    ) == "0"
 
 
 def test_provision_point_node_disables_ssh(tmp_path):
@@ -1950,10 +2072,10 @@ def test_provision_sets_openmanetd_mesh_interface_to_brahwlan(tmp_path):
     result = _run_provision(prefix, _point_provision_json(), uci_state)
     assert result.returncode == 0, result.stderr + result.stdout
 
-    text = config.read_text()
-    assert 'meshNetInterface: "br-ahwlan"' in text
-    assert 'role: "point"' in text
-    assert 'ip: "10.41.2.1"' in text
+    payload = yaml.safe_load(config.read_text())
+    assert payload["meshNetInterface"] == "br-ahwlan"
+    assert payload["node"]["role"] == "point"
+    assert payload["node"]["ip"] == "10.41.2.1"
     assert (config.stat().st_mode & 0o777) == 0o600
 
 
@@ -2152,26 +2274,6 @@ def test_provision_non_eth0_uplink_configures_wan(tmp_path):
     assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0", "eth0"}
 
 
-def test_provision_disabled_gate_still_uses_eth0_as_wan(tmp_path):
-    prefix = tmp_path / "root"
-    uci_state = tmp_path / "uci-state"
-    _seed_wireless_radios(uci_state)
-    provision_data = _gate_provision_json()
-    provision_data["node"]["gateway"] = {
-        "enabled": False,
-        "uplink_interface": "eth0",
-    }
-
-    result = _run_provision(prefix, provision_data, uci_state)
-    assert result.returncode == 0, result.stderr + result.stdout
-
-    env = _harness_env(uci_state)
-    assert _uci_get(uci_state, "network.bat0.gw_mode", env) == "server"
-    assert _uci_get(uci_state, "network.wan.device", env) == "eth0"
-    assert _uci_get(uci_state, "network.wan.ifname", env) == "eth0"
-    assert _bridge_ports(uci_state, "br-ahwlan", env) == {"bat0"}
-
-
 def test_provision_wifi_uplink_keeps_wan_on_wifi_sta_path(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
@@ -2227,10 +2329,12 @@ def test_provision_requires_node_ip(tmp_path):
         (("mesh", "channel"), "mesh.channel"),
         (("mesh", "bandwidth_mhz"), "mesh.bandwidth_mhz"),
         (("mesh", "country"), "mesh.country"),
+        (("node", "name"), "node.name"),
         (("node", "hostname"), "node.hostname"),
         (("node", "role"), "node.role"),
         (("node", "ip"), "node.ip"),
         (("node", "target"), "node.target"),
+        (("node", "gateway", "enabled"), "node.gateway.enabled"),
     ],
 )
 def test_provision_reports_missing_required_fields(tmp_path, field_path, expected):
@@ -2271,6 +2375,55 @@ def test_provision_rejects_invalid_required_values(tmp_path, field_path, value, 
 
     assert result.returncode != 0
     assert expected in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("gateway", "expected"),
+    [
+        (
+            {"enabled": False, "uplink_interface": "eth0"},
+            "node.gateway.enabled must match node.role",
+        ),
+        (
+            {
+                "enabled": True,
+                "uplink_interface": "eth0",
+                "wifi": {
+                    "enabled": True,
+                    "ssid": "upstream",
+                    "password": "upstream-password",
+                },
+            },
+            "node.gateway.wifi.enabled requires node.gateway.uplink_interface wifi",
+        ),
+        (
+            {"enabled": True, "uplink_interface": "wifi"},
+            "node.gateway.uplink_interface wifi requires node.gateway.wifi.enabled",
+        ),
+        (
+            {
+                "enabled": True,
+                "uplink_interface": "wifi",
+                "wifi": {"enabled": True, "ssid": "upstream"},
+            },
+            "gateway.wifi.enabled requires gateway.wifi.ssid and gateway.wifi.password",
+        ),
+    ],
+)
+def test_provision_rejects_gateway_contract_mismatches(tmp_path, gateway, expected):
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+    provision_data = _gate_provision_json()
+    provision_data["node"]["gateway"] = gateway
+    initial_uci_state = uci_state.read_text()
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode != 0
+    assert expected in result.stdout
+    assert uci_state.read_text() == initial_uci_state
+    assert not (prefix / "etc" / "easymanet" / "provisioned").exists()
 
 
 def _delete_nested(data: dict, field_path: tuple[str, ...]) -> None:

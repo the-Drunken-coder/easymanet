@@ -95,6 +95,14 @@ def test_redact_provision_for_display_hides_secret_values():
                     "enabled": True,
                     "ssid": "uplink",
                     "password": "wifi-secret",
+                    "client_secret": "unknown-secret",
+                    "oauth_token": "unknown-token",
+                    "private_key": "unknown-private-key",
+                    "api_key": "unknown-api-key",
+                    "access_key": "unknown-access-key",
+                    "credentials": "unknown-credentials",
+                    "api_tokens": ["unknown-token"],
+                    "secret_config": {"value": "unknown-secret"},
                 }
             },
         },
@@ -110,6 +118,14 @@ def test_redact_provision_for_display_hides_secret_values():
     assert redacted["mesh"]["password"] == REDACTED_VALUE
     assert redacted["node"]["local_ap"]["password"] == REDACTED_VALUE
     assert redacted["node"]["gateway"]["wifi"]["password"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["client_secret"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["oauth_token"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["private_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["api_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["access_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["credentials"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["api_tokens"] == [REDACTED_VALUE]
+    assert redacted["node"]["gateway"]["wifi"]["secret_config"] == REDACTED_VALUE
     assert redacted["management"]["root_password_hash"] == REDACTED_VALUE
     assert redacted["management"]["ssh_authorized_keys"] == [
         REDACTED_VALUE,
@@ -117,6 +133,14 @@ def test_redact_provision_for_display_hides_secret_values():
     ]
     assert redacted["management"]["ssh_enabled"] is True
     assert provision["mesh"]["password"] == "mesh-secret"
+
+
+def test_redact_provision_hides_malformed_known_secret_fields():
+    provision = {"management": {"ssh_authorized_keys": "malformed-secret"}}
+
+    redacted = redact_provision_for_display(provision)
+
+    assert redacted["management"]["ssh_authorized_keys"] == REDACTED_VALUE
 
 
 def test_flash_ssh_flags_mutually_exclusive():

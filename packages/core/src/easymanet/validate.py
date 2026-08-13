@@ -13,7 +13,6 @@ from .provision import (
     GatewayConfig,
     LocalApConfig,
     eth0_mesh_side,
-    provision_json_bool,
     resolve_node_model,
 )
 
@@ -99,12 +98,8 @@ def validate_ssh_key(key: str) -> Optional[str]:
 
 
 def _as_int(value: object) -> Optional[int]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
+    if type(value) is int:
         return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
     return None
 
 
@@ -207,7 +202,7 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         elif role == "gate":
             gate_nodes.append(name)
 
-        target = node.get("target", defaults.get("target"))
+        target = node.get("target", defaults.get("target", MM6108_TARGET))
         if target not in VALID_TARGETS:
             result.add_error(
                 f"Node '{name}': target must be one of {sorted(VALID_TARGETS)}, got '{target}'"
@@ -253,9 +248,17 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
         if isinstance(manifest.defaults, dict):
             resolved = resolve_node_model(manifest, name)
             _validate_local_ap(result, name, resolved.local_ap)
+            _validate_gateway_semantics(
+                result,
+                name,
+                str(role),
+                default_gateway,
+                node_gateway if isinstance(node_gateway, dict) else {},
+                resolved.gateway,
+            )
             if str(resolved.role) == "gate":
-                uplink = resolved.gateway.uplink_interface
-                if not uplink:
+                gateway_input = {**default_gateway, **node_gateway}
+                if not gateway_input.get("uplink_interface"):
                     result.add_warning(
                         f"Node '{name}': gate role without gateway.uplink_interface set"
                     )
@@ -364,7 +367,9 @@ def _targets_for_mesh_validation(
         node = nodes.get(name)
         if not isinstance(node, dict):
             continue
-        targets.add(str(node.get("target", defaults.get("target", ""))))
+        targets.add(
+            str(node.get("target", defaults.get("target", MM6108_TARGET)))
+        )
     return targets
 
 
@@ -373,7 +378,7 @@ def _validate_local_ap(
     node_label: str,
     local_ap: LocalApConfig,
 ) -> None:
-    if not provision_json_bool(local_ap.enabled):
+    if not local_ap.enabled:
         return
     password = local_ap.password
     if not password:
@@ -396,7 +401,7 @@ def _validate_gateway_wifi(
     gateway: GatewayConfig,
 ) -> None:
     wifi = gateway.wifi
-    if wifi is None or not provision_json_bool(wifi.enabled):
+    if wifi is None or not wifi.enabled:
         return
     ssid = wifi.ssid
     password = wifi.password
@@ -439,6 +444,36 @@ def _warn_point_gateway_wifi(
         f"Node '{node_label}': gateway.wifi.enabled on a point will expose "
         "SSH on upstream Wi-Fi if SSH is enabled during flash"
     )
+
+
+def _validate_gateway_semantics(
+    result: ValidationResult,
+    node_label: str,
+    role: str,
+    default_gateway: dict,
+    node_gateway: dict,
+    gateway: GatewayConfig,
+) -> None:
+    authored = {**default_gateway, **node_gateway}
+    expected_enabled = role == "gate"
+    if "enabled" in authored and authored["enabled"] is not expected_enabled:
+        result.add_error(
+            f"Node '{node_label}': gateway.enabled must match role '{role}' "
+            f"({str(expected_enabled).lower()})"
+        )
+
+    wifi = gateway.wifi
+    wifi_enabled = bool(wifi and wifi.enabled)
+    if wifi_enabled and gateway.uplink_interface != "wifi":
+        result.add_error(
+            f"Node '{node_label}': gateway.wifi.enabled requires "
+            "gateway.uplink_interface: wifi"
+        )
+    if not wifi_enabled and gateway.uplink_interface == "wifi":
+        result.add_error(
+            f"Node '{node_label}': gateway.uplink_interface: wifi requires "
+            "gateway.wifi.enabled: true"
+        )
 
 
 def resolve_node(manifest: Manifest, node_name: str) -> dict:

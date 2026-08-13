@@ -1,5 +1,6 @@
 """Tests for manifest loading and parsing."""
 
+from datetime import date
 import os
 import tempfile
 
@@ -53,6 +54,17 @@ def _write_config(content: str) -> str:
     with os.fdopen(fd, "w") as f:
         f.write(content)
     return path
+
+
+def _write_data(data: dict) -> str:
+    return _write_config(yaml.safe_dump(data, sort_keys=False))
+
+
+def _set_nested(data: dict, path: tuple[str, ...], value: object) -> None:
+    current = data
+    for part in path[:-1]:
+        current = current.setdefault(part, {})
+    current[path[-1]] = value
 
 
 def test_load_valid_config():
@@ -150,4 +162,84 @@ def test_defaults_access():
     m = load_manifest(path)
     assert m.get_default("target") == "rpi4-mm6108-spi"
     assert m.get_default("nonexistent", "fallback") == "fallback"
+    os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    "mapping_path",
+    [
+        (),
+        ("mesh",),
+        ("defaults",),
+        ("defaults", "local_ap"),
+        ("defaults", "management"),
+        ("nodes", "node01"),
+        ("nodes", "node01", "gateway"),
+        ("nodes", "node01", "gateway", "wifi"),
+    ],
+)
+def test_manifest_rejects_unknown_fields_at_every_level(mapping_path):
+    data = yaml.safe_load(VALID_CONFIG)
+    current = data
+    for part in mapping_path:
+        current = current.setdefault(part, {})
+    current["api_token"] = "must-not-pass-through"
+    path = _write_data(data)
+
+    with pytest.raises(ManifestError, match="unsupported field 'api_token'"):
+        load_manifest(path)
+    os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "expected"),
+    [
+        (("version",), True, "version must be an integer"),
+        (("mesh", "id"), 123, "mesh.id must be a string"),
+        (("mesh", "password"), ["secret"], "mesh.password must be a string"),
+        (("mesh", "channel"), "42", "mesh.channel must be an integer"),
+        (
+            ("defaults", "local_ap", "enabled"),
+            "true",
+            "defaults.local_ap.enabled must be a boolean",
+        ),
+        (
+            ("defaults", "management", "root_password_hash"),
+            {"hash": "value"},
+            "root_password_hash must be a string",
+        ),
+        (("nodes", "node01", "role"), ["gate"], "role must be a string"),
+        (("nodes", "node01", "hostname"), 123, "hostname must be a string"),
+        (
+            ("nodes", "node01", "gateway", "wifi"),
+            ["enabled"],
+            "gateway.wifi must be a mapping",
+        ),
+        (("mesh", "id"), date(2026, 8, 13), "mesh.id must be a string"),
+    ],
+)
+def test_manifest_rejects_malformed_scalar_types(field_path, value, expected):
+    data = yaml.safe_load(VALID_CONFIG)
+    _set_nested(data, field_path, value)
+    path = _write_data(data)
+
+    with pytest.raises(ManifestError, match=expected):
+        load_manifest(path)
+    os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["line one\nline two", "tab\tvalue", "nul\0value", "next\u0085line"],
+)
+def test_manifest_rejects_control_characters(value):
+    data = yaml.safe_load(VALID_CONFIG)
+    data["mesh"]["id"] = value
+    path = _write_data(data)
+
+    with pytest.raises(
+        ManifestError,
+        match="mesh.id must not contain control or line-separator characters",
+    ):
+        load_manifest(path)
     os.unlink(path)

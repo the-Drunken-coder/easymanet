@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -1386,6 +1387,75 @@ def test_desktop_server_bool_payload_parses_false_strings():
     assert server._bool_payload("No") is False
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.9"])
+def test_desktop_server_accepts_loopback_hosts(host):
+    assert server._loopback_host(host) == host
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::", "::1", "localhost"])
+def test_desktop_server_rejects_non_loopback_hosts(host):
+    with pytest.raises(server.typer.BadParameter, match="loopback"):
+        server._loopback_host(host)
+
+
+def test_desktop_server_limits_and_structures_invalid_request_bodies():
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": str(server.MAX_REQUEST_BODY_BYTES + 1)}
+    handler.rfile = io.BytesIO()
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [
+        (
+            {"ok": False, "errors": ["Request body exceeds the 1 MiB limit."]},
+            413,
+        )
+    ]
+
+
+def test_desktop_server_rejects_invalid_json_without_detail_leakage():
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": "1"}
+    handler.rfile = io.BytesIO(b"{")
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [({"ok": False, "errors": ["Request body must be valid JSON."]}, 400)]
+
+
+def test_desktop_server_support_bundle_uses_only_default_diagnostics_output(monkeypatch):
+    captured_kwargs = {}
+
+    class FakeSupportBundleResult:
+        def to_dict(self):
+            return {"ok": True, "path": "/workspace/Diagnostics/support.zip"}
+
+    def fake_create_support_bundle(**kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeSupportBundleResult()
+
+    monkeypatch.setattr(server, "create_support_bundle", fake_create_support_bundle)
+
+    payload = server._fallback_support_bundle_payload(
+        {"config": "field", "node": "point01", "include_disks": "true"}
+    )
+
+    assert payload["ok"] is True
+    assert captured_kwargs == {
+        "config": "field",
+        "node": "point01",
+        "include_disks": True,
+    }
+    with pytest.raises(ValueError, match="local Diagnostics folder"):
+        server._fallback_support_bundle_payload({"output": "/tmp/support.zip"})
+
+
 def test_desktop_bridge_support_bundle_reports_errors(monkeypatch, capsys):
     def fail_create_support_bundle(**_kwargs):
         raise ValueError("support export failed")
@@ -2003,7 +2073,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
-    assert "meshRadioCard" in render_js.read_text()
+    assert "meshNodeRow" in render_js.read_text()
+    assert "meshLinkRow" in render_js.read_text()
     assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
     assert "untrusted official" in render_js.read_text()
@@ -2014,7 +2085,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "mesh-scanning" in styles.read_text()
     assert "mesh-grid" in styles.read_text()
     assert "topology-view" in styles.read_text()
-    assert "topology-link" in styles.read_text()
+    assert "data-table" in styles.read_text()
     assert "@media print" in styles.read_text()
 
 
@@ -2159,6 +2230,59 @@ def test_electron_shell_files_exist():
     build_text = (electron / "scripts" / "build-bridge.py").read_text()
     assert '"easymanet_cli"' not in build_text
     assert 'ROOT / "apps" / "cli" / "src"' not in build_text
+
+
+def test_elevated_flash_staging_failure_removes_its_root():
+    root = Path(__file__).resolve().parents[1]
+    elevated_flash = root / "apps" / "desktop" / "electron" / "elevated-flash.js"
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("node is required for elevated flash staging test")
+
+    script = """
+const assert = require("node:assert/strict");
+const Module = require("node:module");
+const fs = require("node:fs");
+const originalLoad = Module._load;
+Module._load = function(request, parent, isMain) {
+  if (request === "electron") {
+    return { app: { isPackaged: false, getPath: () => "/tmp" } };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
+const originalMkdtempSync = fs.mkdtempSync;
+const originalCopyFileSync = fs.copyFileSync;
+let stageRoot = "";
+fs.mkdtempSync = (...args) => {
+  stageRoot = originalMkdtempSync(...args);
+  return stageRoot;
+};
+fs.copyFileSync = () => {
+  throw new Error("intentional staging copy failure");
+};
+try {
+  const { stageElevatedFlashInputs } = require(process.argv[1]);
+  assert.throws(
+    () => stageElevatedFlashInputs({ config: "/tmp/fleet.yml" }, {}),
+    /intentional staging copy failure/
+  );
+  assert.notEqual(stageRoot, "");
+  assert.equal(fs.existsSync(stageRoot), false);
+} finally {
+  fs.mkdtempSync = originalMkdtempSync;
+  fs.copyFileSync = originalCopyFileSync;
+  if (stageRoot && fs.existsSync(stageRoot)) {
+    fs.rmSync(stageRoot, { recursive: true, force: true });
+  }
+}
+"""
+
+    subprocess.run(
+        [node_bin, "-e", script, str(elevated_flash)],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
 
 
 def test_electron_check_formats_empty_bridge_failure(tmp_path):

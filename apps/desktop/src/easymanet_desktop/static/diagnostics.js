@@ -4,7 +4,7 @@
   const { nativeApi, postJson, errorDetail, errorMessage } = window.EMApi;
 
   const diagnosticsForm = $("diagnostics-form");
-  const diagnosticsStatusChip = $("diagnostics-status-chip");
+  const diagnosticsStatus = $("diagnostics-status");
   const diagnosticsConfigSource = $("diagnostics-config-source");
   const diagnosticsRun = $("diagnostics-run");
   const diagnosticsExport = $("diagnostics-export");
@@ -132,8 +132,9 @@
   }
 
   function setDiagnosticsStatus(tone, label) {
-    diagnosticsStatusChip.textContent = label;
-    diagnosticsStatusChip.className = `chip ${tone}`;
+    diagnosticsStatus.textContent = label;
+    diagnosticsStatus.className = "status-text";
+    diagnosticsStatus.dataset.tone = tone;
   }
 
   window.EMDiagnostics = {

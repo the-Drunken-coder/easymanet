@@ -30,15 +30,15 @@
     return `${rendered} ${units[unit]}`;
   }
 
-  function chip(tone, text) {
-    return `<span class="chip ${safeTone(tone)}">${escapeHtml(text)}</span>`;
+  function statusText(tone, text) {
+    return `<span class="status-text" data-tone="${safeTone(tone)}">${escapeHtml(text)}</span>`;
   }
 
   function safeTone(tone) {
     return ALLOWED_TONES.has(tone) ? tone : "subtle";
   }
 
-  function imageItem(target, image) {
+  function imageRow(target, image) {
     const cached = Boolean(image.cached_path) && image.cache_present !== false;
     const updateAvailable = Boolean(image.update_available);
     const installing = Boolean(image.installing);
@@ -56,68 +56,61 @@
         : source === "custom" || trustStatus === "checksum-only"
           ? "checksum-only custom"
           : cached ? "checksum-only" : "needs download";
-    const lines = [
-      `<div class="item-top"><span class="item-name mono">${escapeHtml(target)}</span>${chip(updateAvailable ? "warn" : cached ? "ok" : "warn", updateAvailable ? "update available" : cached ? "cached" : "will download")}</div>`,
-      `<div class="meta-line">${escapeHtml(image.version || "unversioned")}</div>`,
-      `<div class="meta-line">${chip(trustStatus === "verified" ? "ok" : trustStatus === "untrusted" ? "bad" : cached ? "warn" : "subtle", trustLabel)}</div>`,
-    ];
+    const evidence = [];
     if (updateAvailable) {
-      lines.push(`
-        <div class="image-update-row">
-          <span class="image-action">new image available: ${escapeHtml(image.latest_version || "latest")}</span>
-          <button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing || anyInstallRunning ? " disabled" : ""}>${installing ? "Installing..." : "Install Update"}</button>
-        </div>
-      `);
+      evidence.push(`new image available: ${escapeHtml(image.latest_version || "latest")}`);
     }
     if (imageStatus === "superseded" || imageStatus === "unsafe") {
-      lines.push(`<div class="meta-line image-action">warning: ${escapeHtml(imageStatus)}</div>`);
+      evidence.push(`warning: ${escapeHtml(imageStatus)}`);
     }
     for (const warning of image.warnings || []) {
-      lines.push(`<div class="meta-line image-action">${escapeHtml(warning)}</div>`);
+      evidence.push(escapeHtml(warning));
     }
     if (cached && cachedSize) {
-      lines.push(`<div class="meta-line">${escapeHtml(cachedSize)}</div>`);
+      evidence.push(escapeHtml(cachedSize));
     }
     if (!cached) {
-      lines.push(`<div class="meta-line image-action">Preview or flash will fetch this image.</div>`);
+      evidence.push("Preview or flash will fetch this image.");
     }
     if (image.url) {
-      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(image.url)}">${escapeHtml(image.url)}</div>`);
+      evidence.push(`<span class="mono">${escapeHtml(image.url)}</span>`);
     }
     if (configuredSha) {
-      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(configuredSha)}">configured sha ${escapeHtml(configuredSha.slice(0, 16))}&hellip;</div>`);
+      evidence.push(`<span class="mono">configured sha ${escapeHtml(configuredSha.slice(0, 16))}&hellip;</span>`);
     }
     if (cachedSha && cachedSha !== configuredSha) {
-      lines.push(`<div class="meta-line mono trunc" title="${escapeHtml(cachedSha)}">cached sha ${escapeHtml(cachedSha.slice(0, 16))}&hellip;</div>`);
+      evidence.push(`<span class="mono">cached sha ${escapeHtml(cachedSha.slice(0, 16))}&hellip;</span>`);
     }
-    return `<div class="image-item">${lines.join("")}</div>`;
+    const updateControl = updateAvailable
+      ? `<button class="btn ghost small" type="button" data-image-install-target="${escapeHtml(target)}"${installing || anyInstallRunning ? " disabled" : ""}>${installing ? "Installing..." : "Install Update"}</button>`
+      : "";
+    const action = [...evidence, updateControl].filter(Boolean).join("<br>");
+    return `
+      <tr class="image-row">
+        <th scope="row" class="mono">${escapeHtml(target)}</th>
+        <td>${escapeHtml(image.version || "unversioned")}</td>
+        <td>${statusText(updateAvailable ? "warn" : cached ? "ok" : "warn", updateAvailable ? "update available" : cached ? "cached" : "will download")}</td>
+        <td>${statusText(trustStatus === "verified" ? "ok" : trustStatus === "untrusted" ? "bad" : cached ? "warn" : "subtle", trustLabel)}</td>
+        <td class="evidence-cell">${action}</td>
+      </tr>
+    `;
   }
 
-  function diskCard(disk, selectedDevice) {
+  function diskRow(disk, selectedDevice) {
     const selected = disk.device === selectedDevice;
-    const warnings = (disk.warnings || [])
-      .map((item) => `<span class="disk-warning">${escapeHtml(item)}</span>`)
-      .join("");
+    const warnings = (disk.warnings || []).map(escapeHtml).join("; ");
     const mounted = (disk.mounted || []).join(", ");
-    const typeChip = disk.virtual
-      ? chip("warn", "virtual")
-      : chip(disk.removable ? "ok" : "warn", disk.removable ? "removable" : "fixed");
+    const media = disk.virtual
+      ? statusText("warn", "virtual")
+      : statusText(disk.removable ? "ok" : "warn", disk.removable ? "removable" : "fixed");
     return `
-      <button type="button" class="disk-card${selected ? " selected" : ""}" data-device="${escapeHtml(disk.device)}" aria-pressed="${selected}">
-        <span class="disk-top">
-          <span class="disk-device mono">${escapeHtml(disk.device)}</span>
-          <span class="disk-check" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"></path></svg>
-          </span>
-        </span>
-        <span class="disk-model">${escapeHtml(disk.model || "Unknown model")}</span>
-        <span class="disk-tags">
-          ${chip("subtle", disk.size_human || "size unknown")}
-          ${typeChip}
-        </span>
-        <span class="meta-line mono trunc" title="${escapeHtml(mounted)}">${escapeHtml(mounted || "not mounted")}</span>
-        ${warnings}
-      </button>
+      <tr class="disk-row${selected ? " selected" : ""}">
+        <th scope="row"><button type="button" class="disk-select mono" data-device="${escapeHtml(disk.device)}" aria-pressed="${selected}">${escapeHtml(disk.device)}</button></th>
+        <td>${escapeHtml(disk.model || "Unknown model")}${warnings ? `<br><span class="disk-warning">${warnings}</span>` : ""}</td>
+        <td>${escapeHtml(disk.size_human || "size unknown")}</td>
+        <td>${media}</td>
+        <td class="mono">${escapeHtml(mounted || "not mounted")}</td>
+      </tr>
     `;
   }
 
@@ -142,21 +135,6 @@
       rows.push(statusRow("subtle", `${label}: ${nodes.join(", ")}`));
     }
     return rows.join("") || statusRow("subtle", "No result");
-  }
-
-  function planRowElement(label, value) {
-    if (value === undefined || value === null || value === "") {
-      return [];
-    }
-    const key = document.createElement("div");
-    key.className = "plan-key";
-    key.textContent = label;
-
-    const planValue = document.createElement("div");
-    planValue.className = "plan-val mono";
-    planValue.textContent = String(value);
-
-    return [key, planValue];
   }
 
   function planSshValue(plan) {
@@ -190,16 +168,14 @@
     return details;
   }
 
-  function planCardElements(payload) {
+  function planTableElements(payload) {
     const plan = payload.plan || {};
     const image = payload.image || {};
     const imagePath = image.cached_path || plan.base_image || image.url || "";
-    const head = document.createElement("div");
-    head.className = "plan-head";
-    head.textContent = "Flash plan";
-
-    const grid = document.createElement("div");
-    grid.className = "plan-grid";
+    const table = document.createElement("table");
+    table.className = "state-table";
+    table.setAttribute("aria-label", "Flash plan");
+    const body = document.createElement("tbody");
     for (const [label, value] of [
       ["Node", plan.node],
       ["Hostname", plan.hostname],
@@ -212,72 +188,49 @@
       ["WAN API", planWanApiValue(plan)],
       ["Boot payload", plan.boot_payload],
     ]) {
-      grid.append(...planRowElement(label, value));
+      if (value === undefined || value === null || value === "") {
+        continue;
+      }
+      const row = document.createElement("tr");
+      const key = document.createElement("th");
+      key.setAttribute("scope", "row");
+      key.textContent = label;
+      const planValue = document.createElement("td");
+      planValue.className = "mono";
+      planValue.textContent = String(value);
+      row.append(key, planValue);
+      body.appendChild(row);
     }
+    table.appendChild(body);
 
     return [
-      head,
-      grid,
+      table,
       planDetailsElement("Provision payload", payload.provision_display),
       planDetailsElement("Boot files", payload.dry_run_info),
     ].filter(Boolean);
   }
 
-  function meshRadioCard(radio) {
-    const host = radio.host || radio.address || "unknown";
-    const title = radio.hostname || radio.expected_hostname || host;
-    const status = radio.status === "connected" ? "connected" : radio.status || "seen";
-    const rows = [
-      meshDetail("Host", host),
-      meshDetail("Address", radio.address),
-      meshDetail("Node", radio.node),
-      meshDetail("Expected IP", radio.expected_ip),
-      meshDetail("Expected host", radio.expected_hostname),
-      meshDetail("Status", status.replaceAll("_", " ")),
-      meshDetail("Role", radio.role),
-      meshDetail("Mesh", radio.mesh_id),
-      meshDetail("Node IP", radio.node_ip),
-      meshDetail("Target", radio.target),
-      meshDetail("Source", radio.source),
-      meshDetail("Error", radio.error || radio.stderr),
-    ].filter(Boolean).join("");
-    return `
-      <article class="radio-card">
-        <div class="radio-top">
-          <div class="radio-title">
-            <span class="radio-name mono">${escapeHtml(title)}</span>
-            <span class="radio-sub mono">${escapeHtml(radio.summary || radio.address || "")}</span>
-          </div>
-          ${chip(radio.ok ? "ok" : "warn", status.replaceAll("_", " "))}
-        </div>
-        <div class="radio-details">${rows}</div>
-      </article>
-    `;
-  }
-
-  function meshNodeCard(node) {
-    const title = node.name || node.hostname || node.ip || "unknown";
+  function meshNodeRow(node) {
+    const title = node.name || node.hostname || node.node || node.host || node.ip || node.address || "unknown";
     const status = node.status || "seen";
-    const rows = [
-      meshDetail("Hostname", node.hostname),
-      meshDetail("Role", node.role),
-      meshDetail("IP", node.ip || node.node_ip),
-      meshDetail("Target", node.target),
-      meshDetail("Mesh MAC", node.mesh_mac),
-      meshDetail("BAT0 MAC", node.bat0_mac),
-      meshDetail("Status", status),
-    ].filter(Boolean).join("");
+    const details = [
+      node.summary,
+      node.target,
+      node.mesh_mac,
+      node.bat0_mac,
+      node.expected_ip,
+      node.expected_hostname,
+      node.source,
+      node.error || node.stderr,
+    ].filter(Boolean).map(escapeHtml).join("; ");
     return `
-      <article class="radio-card">
-        <div class="radio-top">
-          <div class="radio-title">
-            <span class="radio-name mono">${escapeHtml(title)}</span>
-            <span class="radio-sub mono">${escapeHtml(node.ip || node.node_ip || "")}</span>
-          </div>
-          ${chip(status === "online" || status === "connected" ? "ok" : "warn", status)}
-        </div>
-        <div class="radio-details">${rows}</div>
-      </article>
+      <tr>
+        <th scope="row" class="mono">${escapeHtml(title)}</th>
+        <td class="mono">${escapeHtml(node.ip || node.node_ip || node.address || node.host || "")}</td>
+        <td>${escapeHtml(node.role || "")}</td>
+        <td>${statusText(status === "online" || status === "connected" ? "ok" : "warn", status)}</td>
+        <td class="mono">${details}</td>
+      </tr>
     `;
   }
 
@@ -287,42 +240,34 @@
     const status = link.status || (link.target ? "resolved" : "unresolved");
     const meta = [link.iface, link.last_seen, link.throughput].filter(Boolean).join(" / ");
     return `
-      <div class="topology-link">
-        <span class="mono">${escapeHtml(source)}</span>
-        <span aria-hidden="true">&rarr;</span>
-        <span class="mono">${escapeHtml(target)}</span>
-        ${chip(status === "resolved" ? "ok" : "warn", status)}
-        <span class="meta-line mono">${escapeHtml(meta)}</span>
-      </div>
+      <tr>
+        <th scope="row" class="mono">${escapeHtml(source)}</th>
+        <td class="mono">${escapeHtml(target)}</td>
+        <td>${statusText(status === "resolved" ? "ok" : "warn", status)}</td>
+        <td class="mono">${escapeHtml(meta)}</td>
+      </tr>
     `;
   }
 
   function meshTopologyView(payload) {
     const nodes = payload.nodes || payload.radios || [];
     const links = payload.links || [];
-    const nodeMarkup = nodes.map((node) => meshNodeCard(node)).join("");
+    const nodeMarkup = nodes.map(meshNodeRow).join("");
     const emptyLinksMeta = payload.degraded
       ? "Reachable node APIs did not report active BATMAN neighbors."
       : "The gateway API did not report active BATMAN neighbors.";
     const linkMarkup = links.length
-      ? `<div class="topology-links">${links.map((link) => meshLinkRow(link)).join("")}</div>`
+      ? `<div class="table-wrap"><table class="data-table" aria-label="Discovered mesh links"><thead><tr><th scope="col">Source</th><th scope="col">Target</th><th scope="col">State</th><th scope="col">Evidence</th></tr></thead><tbody>${links.map(meshLinkRow).join("")}</tbody></table></div>`
       : `<div class="empty-state slim"><p class="empty-title">No links reported</p><p class="empty-meta">${emptyLinksMeta}</p></div>`;
     return `
       <div class="topology-section">
-        <div class="mesh-grid">${nodeMarkup}</div>
+        <div class="table-wrap"><table class="data-table" aria-label="Discovered mesh nodes"><thead><tr><th scope="col">Node</th><th scope="col">Address</th><th scope="col">Role</th><th scope="col">State</th><th scope="col">Evidence</th></tr></thead><tbody>${nodeMarkup}</tbody></table></div>
       </div>
       <div class="topology-section">
         <div class="section-title">Links</div>
         ${linkMarkup}
       </div>
     `;
-  }
-
-  function meshDetail(label, value) {
-    if (!value) {
-      return "";
-    }
-    return `<span class="radio-key">${escapeHtml(label)}</span><span class="radio-value mono">${escapeHtml(value)}</span>`;
   }
 
   function meshDiscoveryMarkup(payload) {
@@ -354,12 +299,10 @@
     escapeHtml,
     formatBytes,
     safeTone,
-    imageItem,
-    diskCard,
+    imageRow,
+    diskRow,
     validationMarkup,
-    planCardElements,
-    meshRadioCard,
-    meshNodeCard,
+    planTableElements,
     meshTopologyView,
     meshDiscoveryMarkup,
   };

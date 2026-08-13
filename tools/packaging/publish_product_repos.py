@@ -11,7 +11,6 @@ import shutil
 import subprocess
 from pathlib import Path
 import sys
-import tarfile
 import tempfile
 
 
@@ -23,6 +22,7 @@ if str(PUBLISH_SRC) not in sys.path:
 from easymanet_publish.surfaces import (  # noqa: E402
     SURFACES,
     SurfaceSpec,
+    materialize_commit,
     project_version,
     render_surface_pyproject,
     selected_surface_specs,
@@ -186,37 +186,6 @@ def validate_source_commit(source_sha: str) -> str:
                 "Tracked source changes must be committed before generating public repositories"
             )
     return resolved_sha
-
-
-def materialize_source_commit(source_sha: str, destination: Path) -> Path:
-    archive_path = destination / "source.tar"
-    source_root = destination / "source"
-    source_root.mkdir(parents=True)
-    run(
-        ["git", "archive", "--format=tar", "--output", str(archive_path), source_sha],
-        cwd=ROOT,
-    )
-
-    with tarfile.open(archive_path, "r") as archive:
-        for member in archive.getmembers():
-            relative = Path(member.name)
-            if relative.is_absolute() or ".." in relative.parts:
-                raise ValueError(f"Git archive contained an unsafe path: {member.name}")
-            target = source_root / relative
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            if not member.isfile():
-                raise ValueError(f"Git archive contained a non-file entry: {member.name}")
-            source = archive.extractfile(member)
-            if source is None:
-                raise ValueError(f"Git archive file could not be read: {member.name}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("wb") as output:
-                shutil.copyfileobj(source, output)
-            target.chmod(member.mode & 0o777)
-    archive_path.unlink()
-    return source_root
 
 
 def github_repo_exists(owner: str, spec: RepoSpec) -> bool:
@@ -432,7 +401,11 @@ def main() -> int:
 
     payload = build_payload(args, source_ref, source_sha)
     with tempfile.TemporaryDirectory(prefix="easymanet-publish-source-") as temp_dir:
-        source_root = materialize_source_commit(source_sha, Path(temp_dir))
+        source_root, materialized_sha = materialize_commit(ROOT, source_sha, Path(temp_dir))
+        if materialized_sha != source_sha:
+            raise SystemExit(
+                f"Materialized source {materialized_sha} does not match requested {source_sha}"
+            )
         for spec in selected_specs(args.product):
             generated_dir = generate_repo(
                 spec,

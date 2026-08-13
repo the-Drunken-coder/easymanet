@@ -54,6 +54,7 @@ PY
 )
 python tools/packaging/publish_product_repos.py \
   --product images \
+  --push \
   --dispatch \
   --release-tag "images-v${VERSION}" \
   --openmanet-version 1.6.5 \

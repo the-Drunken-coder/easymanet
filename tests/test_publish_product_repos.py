@@ -39,6 +39,30 @@ def track_paths(repo_root: Path, *paths: str) -> None:
         subprocess.run(["git", "add", *paths], cwd=repo_root, check=True)
 
 
+def commit_index(repo_root: Path) -> str:
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "snapshot",
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def missing_local_markdown_links(root: Path) -> list[str]:
     root_resolved = root.resolve()
     missing: list[str] = []
@@ -355,6 +379,7 @@ def test_preview_and_remote_generation_share_tracked_inputs(monkeypatch, tmp_pat
         "src/nested/tracked.py",
         "product_repos/templates/test/.github/workflows/release.yml",
     )
+    source_sha = commit_index(source_root)
     untracked_source = source_root / "src" / "nested" / "local-only.py"
     untracked_template = template_dir / ".github" / "workflows" / "local-only.yml"
     untracked_source.write_text("local = True\n", encoding="utf-8")
@@ -376,11 +401,11 @@ def test_preview_and_remote_generation_share_tracked_inputs(monkeypatch, tmp_pat
     preview = export_mod.export_public_surfaces(
         tmp_path / "preview",
         repo_root=source_root,
-        source_ref="source-sha",
+        source_ref=source_sha,
     )
     publish = load_publish_module()
     monkeypatch.setattr(publish, "ROOT", source_root)
-    remote = publish.generate_repo(surface, tmp_path / "remote", "branch", "source-sha")
+    remote = publish.generate_repo(surface, tmp_path / "remote", "branch", source_sha)
 
     preview_root = Path(preview["surfaces"]["test"]["path"])
     for path in ("src/nested/tracked.py", ".github/workflows/release.yml"):
@@ -389,6 +414,48 @@ def test_preview_and_remote_generation_share_tracked_inputs(monkeypatch, tmp_pat
     for path in ("src/nested/local-only.py", ".github/workflows/local-only.yml"):
         assert not (preview_root / path).exists()
         assert not (remote / path).exists()
+
+
+def test_local_export_reads_exact_commit_not_dirty_tracked_bytes(monkeypatch, tmp_path):
+    source_root = tmp_path / "authoring"
+    template = source_root / "product_repos" / "templates" / "test" / "README.md"
+    source = source_root / "src" / "value.py"
+    template.parent.mkdir(parents=True)
+    source.parent.mkdir(parents=True)
+    template.write_text("template\n")
+    source.write_text("value = 'committed'\n")
+    (source_root / "pyproject.toml").write_text('version = "1.2.3"\n')
+    track_paths(
+        source_root,
+        "pyproject.toml",
+        "src/value.py",
+        "product_repos/templates/test/README.md",
+    )
+    source_sha = commit_index(source_root)
+    source.write_text("value = 'dirty'\n")
+    surface = surface_registry.SurfaceSpec(
+        key="test",
+        local_name="test",
+        repo_name="test-repo",
+        description="Test surface.",
+        source_paths=("src",),
+        package_roots=(),
+        package_includes=(),
+        scripts=(),
+        dispatch_event="test-release",
+        release_workflow="release.yml",
+    )
+    monkeypatch.setattr(export_mod, "SURFACES", {"test": surface})
+
+    record = export_mod.export_public_surfaces(
+        tmp_path / "preview",
+        repo_root=source_root,
+        source_ref=source_sha,
+    )
+
+    exported = Path(record["surfaces"]["test"]["path"]) / "src" / "value.py"
+    assert record["source_ref"] == source_sha
+    assert exported.read_text() == "value = 'committed'\n"
 
 
 def test_publish_rejects_tracked_changes_not_in_source_commit(monkeypatch, tmp_path):
@@ -460,8 +527,13 @@ def test_publish_materializes_exact_commit_bytes(monkeypatch, tmp_path):
     script.write_text("dirty\n")
     monkeypatch.setattr(publish, "ROOT", repo)
 
-    snapshot = publish.materialize_source_commit(source_sha, tmp_path / "snapshot")
+    snapshot, materialized_sha = surface_registry.materialize_commit(
+        repo,
+        source_sha,
+        tmp_path / "snapshot",
+    )
 
+    assert materialized_sha == source_sha
     assert (snapshot / "script.sh").read_text() == "committed\n"
     assert os.access(snapshot / "script.sh", os.X_OK)
 
@@ -692,8 +764,8 @@ def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):
     monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
     monkeypatch.setattr(
         publish,
-        "materialize_source_commit",
-        lambda _source_sha, _destination: ROOT,
+        "materialize_commit",
+        lambda _repo_root, source_sha, _destination: (ROOT, source_sha),
     )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
@@ -716,8 +788,8 @@ def test_main_dispatches_when_push_has_no_changes(monkeypatch, tmp_path):
     monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
     monkeypatch.setattr(
         publish,
-        "materialize_source_commit",
-        lambda _source_sha, _destination: ROOT,
+        "materialize_commit",
+        lambda _repo_root, source_sha, _destination: (ROOT, source_sha),
     )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)

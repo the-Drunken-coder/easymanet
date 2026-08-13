@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +93,51 @@ def tracked_files(repo_root: Path, rel_path: str) -> tuple[str, ...]:
             )
 
     return files
+
+
+def materialize_commit(
+    repo_root: Path,
+    source_ref: str,
+    destination: Path,
+) -> tuple[Path, str]:
+    """Extract one exact Git commit into a temporary source tree."""
+    result = subprocess.run(
+        ["git", "rev-parse", f"{source_ref}^{{commit}}"],
+        cwd=repo_root,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    source_sha = result.stdout.strip()
+    archive_path = destination / "source.tar"
+    source_root = destination / "source"
+    source_root.mkdir(parents=True)
+    subprocess.run(
+        ["git", "archive", "--format=tar", "--output", str(archive_path), source_sha],
+        cwd=repo_root,
+        check=True,
+    )
+
+    with tarfile.open(archive_path, "r") as archive:
+        for member in archive.getmembers():
+            relative = Path(member.name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Git archive contained an unsafe path: {member.name}")
+            target = source_root / relative
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise ValueError(f"Git archive contained a non-file entry: {member.name}")
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError(f"Git archive file could not be read: {member.name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            target.chmod(member.mode & 0o777)
+    archive_path.unlink()
+    return source_root, source_sha
 
 
 PRODUCT_DOC_PATHS = (

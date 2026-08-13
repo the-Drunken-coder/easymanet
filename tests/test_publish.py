@@ -10,9 +10,9 @@ from easymanet_publish.export import EXPORT_RECORD, export_public_surfaces
 def test_export_public_surfaces_writes_local_outputs(tmp_path):
     output = tmp_path / "public"
 
-    record = export_public_surfaces(output, source_ref="abc123")
+    record = export_public_surfaces(output, source_ref="HEAD")
 
-    assert record["source_ref"] == "abc123"
+    assert record["source_ref"] == export_mod._git_ref(export_mod._repo_root())
     assert record["subrepos_configured"] is False
     for surface in ("images", "cli", "desktop"):
         assert (output / surface / "README.generated.md").exists()
@@ -29,7 +29,7 @@ def test_export_public_surfaces_writes_local_outputs(tmp_path):
 def test_export_surfaces_include_installable_python_roots(tmp_path):
     output = tmp_path / "public"
 
-    record = export_public_surfaces(output, source_ref="abc123")
+    record = export_public_surfaces(output, source_ref="HEAD")
 
     image_files = set(record["surfaces"]["images"]["files"])
     cli_files = set(record["surfaces"]["cli"]["files"])
@@ -51,7 +51,7 @@ def test_export_surfaces_include_installable_python_roots(tmp_path):
 def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
     output = tmp_path / "public"
 
-    export_public_surfaces(output, source_ref="abc123")
+    export_public_surfaces(output, source_ref="HEAD")
 
     image_pyproject = (output / "images" / "pyproject.toml").read_text()
     cli_pyproject = (output / "cli" / "pyproject.toml").read_text()
@@ -88,7 +88,7 @@ def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
 def test_export_templates_dispatch_and_checkout_requested_refs(tmp_path):
     output = tmp_path / "public"
 
-    export_public_surfaces(output, source_ref="abc123")
+    export_public_surfaces(output, source_ref="HEAD")
 
     cli_bootstrap = (
         output / "cli" / ".github" / "workflows" / "bootstrap-release.yml"

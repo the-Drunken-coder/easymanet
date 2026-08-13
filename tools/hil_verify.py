@@ -255,64 +255,64 @@ def run_hil(
                         flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
                         _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
 
-    if args.dry_run and args.base_image and args.image_sha256:
-        image = _validate_declared_image(args, checks, errors, check_name="declared image identity")
-    elif _has_device(args) and flash_results:
-        flashed_image = _flash_image_evidence(flash_results, checks, errors)
-        image = _mixed_image_evidence(reuse_image, flashed_image, checks, errors)
+        if args.dry_run and args.base_image and args.image_sha256:
+            image = _validate_declared_image(args, checks, errors, check_name="declared image identity")
+        elif _has_device(args) and flash_results:
+            flashed_image = _flash_image_evidence(flash_results, checks, errors)
+            image = _mixed_image_evidence(reuse_image, flashed_image, checks, errors)
 
-    flash_failed = any(not result.get("ok") for result in flash_results.values())
-    if args.dry_run:
-        warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
-    elif not errors and not flash_failed and gate is not None and point is not None:
-        ready_to_probe = True
-        if _has_device(args):
-            ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
-        if ready_to_probe:
-            sleep_fn(args.wait_seconds)
-            for spec in (gate, point):
-                nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
-            topology = _probe_topology(gate, point, checks)
-            if args.throughput_smoke:
-                throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
+        flash_failed = any(not result.get("ok") for result in flash_results.values())
+        if args.dry_run:
+            warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
+        elif not errors and not flash_failed and gate is not None and point is not None:
+            ready_to_probe = True
+            if _has_device(args):
+                ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
+            if ready_to_probe:
+                sleep_fn(args.wait_seconds)
+                for spec in (gate, point):
+                    nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
+                topology = _probe_topology(gate, point, checks)
+                if args.throughput_smoke:
+                    throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
 
-    mode = "dry-run" if args.dry_run else ("flash" if _has_device(args) else "reuse")
-    ok = not errors and all(check.get("ok") is not False for check in checks)
-    payload = {
-        "ok": ok,
-        "schema_version": SCHEMA_VERSION,
-        "mode": mode,
-        "generated_at": _iso(now),
-        "easymanet_version": EASYMANET_VERSION,
-        "config_path": str(config_path),
-        "config": config_evidence,
-        "gate_node": args.gate_node,
-        "point_node": args.point_node,
-        "wait_seconds": 0 if args.dry_run else args.wait_seconds,
-        "provenance": provenance,
-        "image": image,
-        "evidence_scope": _evidence_scope(
-            mode,
-            ok,
-            flash_results,
-            image,
-            provenance,
-            config_evidence,
-        ),
-        "flash": flash_results,
-        "nodes": nodes,
-        "topology": topology,
-        "throughput": throughput,
-        "checks": checks,
-        "warnings": warnings,
-        "errors": errors,
-    }
-    result_path = diagnostics_dir() / f"easymanet-hil-{_stamp(now)}.json"
-    payload["result_path"] = str(result_path)
-    bundle_path = _write_support_bundle(payload, args, topology)
-    payload["support_bundle_path"] = bundle_path
-    _write_json(result_path, payload)
-    return payload
+        mode = "dry-run" if args.dry_run else ("flash" if _has_device(args) else "reuse")
+        ok = not errors and all(check.get("ok") is not False for check in checks)
+        payload = {
+            "ok": ok,
+            "schema_version": SCHEMA_VERSION,
+            "mode": mode,
+            "generated_at": _iso(now),
+            "easymanet_version": EASYMANET_VERSION,
+            "config_path": str(config_path),
+            "config": config_evidence,
+            "gate_node": args.gate_node,
+            "point_node": args.point_node,
+            "wait_seconds": 0 if args.dry_run else args.wait_seconds,
+            "provenance": provenance,
+            "image": image,
+            "evidence_scope": _evidence_scope(
+                mode,
+                ok,
+                flash_results,
+                image,
+                provenance,
+                config_evidence,
+            ),
+            "flash": flash_results,
+            "nodes": nodes,
+            "topology": topology,
+            "throughput": throughput,
+            "checks": checks,
+            "warnings": warnings,
+            "errors": errors,
+        }
+        result_path = diagnostics_dir() / f"easymanet-hil-{_stamp(now)}.json"
+        payload["result_path"] = str(result_path)
+        bundle_path = _write_support_bundle(payload, args, topology, config_snapshot)
+        payload["support_bundle_path"] = bundle_path
+        _write_json(result_path, payload)
+        return payload
 
 
 def _git_provenance() -> dict[str, Any]:
@@ -1018,10 +1018,15 @@ def _run_command(command: list[str], timeout: int) -> subprocess.CompletedProces
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
 
 
-def _write_support_bundle(payload: dict[str, Any], args: argparse.Namespace, topology: dict[str, Any]) -> str:
+def _write_support_bundle(
+    payload: dict[str, Any],
+    args: argparse.Namespace,
+    topology: dict[str, Any],
+    config_snapshot: Path,
+) -> str:
     boot_report = args.gate_boot_report or args.point_boot_report
     result = create_support_bundle(
-        config=args.config,
+        config=str(config_snapshot),
         node="",
         boot_report=boot_report,
         include_mesh=not topology.get("skipped", False),

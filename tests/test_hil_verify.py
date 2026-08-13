@@ -1,12 +1,14 @@
 import hashlib
 import json
 import subprocess
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from easymanet import diagnostics
+from easymanet.support_bundle import redact_text
 from easymanet.workspace import WORKSPACE_ENV
 from tools import hil_verify
 
@@ -698,6 +700,12 @@ def test_flash_acceptance_uses_one_config_snapshot_when_source_changes_between_f
     assert payload["config"]["path"] == str(config.resolve())
     assert payload["config"]["sha256"] == hashlib.sha256(original).hexdigest()
     assert payload["evidence_scope"]["physical_acceptance"] is True
+    with zipfile.ZipFile(payload["support_bundle_path"]) as bundle:
+        bundled_config = bundle.read("fleet/redacted-config.yml").decode()
+        bundled_result = json.loads(bundle.read("flash/result.json"))
+    assert bundled_config == redact_text(original.decode())
+    assert bundled_result["config"]["path"] == str(config.resolve())
+    assert bundled_result["config"]["sha256"] == hashlib.sha256(original).hexdigest()
 
 
 def test_reuse_rejects_missing_local_artifact_before_probes(tmp_path, monkeypatch):

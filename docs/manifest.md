@@ -272,10 +272,11 @@ Priority (highest to lowest):
 | Gate Ethernet (`eth0`) is the WAN uplink | Warning |
 | mesh.country must be two-letter ISO code (e.g. US) | Error |
 | gateway.wifi.enabled requires ssid and password | Error |
+| local_ap.enabled and gateway.wifi.enabled cannot both be true on one node | Error |
 | gateway.enabled, when authored, must match the node role | Error |
 | gateway.wifi.enabled and uplink_interface: wifi must agree | Error |
 | gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |
-| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior, local AP suppression, and SSH exposure if enabled | Warning |
+| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior and SSH exposure if enabled | Warning |
 
 ## Security
 

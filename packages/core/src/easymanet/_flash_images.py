@@ -18,7 +18,12 @@ from .download import (
     set_image_config,
     verify_image_sha256,
 )
-from .release_trust import OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS
+from .release_trust import (
+    OFFICIAL_TRUST_STATUS,
+    PENDING_TRUST_STATUS,
+    custom_trust,
+    image_trust_payload,
+)
 from .manifest import load_manifest
 from .provision import resolve_provision
 from .validate import validate
@@ -80,6 +85,7 @@ def resolve_base_image(
             sha256=normalized_sha256,
             trust_status="checksum-only",
             source="custom",
+            trust=image_trust_payload(custom_trust()),
         )
         return str(base_image_path), payload, warnings
 
@@ -162,16 +168,22 @@ def resolve_base_image(
         "manifest_url": latest_manifest_url,
         "manifest_signature_verified": latest_manifest_signature_verified,
     }
-    latest_trust = getattr(latest, "trust", {
-        "status": latest_trust_status,
-        "source": latest_source,
-        "channel": latest_channel,
-        "release_tag": latest_release_tag,
-        "image_status": latest_image_status,
-        "manifest_url": latest_manifest_url,
-        "manifest_signature_verified": latest_manifest_signature_verified,
-        "warnings": list(latest_warnings),
-    })
+    latest_trust = image_trust_payload(
+        getattr(
+            latest,
+            "trust",
+            {
+                "status": latest_trust_status,
+                "source": latest_source,
+                "channel": latest_channel,
+                "release_tag": latest_release_tag,
+                "image_status": latest_image_status,
+                "manifest_url": latest_manifest_url,
+                "manifest_signature_verified": latest_manifest_signature_verified,
+                "warnings": list(latest_warnings),
+            },
+        )
+    )
 
     if latest_source == "official" and latest_trust_status not in {OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS}:
         detail = "; ".join(latest_warnings) if latest_warnings else "official verification failed"
@@ -187,7 +199,12 @@ def resolve_base_image(
         if cached:
             return (
                 str(cached),
-                image_payload(path=str(cached), cached_path=str(cached), **latest_payload),
+                image_payload(
+                    path=str(cached),
+                    cached_path=str(cached),
+                    trust=latest_trust,
+                    **latest_payload,
+                ),
                 warnings,
             )
 
@@ -203,6 +220,7 @@ def resolve_base_image(
         )
         if pending_official:
             latest_payload["trust_status"] = OFFICIAL_TRUST_STATUS
+            latest_trust["status"] = OFFICIAL_TRUST_STATUS
     except (OSError, TypeError) as exc:
         raise FlashWorkflowError(
             FlashErrorCode.IMAGE,
@@ -210,7 +228,12 @@ def resolve_base_image(
         ) from exc
     return (
         str(path),
-        image_payload(path=str(path), cached_path=str(path), **latest_payload),
+        image_payload(
+            path=str(path),
+            cached_path=str(path),
+            trust=latest_trust,
+            **latest_payload,
+        ),
         warnings,
     )
 
@@ -248,6 +271,7 @@ def flash_image_details(*, config: str, node: str) -> dict[str, Any]:
                 "manifest_signature_verified": getattr(
                     latest, "manifest_signature_verified", False
                 ),
+                "trust": image_trust_payload(getattr(latest, "trust", {})),
                 "warnings": list(getattr(latest, "warnings", ())),
             }
         )
@@ -271,6 +295,7 @@ def image_payload(
     image_status: str = "",
     manifest_url: str = "",
     manifest_signature_verified: bool = False,
+    trust: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "path": path,
@@ -285,4 +310,5 @@ def image_payload(
         "image_status": image_status,
         "manifest_url": manifest_url,
         "manifest_signature_verified": manifest_signature_verified,
+        "trust": dict(trust or {}),
     }

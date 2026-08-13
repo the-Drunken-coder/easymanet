@@ -1,6 +1,7 @@
 """Tests for image validation before flashing."""
 
 import gzip
+import hashlib
 import io
 import os
 import subprocess
@@ -11,6 +12,7 @@ import pytest
 from easymanet.disks import DiskInfo, capture_device_identity
 from easymanet.image import (
     FlashError,
+    _check_device_safety,
     _check_image,
     _clear_stale_overlay,
     _dd_device_path,
@@ -472,11 +474,13 @@ def test_write_raw_via_dd_writes_payload(tmp_path):
     payload = b"EASYMANET-RAW-IMAGE" * 32
     image.write_bytes(payload)
 
-    fd = os.open(device, os.O_WRONLY)
+    image_fd = os.open(image, os.O_RDONLY)
+    device_fd = os.open(device, os.O_WRONLY)
     try:
-        _write_raw_via_dd(str(image), fd)
+        _write_raw_via_dd(image_fd, device_fd)
     finally:
-        os.close(fd)
+        os.close(device_fd)
+        os.close(image_fd)
 
     written = device.read_bytes()
     assert written[: len(payload)] == payload
@@ -491,11 +495,13 @@ def test_write_gz_via_dd_writes_decompressed_payload(tmp_path):
     with gzip.open(image, "wb") as handle:
         handle.write(payload)
 
-    fd = os.open(device, os.O_WRONLY)
+    image_fd = os.open(image, os.O_RDONLY)
+    device_fd = os.open(device, os.O_WRONLY)
     try:
-        _write_gz_via_dd(str(image), fd)
+        _write_gz_via_dd(image_fd, device_fd)
     finally:
-        os.close(fd)
+        os.close(device_fd)
+        os.close(image_fd)
 
     written = device.read_bytes()
     assert written[: len(payload)] == payload
@@ -589,7 +595,70 @@ def test_flash_image_rejects_device_replacement_after_unmount(monkeypatch, tmp_p
     assert replacement.read_bytes() == b"replacement"
 
 
-def test_finish_flash_warns_when_eject_fails(monkeypatch):
+def test_flash_image_rejects_expected_sha_before_safety_or_write(monkeypatch, tmp_path):
+    image = tmp_path / "firmware.img"
+    image.write_bytes(b"verified bytes")
+
+    monkeypatch.setattr(
+        "easymanet.image._check_device_safety",
+        lambda *_args, **_kwargs: pytest.fail("disk safety must not run"),
+    )
+    monkeypatch.setattr(
+        "easymanet.image._write_raw_via_dd",
+        lambda *_args, **_kwargs: pytest.fail("mismatched image must not be written"),
+    )
+
+    with pytest.raises(FlashError, match="SHA-256 mismatch"):
+        flash_image(
+            "/dev/disk4",
+            str(image),
+            expected_sha256=hashlib.sha256(b"other bytes").hexdigest(),
+        )
+
+
+def test_flash_image_writes_opened_verified_image_after_path_replacement(
+    monkeypatch, tmp_path
+):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img"
+    verified_payload = b"verified image payload"
+    replacement_payload = b"replacement image payload"
+    image.write_bytes(verified_payload)
+    expected_sha256 = hashlib.sha256(verified_payload).hexdigest()
+    written = []
+
+    def replace_image_after_open(device_path, force=False):
+        checked = _check_device_safety(device_path, force=force)
+        image.unlink()
+        image.write_bytes(replacement_payload)
+        return checked
+
+    def capture_opened_image(image_fd, _device_fd, **_kwargs):
+        written.append(os.pread(image_fd, 4096, 0))
+
+    monkeypatch.setattr(
+        "easymanet.image._check_device_safety",
+        replace_image_after_open,
+    )
+    monkeypatch.setattr("easymanet.image._write_raw_via_dd", capture_opened_image)
+    monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
+
+    flash_image(
+        str(device),
+        str(image),
+        force=True,
+        skip_overlay_wipe=True,
+        expected_sha256=expected_sha256,
+    )
+
+    assert written == [verified_payload]
+    assert image.read_bytes() == replacement_payload
+
+
+def test_finish_flash_raises_when_eject_fails(monkeypatch, tmp_path):
+    device = tmp_path / "disk"
+    device.write_bytes(b"disk")
+    identity = capture_device_identity(str(device))
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
 
     def fail_eject(_device):
@@ -598,16 +667,22 @@ def test_finish_flash_warns_when_eject_fails(monkeypatch):
     monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
 
     events = []
-    result = finish_flash("/dev/disk4", emit=events.append)
+    with pytest.raises(FlashError, match="Failed to eject"):
+        finish_flash(
+            str(device),
+            device_identity=identity,
+            emit=events.append,
+        )
 
-    assert result is False
     messages = [event["message"] for event in events]
-    assert "Warning: eject failed" in messages
-    assert any("eject /dev/disk4 manually" in message for message in messages)
+    assert any(f"eject {device} manually" in message for message in messages)
     assert "Safe to remove." not in messages
 
 
-def test_finish_flash_warns_when_eject_times_out(monkeypatch):
+def test_finish_flash_raises_when_eject_times_out(monkeypatch, tmp_path):
+    device = tmp_path / "disk"
+    device.write_bytes(b"disk")
+    identity = capture_device_identity(str(device))
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
 
     def fail_eject(_device):
@@ -616,16 +691,22 @@ def test_finish_flash_warns_when_eject_times_out(monkeypatch):
     monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
 
     events = []
-    result = finish_flash("/dev/disk4", emit=events.append)
+    with pytest.raises(FlashError, match="Failed to eject"):
+        finish_flash(
+            str(device),
+            device_identity=identity,
+            emit=events.append,
+        )
 
-    assert result is False
     messages = [event["message"] for event in events]
-    assert any("timed out" in message for message in messages)
-    assert any("eject /dev/disk4 manually" in message for message in messages)
+    assert any(f"eject {device} manually" in message for message in messages)
     assert "Safe to remove." not in messages
 
 
-def test_finish_flash_no_eject_unmounts_before_reporting_safe(monkeypatch):
+def test_finish_flash_no_eject_unmounts_before_reporting_safe(monkeypatch, tmp_path):
+    device = tmp_path / "disk"
+    device.write_bytes(b"disk")
+    identity = capture_device_identity(str(device))
     calls = []
     monkeypatch.setattr("easymanet.image.os.sync", lambda: calls.append("sync"))
     monkeypatch.setattr(
@@ -634,14 +715,22 @@ def test_finish_flash_no_eject_unmounts_before_reporting_safe(monkeypatch):
     )
     events = []
 
-    result = finish_flash("/dev/disk4", eject=False, emit=events.append)
+    result = finish_flash(
+        str(device),
+        device_identity=identity,
+        eject=False,
+        emit=events.append,
+    )
 
-    assert result is True
-    assert calls == ["sync", ("unmount", "/dev/disk4")]
+    assert result is None
+    assert calls == ["sync", ("unmount", str(device))]
     assert [event["type"] for event in events] == ["unmount_started", "safe_to_remove"]
 
 
-def test_finish_flash_no_eject_propagates_unmount_failure(monkeypatch):
+def test_finish_flash_no_eject_propagates_unmount_failure(monkeypatch, tmp_path):
+    device = tmp_path / "disk"
+    device.write_bytes(b"disk")
+    identity = capture_device_identity(str(device))
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
     monkeypatch.setattr(
         "easymanet.image.unmount_disk",
@@ -649,15 +738,53 @@ def test_finish_flash_no_eject_propagates_unmount_failure(monkeypatch):
     )
     events = []
 
-    result = finish_flash("/dev/disk4", eject=False, emit=events.append)
+    with pytest.raises(FlashError, match="Failed to unmount"):
+        finish_flash(
+            str(device),
+            device_identity=identity,
+            eject=False,
+            emit=events.append,
+        )
 
-    assert result is False
     assert [event["type"] for event in events] == [
         "unmount_started",
-        "warning",
         "unmount_failed",
     ]
     assert all(event["type"] != "safe_to_remove" for event in events)
+
+
+@pytest.mark.parametrize("eject", [True, False])
+def test_finish_flash_rejects_device_replacement_before_cleanup(
+    monkeypatch, tmp_path, eject
+):
+    original = tmp_path / "original-disk"
+    replacement = tmp_path / "replacement-disk"
+    selected = tmp_path / "selected-disk"
+    original.write_bytes(b"original")
+    replacement.write_bytes(b"replacement")
+    selected.symlink_to(original)
+    identity = capture_device_identity(str(selected))
+
+    def replace_during_sync():
+        selected.unlink()
+        selected.symlink_to(replacement)
+
+    monkeypatch.setattr("easymanet.image.os.sync", replace_during_sync)
+    monkeypatch.setattr(
+        "easymanet.image.eject_disk",
+        lambda _device: pytest.fail("replacement target must not be ejected"),
+    )
+    monkeypatch.setattr(
+        "easymanet.image.unmount_disk",
+        lambda _device: pytest.fail("replacement target must not be unmounted"),
+    )
+
+    with pytest.raises(FlashError, match="Device identity changed"):
+        finish_flash(
+            str(selected),
+            device_identity=identity,
+            eject=eject,
+        )
 
 
 @REAL_DD_TEST
@@ -698,6 +825,7 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
     def fake_popen(cmd, **kwargs):
         popen_calls.append((cmd, kwargs))
         if cmd[0] == "gzip":
+            kwargs["stderr"].write(b"gzip: trailing garbage ignored\n")
             return procs[0]
         return procs[1]
 
@@ -705,20 +833,24 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
-    _write_gz_via_dd(str(image), 42)
+    image_fd = os.open(image, os.O_RDONLY)
+    try:
+        _write_gz_via_dd(image_fd, 42)
+    finally:
+        os.close(image_fd)
 
-    assert popen_calls == [
-        (["gzip", "-dc", str(image)], {"stdout": subprocess.PIPE}),
-        (
-            ["dd", "bs=16M", "status=progress"],
-            {
-                "stdin": gzip_stdout,
-                "stdout": 42,
-                "stderr": subprocess.PIPE,
-                "text": True,
-            },
-        ),
-    ]
+    assert popen_calls[0][0] == ["gzip", "-dc"]
+    assert popen_calls[0][1]["stdin"] == image_fd
+    assert popen_calls[0][1]["stdout"] is subprocess.PIPE
+    assert popen_calls[1] == (
+        ["dd", "bs=16M", "status=progress"],
+        {
+            "stdin": gzip_stdout,
+            "stdout": 42,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        },
+    )
     assert gzip_stdout.closed is True
 
 
@@ -780,10 +912,15 @@ def test_write_gz_via_dd_uses_unpadded_buffered_stream_on_macos(monkeypatch, tmp
     monkeypatch.setattr("easymanet.image.tempfile.TemporaryFile", _memory_tempfile)
     monkeypatch.setattr("easymanet.image.os.write", fake_write)
 
-    _write_gz_via_dd(str(image), 42)
+    image_fd = os.open(image, os.O_RDONLY)
+    try:
+        _write_gz_via_dd(image_fd, 42)
+    finally:
+        os.close(image_fd)
 
     assert len(popen_calls) == 1
-    assert popen_calls[0][0] == ["gzip", "-dc", str(image)]
+    assert popen_calls[0][0] == ["gzip", "-dc"]
+    assert popen_calls[0][1]["stdin"] == image_fd
     assert popen_calls[0][1]["stdout"] is subprocess.PIPE
     assert popen_calls[0][1]["stderr"] is not subprocess.DEVNULL
     assert writes == [full_chunk, full_chunk[len(full_chunk) // 2 :], tail]
@@ -815,8 +952,9 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path
     gzip_stdout = io.BytesIO(b"payload")
     procs = [FakeProc(2, stdout=gzip_stdout)]
 
-    def fake_popen(cmd, **_kwargs):
+    def fake_popen(cmd, **kwargs):
         if cmd[0] == "gzip":
+            kwargs["stderr"].write(b"gzip: trailing garbage ignored\n")
             return procs[0]
         raise AssertionError(f"dd should not run on macOS gzip streams: {cmd}")
 
@@ -831,7 +969,11 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2_on_macos(monkeypatch, tmp_path
         lambda _fd, payload: writes.append(bytes(payload)) or len(payload),
     )
 
-    _write_gz_via_dd(str(image), 42)
+    image_fd = os.open(image, os.O_RDONLY)
+    try:
+        _write_gz_via_dd(image_fd, 42)
+    finally:
+        os.close(image_fd)
 
     assert writes == [b"payload"]
 
@@ -875,7 +1017,11 @@ def test_write_gz_via_dd_reports_macos_buffered_write_failure(monkeypatch, tmp_p
     )
 
     with pytest.raises(OSError, match="raw write failed"):
-        _write_gz_via_dd(str(image), 42)
+        image_fd = os.open(image, os.O_RDONLY)
+        try:
+            _write_gz_via_dd(image_fd, 42)
+        finally:
+            os.close(image_fd)
 
     assert proc.killed is True
     assert proc.communicated is True
@@ -908,7 +1054,11 @@ def test_write_gz_via_dd_reports_macos_gzip_stderr(monkeypatch, tmp_path):
     monkeypatch.setattr("easymanet.image.os.write", lambda _fd, payload: len(payload))
 
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
-        _write_gz_via_dd(str(image), 42)
+        image_fd = os.open(image, os.O_RDONLY)
+        try:
+            _write_gz_via_dd(image_fd, 42)
+        finally:
+            os.close(image_fd)
 
     assert "gzip: corrupt input" in exc_info.value.stderr
 
@@ -925,12 +1075,16 @@ def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):
     monkeypatch.setattr("easymanet.image.subprocess.run", fake_run)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
 
-    _write_raw_via_dd(str(image), 42)
+    image_fd = os.open(image, os.O_RDONLY)
+    try:
+        _write_raw_via_dd(image_fd, 42)
+    finally:
+        os.close(image_fd)
 
     assert run_calls == [
         (
-            ["dd", f"if={image}", "bs=16m", "status=progress"],
-            {"check": True, "stdout": 42},
+            ["dd", "bs=16m", "status=progress"],
+            {"check": True, "stdin": image_fd, "stdout": 42},
         )
     ]
 
@@ -961,7 +1115,6 @@ def test_run_dd_with_progress_emits_parsed_byte_count(monkeypatch):
 
 def test_check_device_safety_requires_force_for_blocking_disk(monkeypatch, tmp_path):
     from easymanet import disks
-    from easymanet.image import _check_device_safety
 
     device = tmp_path / "device"
     device.write_bytes(b"device")
@@ -983,8 +1136,6 @@ def test_check_device_safety_requires_force_for_blocking_disk(monkeypatch, tmp_p
 
 
 def test_check_device_safety_binds_metadata_to_same_device_instance(monkeypatch, tmp_path):
-    from easymanet.image import _check_device_safety
-
     original = tmp_path / "original-device"
     replacement = tmp_path / "replacement-device"
     selected = tmp_path / "selected-device"

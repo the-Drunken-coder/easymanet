@@ -8,7 +8,7 @@ import ipaddress
 import re
 from typing import Optional
 
-from .manifest import Manifest
+from .manifest import Manifest, ManifestError
 from .provision import (
     GatewayConfig,
     LocalApConfig,
@@ -246,7 +246,11 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                 f"Node '{name}': gateway must be a mapping, got {type(node_gateway).__name__}"
             )
         if isinstance(manifest.defaults, dict):
-            resolved = resolve_node_model(manifest, name)
+            try:
+                resolved = resolve_node_model(manifest, name)
+            except ManifestError as exc:
+                result.add_error(str(exc))
+                continue
             _validate_local_ap(result, name, resolved.local_ap)
             _validate_gateway_semantics(
                 result,
@@ -272,7 +276,6 @@ def validate(manifest: Manifest, node_name: Optional[str] = None) -> ValidationR
                 _warn_point_gateway_wifi(
                     result,
                     name,
-                    resolved.local_ap,
                     resolved.gateway,
                 )
 
@@ -424,7 +427,6 @@ def _validate_gateway_wifi(
 def _warn_point_gateway_wifi(
     result: ValidationResult,
     node_label: str,
-    local_ap: LocalApConfig,
     gateway: GatewayConfig,
 ) -> None:
     wifi = gateway.wifi
@@ -435,11 +437,6 @@ def _warn_point_gateway_wifi(
         "for management access, but it does not make the point a mesh gateway "
         "or provide mesh-to-WAN forwarding"
     )
-    if local_ap.enabled:
-        result.add_warning(
-            f"Node '{node_label}': gateway.wifi.enabled on a point uses the "
-            "local AP radio, so local_ap will not be created"
-        )
     result.add_warning(
         f"Node '{node_label}': gateway.wifi.enabled on a point will expose "
         "SSH on upstream Wi-Fi if SSH is enabled during flash"

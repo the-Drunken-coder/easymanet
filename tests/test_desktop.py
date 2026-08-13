@@ -57,6 +57,7 @@ nodes:
     ip: 10.41.1.1
 
     local_ap:
+      enabled: false
       ssid: gate01-local
 
     gateway:
@@ -64,6 +65,14 @@ nodes:
       uplink_interface: wifi
       wifi:
         enabled: true
+
+  point01:
+    role: point
+    hostname: point01
+    ip: 10.41.2.1
+
+    local_ap:
+      ssid: point01-local
 """
     )
 
@@ -144,7 +153,8 @@ def test_desktop_validate_payload_returns_nodes():
     assert "point01" in payload["nodes"]
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
-    assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
+    assert payload["node_access"]["gate01"]["local_ap_enabled"] is False
+    assert payload["node_access"]["gate01"]["local_ap_ssid"] == ""
     assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
     assert payload["node_access"]["gate01"]["mesh_ip"] == "10.41.1.1"
     assert payload["node_access"]["gate01"]["ethernet_mesh_access"] is True
@@ -205,7 +215,7 @@ mesh:
 defaults:
   target: rpi4-mm6108-spi
   local_ap:
-    enabled: true
+    enabled: false
     password: local-ap-password
   gateway:
     enabled: true
@@ -1721,18 +1731,28 @@ def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path
         lambda **_kwargs: {},
     )
 
-    payload = bridge.prepare_flash_payload(
+    gate_payload = bridge.prepare_flash_payload(
         config=str(config),
         node="gate01",
         device="/dev/disk4",
         base_image=str(image),
     )
+    point_payload = bridge.prepare_flash_payload(
+        config=str(config),
+        node="point01",
+        device="/dev/disk4",
+        base_image=str(image),
+    )
 
-    encoded = json.dumps(payload)
-    assert payload["provision"]["mesh"]["password"] == "<redacted>"
-    assert payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
-    assert payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
-    assert payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
+    encoded = json.dumps([gate_payload, point_payload])
+    assert gate_payload["provision"]["mesh"]["password"] == "<redacted>"
+    assert gate_payload["provision"]["node"]["local_ap"]["enabled"] is False
+    assert gate_payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
+    assert gate_payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
+    assert point_payload["provision"]["mesh"]["password"] == "<redacted>"
+    assert point_payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
+    assert "wifi" not in point_payload["provision"]["node"]["gateway"]
+    assert point_payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
     assert "<redacted>" in encoded
     for raw_value in raw_values.values():
         assert raw_value not in encoded

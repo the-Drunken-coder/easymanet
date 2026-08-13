@@ -5,11 +5,11 @@ streaming, disk unmounts, stale overlay wipe, sync, and eject. It does not
 resolve fleet configs, download images, or stage EasyMANET boot payloads.
 """
 
+import hashlib
 import os
 import shutil
 import subprocess
 import tempfile
-import zlib
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
@@ -22,9 +22,7 @@ from ._image_dd import (
     stream_dd_device_path as _platform_stream_dd_device_path,
     write_block_size_arg as _platform_write_block_size_arg,
 )
-from ._image_validation import (
-    check_gzip_payload as _check_gzip_payload,
-)
+from ._download_integrity import normalize_sha256
 from .disks import (
     DeviceIdentity,
     DiskInfo,
@@ -45,6 +43,7 @@ class FlashError(Exception):
 
 FlashEventCallback = Callable[[dict[str, Any]], None]
 _MACOS_GZIP_WRITE_CHUNK_BYTES = 1024 * 1024
+_IMAGE_READ_BYTES = 1024 * 1024
 
 
 def _emit_event(
@@ -113,23 +112,113 @@ def _unmount_or_raise(device: str) -> None:
         raise FlashError(f"Failed to unmount {device}: {e}") from e
 
 
-def _check_image(image_path: str) -> Tuple[Path, Optional[int]]:
-    """Return (image path, decompressed byte count for .img.gz else None)."""
-    p = Path(image_path)
-    if not p.exists():
-        raise FlashError(f"Base image not found: {image_path}")
-    suffix = p.suffix.lower()
-    if suffix == ".gz":
-        if p.stem.lower().endswith(".img"):
-            try:
-                written_bytes = _check_gzip_payload(p)
-            except (OSError, zlib.error) as e:
-                raise FlashError(f"Invalid gzip-compressed image {image_path}: {e}") from e
-            return p, written_bytes
+def _open_image(image_path: str) -> tuple[Path, int]:
+    image = Path(image_path)
+    suffix = image.suffix.lower()
+    if suffix == ".gz" and not image.stem.lower().endswith(".img"):
         raise FlashError(f"Expected .img.gz file, got: {image_path}")
-    if suffix == ".img":
-        return p, None
-    raise FlashError(f"Unsupported image format: {image_path}. Expected .img or .img.gz")
+    if suffix not in {".img", ".gz"}:
+        raise FlashError(
+            f"Unsupported image format: {image_path}. Expected .img or .img.gz"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    try:
+        return image, os.open(image, flags)
+    except OSError as exc:
+        raise FlashError(f"Base image not found or unreadable: {image_path}: {exc}") from exc
+
+
+def _check_image(
+    image_path: str,
+    expected_sha256: str | None = None,
+) -> Tuple[Path, Optional[int]]:
+    """Validate one image object and return its decompressed size when gzipped."""
+    image, image_fd = _open_image(image_path)
+    try:
+        return image, _check_open_image(image, image_fd, expected_sha256)
+    finally:
+        os.close(image_fd)
+
+
+def _check_open_image(
+    image: Path,
+    image_fd: int,
+    expected_sha256: str | None,
+) -> int | None:
+    size = os.fstat(image_fd).st_size
+    if size <= 0:
+        raise FlashError(f"Base image is empty: {image}")
+    if expected_sha256:
+        try:
+            expected = normalize_sha256(expected_sha256)
+        except ValueError as exc:
+            raise FlashError(f"Invalid image SHA-256: {exc}") from exc
+        actual = _sha256_fd(image_fd)
+        if actual != expected:
+            raise FlashError(
+                f"SHA-256 mismatch for {image.name}: expected {expected}, got {actual}"
+            )
+    if image.suffix.lower() != ".gz":
+        return None
+    try:
+        written_bytes = _gzip_decompressed_bytes(image_fd)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FlashError(f"Invalid gzip-compressed image {image}: {exc}") from exc
+    if written_bytes <= 0:
+        raise FlashError(
+            f"Invalid gzip-compressed image {image}: compressed image did not contain a disk image payload"
+        )
+    return written_bytes
+
+
+def _sha256_fd(image_fd: int) -> str:
+    hasher = hashlib.sha256()
+    offset = 0
+    while True:
+        chunk = os.pread(image_fd, _IMAGE_READ_BYTES, offset)
+        if not chunk:
+            return hasher.hexdigest()
+        hasher.update(chunk)
+        offset += len(chunk)
+
+
+def _gzip_decompressed_bytes(image_fd: int) -> int:
+    os.lseek(image_fd, 0, os.SEEK_SET)
+    gzip_cmd = [_tool_path("gzip"), "-dc"]
+    with tempfile.TemporaryFile() as gzip_stderr_file:
+        gzip_proc = subprocess.Popen(
+            gzip_cmd,
+            stdin=image_fd,
+            stdout=subprocess.PIPE,
+            stderr=gzip_stderr_file,
+        )
+        assert gzip_proc.stdout is not None
+        total = 0
+        try:
+            for chunk in iter(
+                lambda: gzip_proc.stdout.read(_IMAGE_READ_BYTES),
+                b"",
+            ):
+                total += len(chunk)
+        except BaseException:
+            gzip_proc.kill()
+            gzip_proc.wait()
+            raise
+        finally:
+            gzip_proc.stdout.close()
+        gzip_return = gzip_proc.wait()
+        gzip_stderr_file.seek(0)
+        gzip_stderr = _decode_subprocess_output(gzip_stderr_file.read())
+    _check_gzip_result(gzip_return, gzip_cmd, gzip_stderr)
+    return total
+
+
+def _check_gzip_result(return_code: int, command: list[str], stderr: str) -> None:
+    if return_code == 0:
+        return
+    if return_code == 2 and "trailing garbage ignored" in stderr.lower():
+        return
+    raise subprocess.CalledProcessError(return_code, command, stderr=stderr)
 
 
 def _reread_partition_table(device: str) -> None:
@@ -173,141 +262,159 @@ def flash_image(
     dry_run: bool = False,
     force: bool = False,
     skip_overlay_wipe: bool = False,
+    expected_sha256: str | None = None,
     emit: FlashEventCallback | None = None,
-) -> None:
-    image, gzip_written_bytes = _check_image(image_path)
-    disk, device_identity = _check_device_safety(device, force=force)
-
-    if dry_run:
-        return
-
-    device = disk.device
-    write_path = (
-        _stream_dd_device_path(device)
-        if image.suffix == ".gz"
-        else _dd_device_path(device)
-    )
-    write_identity = (
-        device_identity
-        if write_path == device
-        else _capture_device_identity(write_path)
-    )
-    overlay_path = _dd_device_path(device)
-    overlay_identity = (
-        device_identity
-        if overlay_path == device
-        else _capture_device_identity(overlay_path)
-    )
-
-    _emit_event(
-        emit,
-        "disk_details",
-        f"Device: {disk.device}",
-        device=disk.device,
-        model=disk.model,
-        size_human=disk.size_human,
-        mounted=disk.mounted,
-        removable=disk.removable,
-    )
-
+) -> DeviceIdentity:
+    image, image_fd = _open_image(image_path)
     try:
-        _assert_device_identity(device_identity)
-        _unmount_or_raise(device)
+        gzip_written_bytes = _check_open_image(
+            image,
+            image_fd,
+            expected_sha256,
+        )
+        disk, device_identity = _check_device_safety(device, force=force)
+
+        if dry_run:
+            return device_identity
+
+        device = disk.device
+        write_path = (
+            _stream_dd_device_path(device)
+            if image.suffix == ".gz"
+            else _dd_device_path(device)
+        )
+        write_identity = (
+            device_identity
+            if write_path == device
+            else _capture_device_identity(write_path)
+        )
+        overlay_path = _dd_device_path(device)
+        overlay_identity = (
+            device_identity
+            if overlay_path == device
+            else _capture_device_identity(overlay_path)
+        )
+
         _emit_event(
             emit,
-            "write_started",
-            f"Writing {image.name} to {device}...",
-            image=image.name,
-            device=device,
+            "disk_details",
+            f"Device: {disk.device}",
+            device=disk.device,
+            model=disk.model,
+            size_human=disk.size_human,
+            mounted=disk.mounted,
+            removable=disk.removable,
         )
-        companions = () if write_identity == device_identity else (device_identity,)
-        device_fd = _open_device_for_write(write_identity, companions=companions)
+
         try:
-            if image.suffix == ".gz":
-                _write_gz_via_dd(str(image), device_fd, emit=emit)
-            else:
-                _write_raw_via_dd(str(image), device_fd, emit=emit)
-        finally:
-            os.close(device_fd)
-
-        _emit_event(emit, "sync_started", "Syncing...")
-        os.sync()
-        _emit_event(emit, "write_completed", "Done writing.")
-
-        if not skip_overlay_wipe:
-            written_bytes = gzip_written_bytes if gzip_written_bytes is not None else image.stat().st_size
-            _clear_stale_overlay(
-                device,
-                written_bytes,
-                device_identity=device_identity,
-                output_identity=overlay_identity,
-                emit=emit,
+            _assert_device_identity(device_identity)
+            _unmount_or_raise(device)
+            _emit_event(
+                emit,
+                "write_started",
+                f"Writing {image.name} to {device}...",
+                image=image.name,
+                device=device,
             )
+            companions = () if write_identity == device_identity else (device_identity,)
+            device_fd = _open_device_for_write(write_identity, companions=companions)
+            try:
+                if image.suffix == ".gz":
+                    _write_gz_via_dd(image_fd, device_fd, emit=emit)
+                else:
+                    _write_raw_via_dd(image_fd, device_fd, emit=emit)
+            finally:
+                os.close(device_fd)
 
-    except subprocess.CalledProcessError as e:
-        raise FlashError(f"Flash failed: {_command_error_message(e)}") from e
-    except FlashError:
-        raise
-    except (OSError, subprocess.SubprocessError) as e:
-        raise FlashError(f"Flash failed: {e}") from e
+            _emit_event(emit, "sync_started", "Syncing...")
+            os.sync()
+            _emit_event(emit, "write_completed", "Done writing.")
+
+            if not skip_overlay_wipe:
+                written_bytes = (
+                    gzip_written_bytes
+                    if gzip_written_bytes is not None
+                    else os.fstat(image_fd).st_size
+                )
+                _clear_stale_overlay(
+                    device,
+                    written_bytes,
+                    device_identity=device_identity,
+                    output_identity=overlay_identity,
+                    emit=emit,
+                )
+            return device_identity
+
+        except subprocess.CalledProcessError as e:
+            raise FlashError(f"Flash failed: {_command_error_message(e)}") from e
+        except FlashError:
+            raise
+        except (OSError, subprocess.SubprocessError) as e:
+            raise FlashError(f"Flash failed: {e}") from e
+    finally:
+        os.close(image_fd)
 
 
 def _write_gz_via_dd(
-    image_path: str,
+    image_fd: int,
     output_fd: int,
     *,
     emit: FlashEventCallback | None = None,
 ) -> None:
     if is_macos():
-        _write_gz_via_macos_stream(image_path, output_fd, emit=emit)
+        _write_gz_via_macos_stream(image_fd, output_fd, emit=emit)
         return
 
-    gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
+    os.lseek(image_fd, 0, os.SEEK_SET)
+    gzip_cmd = [_tool_path("gzip"), "-dc"]
     dd_cmd = [
         _tool_path("dd"),
         *_stream_dd_block_args(),
         "status=progress",
     ]
-    gzip_proc = subprocess.Popen(
-        gzip_cmd,
-        stdout=subprocess.PIPE,
-    )
-    assert gzip_proc.stdout is not None
-    dd_kwargs: dict[str, Any] = {
-        "stdin": gzip_proc.stdout,
-        "stdout": output_fd,
-        "stderr": subprocess.PIPE,
-        "text": True,
-    }
-    dd_proc = subprocess.Popen(dd_cmd, **dd_kwargs)
-    gzip_proc.stdout.close()
+    with tempfile.TemporaryFile() as gzip_stderr_file:
+        gzip_proc = subprocess.Popen(
+            gzip_cmd,
+            stdin=image_fd,
+            stdout=subprocess.PIPE,
+            stderr=gzip_stderr_file,
+        )
+        assert gzip_proc.stdout is not None
+        dd_kwargs: dict[str, Any] = {
+            "stdin": gzip_proc.stdout,
+            "stdout": output_fd,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+        dd_proc = subprocess.Popen(dd_cmd, **dd_kwargs)
+        gzip_proc.stdout.close()
 
-    if emit is None:
-        _dd_stdout, dd_stderr = dd_proc.communicate()
-    else:
-        dd_stderr = _drain_dd_progress(dd_proc, emit)
-    dd_return = dd_proc.wait()
-    gzip_return = gzip_proc.wait()
+        if emit is None:
+            _dd_stdout, dd_stderr = dd_proc.communicate()
+        else:
+            dd_stderr = _drain_dd_progress(dd_proc, emit)
+        dd_return = dd_proc.wait()
+        gzip_return = gzip_proc.wait()
+        gzip_stderr_file.seek(0)
+        gzip_stderr = _decode_subprocess_output(gzip_stderr_file.read())
 
     if dd_return != 0:
         raise subprocess.CalledProcessError(dd_return, dd_cmd, stderr=dd_stderr)
-
-    # OpenWrt/OpenMANET sysupgrade metadata after the gzip stream can yield exit 2
-    # ("trailing garbage ignored"); payload integrity is validated by _check_gzip_payload.
-    if gzip_return not in (0, 2):
-        raise subprocess.CalledProcessError(gzip_return, gzip_cmd)
+    _check_gzip_result(gzip_return, gzip_cmd, gzip_stderr)
 
 
 def _write_gz_via_macos_stream(
-    image_path: str,
+    image_fd: int,
     output_fd: int,
     *,
     emit: FlashEventCallback | None = None,
 ) -> None:
-    gzip_cmd = [_tool_path("gzip"), "-dc", image_path]
+    os.lseek(image_fd, 0, os.SEEK_SET)
+    gzip_cmd = [_tool_path("gzip"), "-dc"]
     with tempfile.TemporaryFile() as gzip_stderr_file:
         gzip_proc = subprocess.Popen(
             gzip_cmd,
+            stdin=image_fd,
             stdout=subprocess.PIPE,
             stderr=gzip_stderr_file,
         )
@@ -324,12 +431,7 @@ def _write_gz_via_macos_stream(
         gzip_stderr = _decode_subprocess_output(gzip_stderr_file.read())
     if write_error is not None:
         raise write_error
-    if gzip_proc.returncode not in (0, 2):
-        raise subprocess.CalledProcessError(
-            gzip_proc.returncode,
-            gzip_cmd,
-            stderr=gzip_stderr,
-        )
+    _check_gzip_result(gzip_proc.returncode, gzip_cmd, gzip_stderr)
 
 
 def _write_stream_to_fd(
@@ -510,18 +612,19 @@ def _clear_stale_overlay(
 
 
 def _write_raw_via_dd(
-    image_path: str,
+    image_fd: int,
     output_fd: int,
     *,
     emit: FlashEventCallback | None = None,
 ) -> None:
+    os.lseek(image_fd, 0, os.SEEK_SET)
     _run_dd_with_progress(
         [
             _tool_path("dd"),
-            f"if={image_path}",
             _write_block_size_arg(),
             "status=progress",
         ],
+        input_fd=image_fd,
         output_fd=output_fd,
         emit=emit,
     )
@@ -530,18 +633,21 @@ def _write_raw_via_dd(
 def _run_dd_with_progress(
     cmd: list[str],
     *,
+    input_fd: int | None = None,
     output_fd: int | None = None,
     emit: FlashEventCallback | None = None,
 ) -> None:
+    input_kwargs = {"stdin": input_fd} if input_fd is not None else {}
     output_kwargs = {"stdout": output_fd} if output_fd is not None else {}
     if emit is None:
-        subprocess.run(cmd, check=True, **output_kwargs)
+        subprocess.run(cmd, check=True, **input_kwargs, **output_kwargs)
         return
 
     proc = subprocess.Popen(
         cmd,
         stderr=subprocess.PIPE,
         text=True,
+        **input_kwargs,
         **output_kwargs,
     )
     stderr = _drain_dd_progress(proc, emit)
@@ -587,17 +693,18 @@ def _emit_dd_progress(text: str, emit: FlashEventCallback | None) -> None:
 
 def finish_flash(
     device: str,
-    eject: bool = True,
     *,
+    device_identity: DeviceIdentity,
+    eject: bool = True,
     emit: FlashEventCallback | None = None,
-) -> bool:
+) -> None:
     os.sync()
+    _assert_device_identity(device_identity)
     if eject:
         _emit_event(emit, "eject_started", f"Ejecting {device}...", device=device)
         try:
             eject_disk(device)
         except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-            _emit_event(emit, "warning", f"Warning: {e}", level="warning")
             _emit_event(
                 emit,
                 "eject_failed",
@@ -605,7 +712,7 @@ def finish_flash(
                 f"Run sync and eject {device} manually before removing it.",
                 level="warning",
             )
-            return False
+            raise FlashError(f"Failed to eject {device}: {e}") from e
     else:
         _emit_event(
             emit,
@@ -616,7 +723,6 @@ def finish_flash(
         try:
             _unmount_or_raise(device)
         except FlashError as exc:
-            _emit_event(emit, "warning", f"Warning: {exc}", level="warning")
             _emit_event(
                 emit,
                 "unmount_failed",
@@ -624,6 +730,5 @@ def finish_flash(
                 f"Unmount {device} manually before removing it.",
                 level="warning",
             )
-            return False
+            raise
     _emit_event(emit, "safe_to_remove", "Safe to remove.", device=device)
-    return True

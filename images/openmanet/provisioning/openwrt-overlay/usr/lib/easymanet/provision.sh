@@ -98,6 +98,7 @@ MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
 GATEWAY_ENABLED_VALUE="$(json_val node gateway enabled)"
 WIFI_UPLINK_ENABLED_VALUE="$(json_val node gateway wifi enabled)"
+LOCAL_AP_ENABLED_VALUE="$(json_val node local_ap enabled)"
 
 missing_fields=""
 [ -n "$PROVISION_VERSION" ] || missing_fields="$missing_fields version"
@@ -167,6 +168,18 @@ case "$WIFI_UPLINK_ENABLED_VALUE" in
         exit 1
         ;;
 esac
+case "$LOCAL_AP_ENABLED_VALUE" in
+    ""|false) LOCAL_AP_ENABLED=0 ;;
+    true) LOCAL_AP_ENABLED=1 ;;
+    *)
+        echo "FATAL: node.local_ap.enabled must be a boolean in provision.json" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+if [ "$LOCAL_AP_ENABLED" -eq 1 ] && [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
+    echo "FATAL: node.local_ap.enabled and node.gateway.wifi.enabled cannot both be true" | tee -a "$LOG_FILE"
+    exit 1
+fi
 case "${NODE_ROLE}:${GATEWAY_ENABLED_VALUE}" in
     gate:true)
         BATMAN_GW_MODE="server"
@@ -284,7 +297,7 @@ if [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
     uci -q delete wireless.wan0 2>/dev/null || true
 fi
 
-if json_bool node local_ap enabled && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
+if [ "$LOCAL_AP_ENABLED" -eq 1 ]; then
     LOCAL_AP_SSID="$(json_val node local_ap ssid)"
     LOCAL_AP_PASSWORD="$(json_val node local_ap password)"
     AP_RADIO="$(find_local_ap_radio)"

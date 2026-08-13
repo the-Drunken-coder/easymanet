@@ -210,6 +210,10 @@ flash-time `--enable-wan-api` opt-in only on trusted upstream Wi-Fi LANs. With
 `uplink_interface: eth0`, EasyMANET runs WAN DHCP on `eth0` and keeps that port
 out of `br-ahwlan`.
 
+`local_ap.enabled` and `gateway.wifi.enabled` cannot both be true on one node.
+They use the same physical radio. Disable the local AP on a Wi-Fi-uplink node;
+the validator and first-boot provisioning both reject the conflicting shape.
+
 Gateway mode itself is derived from the node role: gates render
 `gateway.enabled: true`; points render `gateway.enabled: false`. An authored
 `gateway.enabled` value is optional and must agree with the role. When
@@ -221,7 +225,7 @@ on first boot before network configuration is changed.
 On point nodes, `gateway.wifi.enabled` is allowed as a management uplink for
 direct SSH or troubleshooting over an upstream Wi-Fi LAN. It does not make the
 point a mesh gateway, does not provide mesh-to-WAN forwarding, and uses the
-same local AP radio that would otherwise host `local_ap`.
+same radio that would otherwise host `local_ap`, which must be disabled.
 
 ---
 

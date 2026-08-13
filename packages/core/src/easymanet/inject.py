@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from .disks import DeviceIdentity, assert_device_identity
 from .manifest import Manifest
 from .platform import is_linux, is_macos
 from .render import render
@@ -56,6 +57,7 @@ def inject(
     node_name: str,
     dry_run: bool = False,
     *,
+    device_identity: DeviceIdentity,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
 ) -> List[Tuple[str, bool]]:
@@ -71,10 +73,12 @@ def inject(
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
 
+    _assert_device_identity(device_identity)
     mount_point, mounted_here = _mount_boot_partition(device)
     results: List[Tuple[str, bool]] | None = None
     stage_error: BaseException | None = None
     try:
+        _assert_device_identity(device_identity)
         results = stage_boot_payload(
             Path(mount_point),
             manifest,
@@ -82,6 +86,7 @@ def inject(
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
         )
+        _assert_device_identity(device_identity)
     except OSError as exc:
         stage_error = InjectError(
             f"Failed to write boot-partition provision.json: {exc}"
@@ -95,10 +100,23 @@ def inject(
         if stage_error is not None:
             raise stage_error from cleanup_error
         raise
+    try:
+        _assert_device_identity(device_identity)
+    except InjectError as identity_error:
+        if stage_error is not None:
+            raise identity_error from stage_error
+        raise
     if stage_error is not None:
         raise stage_error
     assert results is not None
     return results
+
+
+def _assert_device_identity(expected: DeviceIdentity) -> None:
+    try:
+        assert_device_identity(expected)
+    except (OSError, ValueError) as exc:
+        raise InjectError(str(exc)) from exc
 
 
 def stage_boot_payload(

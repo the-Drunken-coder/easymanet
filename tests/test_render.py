@@ -297,6 +297,7 @@ def test_render_starter_gate_uses_wifi_uplink_shape():
     assert gate["node"]["gateway"]["wifi"]["enabled"] is True
     assert gate["node"]["gateway"]["wifi"]["ssid"]
     assert gate["node"]["gateway"]["wifi"]["password"]
+    assert gate["node"]["local_ap"]["enabled"] is False
     assert gate["management"]["ssh_enabled"] is True
 
 
@@ -308,6 +309,7 @@ def test_render_preserves_safe_scalar_content_and_canonical_booleans(tmp_path):
     data["defaults"]["local_ap"]["password"] = scalar
     data["defaults"]["management"]["root_password_hash"] = scalar
     data["nodes"]["node01"]["local_ap"]["ssid"] = scalar
+    data["nodes"]["node01"]["local_ap"]["enabled"] = False
     data["nodes"]["node01"]["gateway"] = {
         "enabled": True,
         "uplink_interface": "wifi",
@@ -330,9 +332,30 @@ def test_render_preserves_safe_scalar_content_and_canonical_booleans(tmp_path):
     assert result["node"]["gateway"]["wifi"]["ssid"] == scalar
     assert result["node"]["gateway"]["wifi"]["password"] == scalar
     assert result["management"]["root_password_hash"] == scalar
-    assert type(result["node"]["local_ap"]["enabled"]) is bool
+    assert result["node"]["local_ap"]["enabled"] is False
     assert type(result["node"]["gateway"]["enabled"]) is bool
     assert type(result["node"]["gateway"]["wifi"]["enabled"]) is bool
+
+
+def test_render_rejects_local_ap_with_gateway_wifi():
+    config = VALID_CONFIG.replace(
+        "      uplink_interface: eth0",
+        """      uplink_interface: wifi
+      wifi:
+        enabled: true
+        ssid: operator-wifi
+        password: operator-password""",
+        1,
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    with pytest.raises(
+        ManifestError,
+        match=r"local_ap\.enabled and gateway\.wifi\.enabled cannot both be true",
+    ):
+        render_dict(manifest, "node01")
+    os.unlink(path)
 
 
 def test_render_derives_gateway_enabled_from_role():

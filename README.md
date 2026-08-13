@@ -100,7 +100,7 @@ nodes:
     hostname: gate01
     ip: 10.41.1.1
     local_ap:
-      ssid: gate01-local
+      enabled: false
     gateway:
       uplink_interface: wifi
       wifi:
@@ -301,7 +301,7 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 - [Public Product Repositories](docs/public-repos.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
 - [Design Decisions](docs/design-decisions/) — durable choices and trade-offs ([template](docs/design-decisions/_EXAMPLE_DESIGN_DECISION_.md))
-- [Problems](docs/problems/) — short-lived agent notes on active blockers ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
+- [Problems](docs/problems/) — active blocker notes and an archive of resolved findings ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
 
 ## Development
 

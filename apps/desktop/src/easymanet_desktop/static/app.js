@@ -120,10 +120,10 @@ checkImageUpdatesButton.addEventListener("click", () => {
   refreshImageUpdateStatus({ checkLatest: true, reportErrors: true }).catch(handleRefreshError);
 });
 fleetSelect.addEventListener("change", () => {
-  selectFleetSource(fleetSelect.value);
+  selectFleetSource(fleetSelect.value).catch(handleNodeLoadError);
 });
 meshConfigSource.addEventListener("change", () => {
-  selectFleetSource(meshConfigSource.value);
+  selectFleetSource(meshConfigSource.value).catch(handleNodeLoadError);
 });
 configInput.addEventListener("input", () => {
   state.nodeLoadSeq += 1;
@@ -133,10 +133,7 @@ configInput.addEventListener("input", () => {
   updateFlashControls();
 });
 configInput.addEventListener("change", () => {
-  syncFleetSelect(configInput.value.trim());
-  resetMeshDiscovery();
-  updateFleetSource();
-  loadNodesForSelectedFleet().catch(handleNodeLoadError);
+  selectFleetSource(configInput.value.trim()).catch(handleNodeLoadError);
 });
 nodeSelect.addEventListener("change", () => {
   state.nodeName = nodeSelect.value.trim();
@@ -149,11 +146,7 @@ chooseConfig.addEventListener("click", async () => {
   }
   const result = await nativeApi.chooseConfig();
   if (result.ok && result.path) {
-    configInput.value = result.path;
-    syncFleetSelect(result.path);
-    updateFleetSource();
-    await loadNodesForSelectedFleet().catch(handleNodeLoadError);
-    updateFlashControls();
+    await selectFleetSource(result.path).catch(handleNodeLoadError);
   }
 });
 openFleetsFolder.addEventListener("click", async () => {
@@ -536,11 +529,7 @@ async function renderFleets(records, folder) {
 
   const current = configInput.value.trim();
   const selected = current || records[0].path;
-  configInput.value = selected;
-  syncFleetSelect(selected);
-  updateFleetSource();
-  await loadNodesForSelectedFleet(state.nodeName).catch(handleNodeLoadError);
-  updateFlashControls();
+  await selectFleetSource(selected, state.nodeName).catch(handleNodeLoadError);
 }
 
 function syncFleetSelect(path) {
@@ -580,7 +569,7 @@ function syncFleetSelectElement(select, path) {
   select.value = path;
 }
 
-function selectFleetSource(path) {
+async function selectFleetSource(path, preferredNode = "") {
   if (!path) {
     return;
   }
@@ -588,8 +577,11 @@ function selectFleetSource(path) {
   syncFleetSelect(path);
   resetMeshDiscovery();
   updateFleetSource();
-  loadNodesForSelectedFleet().catch(handleNodeLoadError);
-  updateFlashControls();
+  try {
+    await loadNodesForSelectedFleet(preferredNode);
+  } finally {
+    updateFlashControls();
+  }
 }
 
 async function loadNodesForSelectedFleet(preferredNode = "") {

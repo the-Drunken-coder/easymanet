@@ -25,6 +25,28 @@ def _image_artifact(tmp_path, contents=b"firmware"):
     return artifact, hashlib.sha256(contents).hexdigest()
 
 
+def _clean_provenance(sha="a" * 40):
+    source = {
+        "git_sha": sha,
+        "dirty": False,
+        "valid": True,
+        "detail": "",
+    }
+    return {
+        "runner": dict(source),
+        "source": dict(source),
+    }
+
+
+def _stable_config_evidence():
+    return {
+        "path": "/tmp/fleet.yml",
+        "sha256": "b" * 64,
+        "size_bytes": 123,
+        "stable": True,
+    }
+
+
 def test_parse_args_refuses_flash_without_guardrails():
     with pytest.raises(SystemExit):
         hil_verify.parse_args(
@@ -134,6 +156,7 @@ def test_parse_args_requires_ssh_for_throughput_smoke(capsys):
 
 def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    monkeypatch.setattr(hil_verify, "_git_provenance", _clean_provenance)
     artifact, sha256 = _image_artifact(tmp_path)
     args = hil_verify.parse_args(
         [
@@ -165,6 +188,10 @@ def test_dry_run_writes_result_and_bundle(tmp_path, monkeypatch):
     assert payload["image"]["artifact_path"] == str(artifact.resolve())
     assert payload["image"]["sha256"] == sha256
     assert payload["image"]["trust"]["status"] == "checksum-only"
+    assert payload["provenance"]["source"]["valid"] is True
+    config_path = Path(payload["config"]["path"])
+    assert payload["config"]["sha256"] == hashlib.sha256(config_path.read_bytes()).hexdigest()
+    assert payload["config"]["stable"] is True
     assert payload["evidence_scope"] == {
         "kind": "synthetic-dry-run",
         "simulation": False,
@@ -252,8 +279,22 @@ def test_unsafe_ip_override_stops_before_throughput_command(tmp_path, monkeypatc
 
 def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    monkeypatch.setattr(hil_verify, "_git_provenance", _clean_provenance)
     artifact, sha256 = _image_artifact(tmp_path)
     events = []
+    expected_trust = {
+        "status": "verified",
+        "source": "official",
+        "channel": "stable",
+        "release_tag": "images-v1.2.3",
+        "image_status": "current",
+        "manifest_url": "https://example.invalid/manifest.json",
+        "manifest_schema_version": 2,
+        "manifest_signature_verified": True,
+        "expected_repo": "the-Drunken-coder/easymanet-images",
+        "attestation_subject_digest": sha256,
+        "warnings": [],
+    }
 
     class FakeFlashResult:
         ok = True
@@ -271,8 +312,7 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
                 "image": {
                     "path": str(artifact),
                     "sha256": sha256,
-                    "trust_status": "verified",
-                    "source": "official",
+                    "trust": expected_trust,
                 },
                 "events": [] if include_events else None,
             }
@@ -341,6 +381,11 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     assert any(check["name"] == "post-flash boot handoff confirmed" and check["ok"] for check in payload["checks"])
     assert payload["image"]["node_image_identity"] == "flashed"
     assert payload["image"]["sha256"] == sha256
+    assert payload["image"]["trust"] == expected_trust
+    assert payload["provenance"]["source"]["valid"] is True
+    config_path = Path(payload["config"]["path"])
+    assert payload["config"]["sha256"] == hashlib.sha256(config_path.read_bytes()).hexdigest()
+    assert payload["config"]["stable"] is True
     assert payload["evidence_scope"]["kind"] == "physical-hil"
     assert payload["evidence_scope"]["physical_acceptance"] is True
 
@@ -447,6 +492,8 @@ def test_git_provenance_records_clean_runner_and_source_shas(monkeypatch):
     assert provenance["source"]["git_sha"] == sha256
     assert provenance["runner"]["dirty"] is False
     assert provenance["source"]["dirty"] is False
+    assert provenance["runner"]["valid"] is True
+    assert provenance["source"]["valid"] is True
 
 
 def test_git_provenance_records_dirty_state_without_claiming_clean(monkeypatch):
@@ -465,6 +512,114 @@ def test_git_provenance_records_dirty_state_without_claiming_clean(monkeypatch):
     assert provenance["source"]["git_sha"] == sha256
     assert provenance["runner"]["dirty"] is True
     assert provenance["source"]["dirty"] is True
+    assert provenance["runner"]["valid"] is True
+    assert provenance["source"]["valid"] is True
+
+
+def test_git_provenance_marks_non_commit_head_invalid(monkeypatch):
+    def fake_git_output(args):
+        return "not-a-commit" if args == ["rev-parse", "HEAD"] else ""
+
+    monkeypatch.setattr(hil_verify, "_git_output", fake_git_output)
+
+    provenance = hil_verify._git_provenance()
+
+    assert provenance["source"]["git_sha"] == "not-a-commit"
+    assert provenance["source"]["dirty"] is False
+    assert provenance["source"]["valid"] is False
+    assert "40-character" in provenance["source"]["detail"]
+
+
+def test_git_provenance_records_unavailable_source(monkeypatch):
+    def fail_git_output(_args):
+        raise subprocess.CalledProcessError(128, ["git"])
+
+    monkeypatch.setattr(hil_verify, "_git_output", fail_git_output)
+
+    provenance = hil_verify._git_provenance()
+
+    assert provenance["source"]["git_sha"] == ""
+    assert provenance["source"]["dirty"] is None
+    assert provenance["source"]["valid"] is False
+    assert "unavailable" in provenance["source"]["detail"].lower()
+
+
+@pytest.mark.parametrize(
+    "missing_attribution",
+    [
+        "dirty-source",
+        "unavailable-source",
+        "invalid-source",
+        "unstable-config",
+        "missing-config-digest",
+    ],
+)
+def test_attribution_gaps_preserve_observation_but_block_acceptance(missing_attribution):
+    provenance = _clean_provenance()
+    config = _stable_config_evidence()
+    if missing_attribution == "dirty-source":
+        provenance["source"]["dirty"] = True
+    elif missing_attribution == "unavailable-source":
+        provenance["source"].update(
+            {"git_sha": "", "dirty": None, "valid": False}
+        )
+    elif missing_attribution == "invalid-source":
+        provenance["source"].update(
+            {"git_sha": "not-a-commit", "valid": False}
+        )
+    elif missing_attribution == "unstable-config":
+        config["stable"] = False
+    else:
+        config["sha256"] = ""
+
+    scope = hil_verify._evidence_scope(
+        "flash",
+        True,
+        {
+            "gate01": {"ok": True, "mode": "flash"},
+            "point01": {"ok": True, "mode": "flash"},
+        },
+        {
+            "node_image_identity": "flashed",
+            "local_digest_verified": True,
+        },
+        provenance,
+        config,
+    )
+
+    assert scope["kind"] == "physical-observation"
+    assert scope["physical_acceptance"] is False
+    assert "Behavioral HIL passed" in scope["detail"]
+
+
+def test_manifest_mutation_is_recorded_before_hardware_work(tmp_path, monkeypatch):
+    source = hil_verify.REPO_ROOT / "examples" / "three-node-field-mesh.yml"
+    config = tmp_path / "fleet.yml"
+    original = source.read_bytes()
+    config.write_bytes(original)
+    real_load_manifest = hil_verify.load_manifest
+
+    def load_then_mutate(path):
+        manifest = real_load_manifest(path)
+        config.write_bytes(original + b"\n# changed during load\n")
+        return manifest
+
+    monkeypatch.setattr(hil_verify, "load_manifest", load_then_mutate)
+    checks = []
+    errors = []
+
+    manifest, evidence = hil_verify._load_manifest_for_result(
+        config,
+        checks,
+        errors,
+    )
+
+    assert manifest is None
+    assert evidence["sha256"] == hashlib.sha256(original).hexdigest()
+    assert evidence["stable"] is False
+    assert errors == ["Fleet config changed while HIL inputs were being loaded."]
+    assert checks[-1]["name"] == "fleet config identity"
+    assert checks[-1]["ok"] is False
 
 
 def test_reuse_rejects_missing_local_artifact_before_probes(tmp_path, monkeypatch):

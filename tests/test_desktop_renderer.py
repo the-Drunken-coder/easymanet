@@ -156,6 +156,7 @@ let meshResolvers = [];
 let flashCallback = null;
 let copiedTexts = [];
 let diagnosticsCalls = [];
+let chosenConfigPath = "";
 
 function statePayload() {
   return {
@@ -254,7 +255,7 @@ const nativeApi = {
     return Promise.resolve({ ok: true, summary: "diagnostics summary", support_code: "ready" });
   },
   chooseConfig() {
-    return Promise.resolve({ ok: true, path: "" });
+    return Promise.resolve({ ok: true, path: chosenConfigPath });
   },
   openFleetsFolder() {
     return Promise.resolve({ ok: true });
@@ -523,7 +524,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   element("config-path").value = "/tmp/EasyMANET/Fleets/fleet-a.yml";
   const staleMeshPromise = context.discoverMesh();
   await flush();
-  context.selectFleetSource("/tmp/EasyMANET/Fleets/fleet-b.yml");
+  chosenConfigPath = "/tmp/EasyMANET/Fleets/fleet-b.yml";
+  const chooseConfigPromise = element("choose-config").listeners.click();
   await flush();
   meshResolvers.shift()({
     ok: true,
@@ -532,6 +534,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     candidates_checked: 1,
   });
   await staleMeshPromise;
+  await chooseConfigPromise;
   const staleMeshResponseSuppressed = context.window.EMState.meshNodes.length === 0
     && element("mesh-summary").hidden === true
     && element("mesh-discover").disabled === false

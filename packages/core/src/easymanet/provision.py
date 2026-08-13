@@ -298,8 +298,13 @@ def resolve_node_model(manifest: Manifest, node_name: str) -> ResolvedNode:
         f"nodes.{node_name}.role",
         default=default_role,
     )
-    local_ap = _resolved_local_ap(defaults, node, node_name)
-    gateway = _resolved_gateway(defaults, node, role=role)
+    local_ap = LocalApConfig.from_mapping(
+        _resolved_local_ap(defaults, node, node_name)
+    )
+    gateway = GatewayConfig.from_mapping(
+        _resolved_gateway(defaults, node, role=role)
+    )
+    _require_distinct_local_wifi_modes(node_name, local_ap, gateway)
     return ResolvedNode(
         name=node_name,
         hostname=_string_value(
@@ -321,9 +326,22 @@ def resolve_node_model(manifest: Manifest, node_name: str) -> ResolvedNode:
             ),
         ),
         ip=_string_value(node, "ip", f"nodes.{node_name}.ip"),
-        local_ap=LocalApConfig.from_mapping(local_ap),
-        gateway=GatewayConfig.from_mapping(gateway),
+        local_ap=local_ap,
+        gateway=gateway,
     )
+
+
+def _require_distinct_local_wifi_modes(
+    node_name: str,
+    local_ap: LocalApConfig,
+    gateway: GatewayConfig,
+) -> None:
+    wifi = gateway.wifi
+    if local_ap.enabled and wifi is not None and wifi.enabled:
+        raise ManifestError(
+            f"Node '{node_name}': local_ap.enabled and gateway.wifi.enabled "
+            "cannot both be true"
+        )
 
 
 def resolve_provision(

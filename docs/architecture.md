@@ -48,13 +48,12 @@ state, and platform helpers.
 ### CLI (`apps/cli/src/easymanet_cli/`)
 
 Installable automation surface. Dispatches commands: `disks`, `validate`,
-`render`, `flash`, workspace discovery commands, and the image subcommands
-exposed by `easymanet_image`.
+`render`, `flash`, workspace discovery commands, and image command registration.
 
 ### Image Surface (`packages/image/src/easymanet_image/`)
 
-OpenMANET image builder, image command registration, and release metadata
-generation. Owns the firmware build workflow and the image release manifest.
+OpenMANET image build and release metadata implementation. Owns the firmware
+build workflow and the image release manifest; the CLI owns command registration.
 
 ### Desktop Surface (`apps/desktop/electron/`, `apps/desktop/src/easymanet_desktop/`)
 
@@ -62,7 +61,7 @@ Local-first Electron operator console. It loads UI files from disk, exposes a
 narrow preload API, and calls the Python desktop bridge for state, disk
 discovery, shared workspace fleet discovery, and fleet validation. The Python
 `easymanet-desktop serve` command keeps a browser-served fallback for
-development and smoke testing.
+development and smoke testing, bound only to an IPv4 loopback address.
 
 ### Publish Surface (`tools/publish/src/easymanet_publish/`, `tools/packaging/publish_product_repos.py`)
 
@@ -87,7 +86,7 @@ errors and warnings separately.
 Merges mesh settings, defaults, and node-specific overrides into a
 single resolved `provision.json` document for the boot-partition payload.
 
-### Disks (`disks.py`)
+### Disks (`disks/`)
 
 Lists available external/removable disks on macOS (diskutil) and Linux
 (lsblk). Detects system disks and mounted partitions.

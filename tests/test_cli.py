@@ -479,7 +479,7 @@ def test_cli_validate_resolves_fleet_name_from_workspace(tmp_path, monkeypatch):
     assert f"Validating: {fleet}" in result.output
 
 
-def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypatch):
+def test_flash_exits_when_finish_flash_raises_eject_failure(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
     from easymanet_cli.app import app
@@ -521,12 +521,13 @@ def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypat
     monkeypatch.setattr(core_flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(core_flash, "inject_dry_run_info", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(core_flash, "check_privileges", lambda _device: None)
-    monkeypatch.setattr(core_flash, "flash_image", lambda **_kwargs: None)
+    device_identity = object()
+    monkeypatch.setattr(core_flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(core_flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
 
     def fake_finish_flash(device, eject=True, **_kwargs):
         finish_calls.append((device, eject))
-        return False
+        raise core_flash.FlashError("eject failed")
 
     monkeypatch.setattr(core_flash, "finish_flash", fake_finish_flash)
 

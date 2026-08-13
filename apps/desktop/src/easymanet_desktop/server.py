@@ -47,7 +47,11 @@ def desktop_root() -> None:
 
 @app.command(name="serve")
 def serve_cmd(
-    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="IPv4 loopback bind address",
+    ),
     port: int = typer.Option(8765, "--port", "-p", help="Bind port"),
     open_browser: bool = typer.Option(
         True,

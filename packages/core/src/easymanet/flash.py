@@ -159,11 +159,12 @@ def run_flash_workflow(
             ) from exc
 
         try:
-            flash_image(
+            device_identity = flash_image(
                 device=options.device,
                 image_path=image_path,
                 force=options.force,
                 skip_overlay_wipe=options.skip_overlay_wipe,
+                expected_sha256=str(context["image"].get("sha256") or "") or None,
                 emit=lambda payload: _forward_media_event(
                     payload,
                     send,
@@ -185,6 +186,7 @@ def run_flash_workflow(
                     device=options.device,
                     manifest=manifest,
                     node_name=options.node,
+                    device_identity=device_identity,
                     ssh_enabled=ssh_enabled,
                     api_wan_enabled=api_wan_enabled,
                 )
@@ -205,20 +207,23 @@ def run_flash_workflow(
                 warnings=warnings,
             ) from exc
 
-        if not finish_flash(
-            options.device,
-            eject=not options.no_eject,
-            emit=lambda payload: _forward_media_event(
-                payload,
-                send,
-                default_type="finish",
-            ),
-        ):
+        try:
+            finish_flash(
+                options.device,
+                device_identity=device_identity,
+                eject=not options.no_eject,
+                emit=lambda payload: _forward_media_event(
+                    payload,
+                    send,
+                    default_type="finish",
+                ),
+            )
+        except FlashError as exc:
             raise FlashWorkflowError(
                 FlashErrorCode.FINISH,
-                "Eject failed; sync and eject the disk manually before removing it.",
+                f"Final disk cleanup failed: {exc}",
                 warnings=warnings,
-            )
+            ) from exc
 
         send("complete", f"Done. Insert the drive into the Raspberry Pi for {options.node} and boot.")
         return _result(

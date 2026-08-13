@@ -569,6 +569,8 @@ def test_gateway_wifi_requires_ssid_and_password():
     role: gate
     hostname: node03
     ip: 10.41.3.1
+    local_ap:
+      enabled: false
     gateway:
       enabled: true
       wifi:
@@ -604,7 +606,10 @@ defaults:
     role: gate
     hostname: node03
     ip: 10.41.3.1
+    local_ap:
+      enabled: false
     gateway:
+      uplink_interface: wifi
       wifi:
         enabled: true
 """
@@ -635,6 +640,10 @@ def test_gateway_enabled_must_match_point_role():
 
 def test_gateway_wifi_enabled_requires_wifi_uplink_interface():
     config = VALID_CONFIG.replace(
+        "    local_ap:\n      ssid: node01-local",
+        "    local_ap:\n      enabled: false\n      ssid: node01-local",
+        1,
+    ).replace(
         "      uplink_interface: eth0",
         """      uplink_interface: eth0
       wifi:
@@ -649,6 +658,28 @@ def test_gateway_wifi_enabled_requires_wifi_uplink_interface():
 
     assert not result.valid
     assert any("gateway.wifi.enabled requires gateway.uplink_interface: wifi" in error for error in result.errors)
+    os.unlink(path)
+
+
+def test_local_ap_and_gateway_wifi_are_mutually_exclusive():
+    config = VALID_CONFIG.replace(
+        "      uplink_interface: eth0",
+        """      uplink_interface: wifi
+      wifi:
+        enabled: true
+        ssid: operator-wifi
+        password: operator-password""",
+        1,
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+    result = validate(manifest, node_name="node01")
+
+    assert not result.valid
+    assert any(
+        "local_ap.enabled and gateway.wifi.enabled cannot both be true" in error
+        for error in result.errors
+    )
     os.unlink(path)
 
 
@@ -669,7 +700,10 @@ def test_point_gateway_wifi_warns_but_remains_valid():
     role: point
     hostname: node03
     ip: 10.41.3.1
+    local_ap:
+      enabled: false
     gateway:
+      uplink_interface: wifi
       wifi:
         enabled: true
         ssid: home-wifi
@@ -681,6 +715,5 @@ def test_point_gateway_wifi_warns_but_remains_valid():
     assert result.valid
     assert result.errors == []
     assert any("does not make the point a mesh gateway" in w for w in result.warnings)
-    assert any("local_ap will not be created" in w for w in result.warnings)
     assert any("SSH on upstream Wi-Fi if SSH is enabled" in w for w in result.warnings)
     os.unlink(path)

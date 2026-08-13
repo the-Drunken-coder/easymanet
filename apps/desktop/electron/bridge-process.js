@@ -175,6 +175,13 @@ function runBridgeProcess(args, handlers) {
       if (operation.terminating) {
         return;
       }
+      if (process.platform !== "win32" && child.pid && processGroupExists(child.pid)) {
+        terminateInBackground({
+          ok: false,
+          errors: ["EasyMANET bridge exited before its child processes"],
+        });
+        return;
+      }
       try {
         handlers.onClose(state, finish);
       } catch (error) {

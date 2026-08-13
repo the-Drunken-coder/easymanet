@@ -11,9 +11,8 @@ tooling as one coordinated product.
   `apps/desktop/electron/package.json` must stay on the same release version.
 - The old Python module paths are intentionally not supported:
   `easymanet.cli`, `easymanet.cli_image`, `easymanet.build`,
-  `easymanet.cli_flash`, and `easymanet.cli_common` must remain removed.
-- Patch releases fix packaging, docs, desktop shell, and provisioning bugs
-  without changing accepted fleet config shape.
+  `easymanet.cli_flash`, `easymanet.cli_common`, and `easymanet_image.cli`
+  must remain removed.
 - Minor releases can add new hardware targets, fleet config fields, desktop
   workflows, or image-discovery behavior.
 
@@ -84,16 +83,19 @@ runs iperf3 throughput smoke, and writes both JSON evidence and a redacted
 support bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt`
 only for lab fixtures where flashed media is automatically booted before probing.
 
-HIL schema v2 records exact runner/source Git SHAs and whether that worktree was
-dirty. A dry run is synthetic evidence only: it is neither calibration nor
-physical acceptance. Product physical acceptance requires both named nodes to
-be flashed and the shared artifact digest to be verified in that run. It does
-not establish simulation parity, calibration results, fleet-wide acceptance, or
-a general radio-range claim.
+HIL schema v2 records the exact runner/source Git SHA, clean-worktree status,
+fleet-config SHA-256, and image identity and trust metadata. A dry run is
+synthetic evidence only: it is neither calibration nor physical acceptance.
+Product physical acceptance requires both named nodes to be flashed with the
+same verified artifact in that run, a clean full source commit, and a stable
+fleet-config digest. It does not establish simulation parity, calibration
+results, fleet-wide acceptance, or a general radio-range claim.
 
-Flashed media is sensitive until first boot completes: `provision.json` is
-written in cleartext on the boot volume until provisioning succeeds, and the
-overlay copy at `/etc/easymanet/provision.json` remains mode `0600`.
+Flashed media is sensitive until first-boot provisioning accepts its required
+activation commands: `provision.json` is written in cleartext on the boot
+volume until then, and the overlay copy at `/etc/easymanet/provision.json`
+remains mode `0600`. The provisioned marker does not prove radio association,
+WAN reachability, or physical mesh connectivity.
 
 Point nodes normally have SSH disabled. For a release HIL run that keeps point
 SSH disabled, pass `--point-boot-report /path/to/boot` or a
@@ -106,7 +108,7 @@ rm -rf dist/release
 mkdir -p dist/release/wheels
 
 .codex-venv/bin/python -m pip wheel \
-  --no-deps --no-build-isolation \
+  --no-deps \
   --wheel-dir dist/release/wheels .
 
 npm --prefix apps/desktop/electron ci

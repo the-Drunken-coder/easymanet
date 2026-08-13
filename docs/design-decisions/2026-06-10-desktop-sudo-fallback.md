@@ -12,12 +12,14 @@ hand the operator an explicit terminal command.
 
 ## Decision
 
-Do not install a privileged helper. If the bridge detects that write access is
-missing, return a copy-paste `sudo` command that re-runs the same bridge flash
-operation with resolved image arguments where available.
+Do not install a privileged helper. On macOS, the native desktop prompts for an
+administrator password and runs the narrow bridge flash command through
+`sudo`. If in-app elevation is unavailable, return the same resolved command as
+an explicit copyable terminal fallback.
 
 ## Consequences
 
-The app stays local-first and avoids long-lived privileged components. The trade
-off is a less polished flash path when privileges are missing, but the operator
-can inspect the exact command before running it.
+The app stays local-first and avoids long-lived privileged components. Elevated
+inputs are staged only for the command lifetime and cleaned on success or
+failure. The operator still gets an inspectable terminal command when native
+elevation cannot run.

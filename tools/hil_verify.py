@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
@@ -198,8 +200,13 @@ def run_hil(
     provenance = _git_provenance()
     image = _empty_image_evidence()
     config_path = resolve_fleet_config(args.config)
+    config_evidence = _empty_config_evidence(config_path)
 
-    manifest = _load_manifest_for_result(config_path, checks, errors)
+    manifest, config_evidence = _load_manifest_for_result(
+        config_path,
+        checks,
+        errors,
+    )
     gate = None
     point = None
     if manifest is not None:
@@ -274,12 +281,20 @@ def run_hil(
         "generated_at": _iso(now),
         "easymanet_version": EASYMANET_VERSION,
         "config_path": str(config_path),
+        "config": config_evidence,
         "gate_node": args.gate_node,
         "point_node": args.point_node,
         "wait_seconds": 0 if args.dry_run else args.wait_seconds,
         "provenance": provenance,
         "image": image,
-        "evidence_scope": _evidence_scope(mode, ok, flash_results, image),
+        "evidence_scope": _evidence_scope(
+            mode,
+            ok,
+            flash_results,
+            image,
+            provenance,
+            config_evidence,
+        ),
         "flash": flash_results,
         "nodes": nodes,
         "topology": topology,
@@ -303,21 +318,38 @@ def _git_provenance() -> dict[str, Any]:
     except (OSError, subprocess.SubprocessError) as exc:
         detail = f"Git provenance unavailable: {exc}"
         return {
-            "runner": {"git_sha": "", "dirty": None, "detail": detail},
-            "source": {"git_sha": "", "dirty": None, "detail": detail},
+            "runner": {
+                "git_sha": "",
+                "dirty": None,
+                "valid": False,
+                "detail": detail,
+            },
+            "source": {
+                "git_sha": "",
+                "dirty": None,
+                "valid": False,
+                "detail": detail,
+            },
         }
 
+    git_sha = git_sha.lower()
     dirty = bool(status)
+    valid = re.fullmatch(r"[0-9a-f]{40}", git_sha) is not None
+    detail = "" if valid else "Git HEAD is not a full 40-character commit SHA."
     return {
         "runner": {
             "git_sha": git_sha,
             "dirty": dirty,
+            "valid": valid,
             "path": str(Path(__file__).resolve()),
+            "detail": detail,
         },
         "source": {
             "git_sha": git_sha,
             "dirty": dirty,
+            "valid": valid,
             "path": str(REPO_ROOT),
+            "detail": detail,
         },
     }
 
@@ -341,6 +373,15 @@ def _empty_image_evidence() -> dict[str, Any]:
         "local_digest_verified": False,
         "node_image_identity": "not-attested",
         "trust": {},
+    }
+
+
+def _empty_config_evidence(config_path: Path) -> dict[str, Any]:
+    return {
+        "path": str(config_path.resolve()),
+        "sha256": "",
+        "size_bytes": 0,
+        "stable": False,
     }
 
 
@@ -440,16 +481,19 @@ def _flash_image_evidence(
             _add_check(checks, "flash image identity", False, message)
             return _empty_image_evidence()
 
-    trust_keys = (
-        "trust_status",
-        "source",
-        "channel",
-        "release_tag",
-        "image_status",
-        "manifest_url",
-        "manifest_signature_verified",
-    )
-    trust = {key: image[key] for key in trust_keys if key in image}
+    trust = image_trust_payload(image.get("trust"))
+    if not trust:
+        trust = {
+            "status": str(image.get("trust_status", "")),
+            "source": str(image.get("source", "")),
+            "channel": str(image.get("channel", "")),
+            "release_tag": str(image.get("release_tag", "")),
+            "image_status": str(image.get("image_status", "")),
+            "manifest_url": str(image.get("manifest_url", "")),
+            "manifest_signature_verified": bool(
+                image.get("manifest_signature_verified", False)
+            ),
+        }
     _add_check(checks, "flash image identity", True, f"{artifact}; sha256={normalized_sha256}")
     return {
         "artifact_path": str(artifact),
@@ -486,6 +530,8 @@ def _evidence_scope(
     ok: bool,
     flash_results: dict[str, dict[str, Any]],
     image: dict[str, Any],
+    provenance: dict[str, Any],
+    config: dict[str, Any],
 ) -> dict[str, Any]:
     if mode == "dry-run":
         return {
@@ -505,7 +551,8 @@ def _evidence_scope(
         and image.get("node_image_identity") == "flashed"
         and image.get("local_digest_verified") is True
     )
-    if mode == "flash" and ok and full_flash_evidence:
+    attribution_complete = _acceptance_attribution_complete(provenance, config)
+    if mode == "flash" and ok and full_flash_evidence and attribution_complete:
         return {
             "kind": "physical-hil",
             "simulation": False,
@@ -513,13 +560,42 @@ def _evidence_scope(
             "physical_acceptance": True,
             "detail": "Physical acceptance is limited to nodes flashed and identity-verified in this run.",
         }
+    detail = "This record is physical observation evidence, not product physical acceptance."
+    if mode == "flash" and ok and full_flash_evidence and not attribution_complete:
+        detail = (
+            "Behavioral HIL passed, but physical acceptance requires a clean full "
+            "source commit and a stable fleet-config digest."
+        )
     return {
         "kind": "physical-observation",
         "simulation": False,
         "calibration": False,
         "physical_acceptance": False,
-        "detail": "This record is physical observation evidence, not product physical acceptance.",
+        "detail": detail,
     }
+
+
+def _acceptance_attribution_complete(
+    provenance: dict[str, Any],
+    config: dict[str, Any],
+) -> bool:
+    runner = provenance.get("runner", {})
+    source = provenance.get("source", {})
+    runner_sha = str(runner.get("git_sha", ""))
+    source_sha = str(source.get("git_sha", ""))
+    clean_source = (
+        runner.get("valid") is True
+        and source.get("valid") is True
+        and runner.get("dirty") is False
+        and source.get("dirty") is False
+        and runner_sha == source_sha
+    )
+    config_sha = str(config.get("sha256", ""))
+    stable_config = (
+        config.get("stable") is True
+        and re.fullmatch(r"[0-9a-f]{64}", config_sha) is not None
+    )
+    return clean_source and stable_config
 
 
 def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -553,21 +629,56 @@ def _load_manifest_for_result(
     config_path: Path,
     checks: list[dict[str, Any]],
     errors: list[str],
-) -> Manifest | None:
+) -> tuple[Manifest | None, dict[str, Any]]:
+    evidence = _empty_config_evidence(config_path)
+    try:
+        before = config_path.read_bytes()
+    except OSError as exc:
+        message = f"Could not read fleet config bytes: {exc}"
+        errors.append(message)
+        _add_check(checks, "fleet config identity", False, message)
+        return None, evidence
+
+    evidence.update(
+        {
+            "sha256": hashlib.sha256(before).hexdigest(),
+            "size_bytes": len(before),
+        }
+    )
     try:
         manifest = load_manifest(str(config_path))
     except ManifestError as exc:
         errors.append(str(exc))
         _add_check(checks, "fleet config loads", False, str(exc))
-        return None
+        return None, evidence
+
+    try:
+        after = config_path.read_bytes()
+    except OSError as exc:
+        message = f"Could not re-read fleet config bytes: {exc}"
+        errors.append(message)
+        _add_check(checks, "fleet config identity", False, message)
+        return None, evidence
+    if before != after:
+        message = "Fleet config changed while HIL inputs were being loaded."
+        errors.append(message)
+        _add_check(checks, "fleet config identity", False, message)
+        return None, evidence
+    evidence["stable"] = True
+    _add_check(
+        checks,
+        "fleet config identity",
+        True,
+        f"sha256={evidence['sha256']}",
+    )
 
     validation = validate(manifest)
     detail = "ok" if validation.valid else "; ".join(validation.errors)
     _add_check(checks, "fleet config validates", validation.valid, detail)
     if not validation.valid:
         errors.extend(validation.errors)
-        return None
-    return manifest
+        return None, evidence
+    return manifest, evidence
 
 
 def _node_spec(

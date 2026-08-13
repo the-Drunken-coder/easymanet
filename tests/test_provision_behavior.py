@@ -175,6 +175,45 @@ def test_python_validation_and_shell_provision_policy_parity(
     assert (result.returncode == 0) is expected_valid, result.stdout + result.stderr
 
 
+def test_host_and_openwrt_reject_local_ap_with_gateway_wifi(tmp_path):
+    config = _policy_parity_config().replace(
+        "      enabled: false\n    gateway:",
+        "      enabled: true\n    gateway:",
+        1,
+    ).replace(
+        "      uplink_interface: eth0",
+        """      uplink_interface: wifi
+      wifi:
+        enabled: true
+        ssid: upstream
+        password: upstream-password""",
+        1,
+    )
+    manifest = _load_policy_parity_manifest(tmp_path, config)
+    validation = validate(manifest, node_name="gate01")
+    host_error = "local_ap.enabled and gateway.wifi.enabled cannot both be true"
+    device_error = "node.local_ap.enabled and node.gateway.wifi.enabled cannot both be true"
+
+    assert not validation.valid
+    assert any(host_error in error for error in validation.errors)
+
+    provision_data = _wifi_gate_provision_json()
+    provision_data["node"]["local_ap"] = {
+        "enabled": True,
+        "ssid": "gate01-local",
+        "password": "local-ap-password",
+    }
+    prefix = tmp_path / "root"
+    uci_state = tmp_path / "uci-state"
+    _seed_wireless_radios(uci_state)
+
+    result = _run_provision(prefix, provision_data, uci_state)
+
+    assert result.returncode != 0
+    assert device_error in result.stdout
+    assert not (prefix / "etc" / "easymanet" / "provisioned").exists()
+
+
 @pytest.mark.parametrize(
     ("role", "wifi_uplink", "uplink", "expected"),
     [

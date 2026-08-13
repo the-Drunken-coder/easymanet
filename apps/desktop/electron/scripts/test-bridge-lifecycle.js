@@ -20,6 +20,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const pidFile = process.argv[2];
 const signalFile = process.argv[3];
+const exitAfterSpawn = process.argv[4] === "exit-after-spawn";
 const childSource = (title) => \`
   const fs = require("node:fs");
   const signalFile = \${JSON.stringify(signalFile)};
@@ -38,6 +39,9 @@ const markReady = () => {
   readyChildren += 1;
   if (readyChildren === 2) {
     fs.writeFileSync(pidFile, JSON.stringify({leader: process.pid, gzip: gzip.pid, dd: dd.pid}));
+    if (exitAfterSpawn) {
+      process.exit(0);
+    }
   }
 };
 gzip.stdout.once("data", markReady);
@@ -50,6 +54,7 @@ async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
     await testShutdownReapsProcessTree();
+    await testUnexpectedParentExitReapsProcessTree();
   }
   await testShutdownClosesBridgeAdmissionWhenIdle();
   await testMainClosesBridgeAdmissionBeforeQuitting();
@@ -86,6 +91,22 @@ async function testShutdownReapsProcessTree() {
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
   assertTermSignals(signalFileFor(pidFile));
+  assertProcessTreeGone(pids);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testUnexpectedParentExitReapsProcessTree() {
+  const pidFile = path.join(tempRoot, "parent-exit-pids.json");
+  const bridge = loadBridgeProcess(pidFile, "exit-after-spawn");
+  const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+
+  const result = await resultPromise;
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /exited before its child processes/);
+  assertDescendantTermSignals(signalFileFor(pidFile));
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
@@ -167,7 +188,7 @@ async function testMainClosesBridgeAdmissionBeforeQuitting() {
   assert.equal(finalQuit.prevented, false);
 }
 
-function loadBridgeProcess(pidFile) {
+function loadBridgeProcess(pidFile, fixtureMode = "") {
   const previousEnvironment = require.cache[environmentPath];
   require.cache[environmentPath] = {
     id: environmentPath,
@@ -176,7 +197,7 @@ function loadBridgeProcess(pidFile) {
     exports: {
       bridgeCommand: () => ({
         command: process.execPath,
-        args: [fixturePath, pidFile, signalFileFor(pidFile)],
+        args: [fixturePath, pidFile, signalFileFor(pidFile), fixtureMode],
       }),
       bridgeEnv: () => ({...process.env}),
       bridgeWorkingDirectory: () => tempRoot,
@@ -225,6 +246,12 @@ function assertTermSignals(signalFile) {
   assert.equal(fs.existsSync(signalFile), true, `no SIGTERM was handled: ${signalFile}`);
   const signals = fs.readFileSync(signalFile, "utf8").trim().split("\n").sort();
   assert.deepEqual(signals, ["dd:TERM", "gzip:TERM", "python:TERM"]);
+}
+
+function assertDescendantTermSignals(signalFile) {
+  assert.equal(fs.existsSync(signalFile), true, `no SIGTERM was handled: ${signalFile}`);
+  const signals = fs.readFileSync(signalFile, "utf8").trim().split("\n").sort();
+  assert.deepEqual(signals, ["dd:TERM", "gzip:TERM"]);
 }
 
 function signalFileFor(pidFile) {

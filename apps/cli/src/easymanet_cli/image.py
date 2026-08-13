@@ -146,6 +146,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
         ),
     ):
         """Build an EasyMANET-flavored OpenMANET image in Docker."""
+        output_path = Path(output_dir).expanduser().resolve()
         maybe_show_update_notice()
         print_header("Image Build")
         typer.echo(f"  Repo:         {repo_url}")
@@ -153,7 +154,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
         typer.echo(f"  Board:        {board}")
         typer.echo(f"  Target:       {target}")
         typer.echo(f"  Channel:      {channel}")
-        typer.echo(f"  Output dir:   {output_dir}")
+        typer.echo(f"  Output dir:   {output_path}")
         if cache_dir:
             typer.echo(f"  Cache dir:    {cache_dir}")
         typer.echo("  Overlay:      images/openmanet/provisioning/openwrt-overlay")
@@ -161,7 +162,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
 
         try:
             artifact = build_image(
-                output_dir=output_dir,
+                output_dir=output_path,
                 openmanet_version=openmanet_version,
                 board=board,
                 target=target,
@@ -180,7 +181,7 @@ def register_image_commands(image_app: typer.Typer) -> None:
 
         manifest = write_release_manifest(
             artifact=artifact,
-            output_dir=Path(output_dir),
+            output_dir=output_path,
             target=target,
             openmanet_version=openmanet_version,
             board=board,

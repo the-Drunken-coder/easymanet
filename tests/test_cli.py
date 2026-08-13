@@ -547,6 +547,36 @@ def test_image_build_chains_build_error(monkeypatch):
     assert "Build error: docker is missing" in result.output
 
 
+def test_image_build_uses_one_canonical_output_path_for_image_and_manifest(monkeypatch):
+    from typer.testing import CliRunner
+
+    from easymanet_cli.app import app
+
+    output_arg = "~/easymanet-cli-output"
+    expected_output = Path(output_arg).expanduser().resolve()
+    calls = {}
+
+    def fake_build_image(**kwargs):
+        calls["build_output"] = kwargs["output_dir"]
+        return expected_output / "openmanet-test.img.gz"
+
+    def fake_write_release_manifest(**kwargs):
+        calls["manifest_output"] = kwargs["output_dir"]
+        return expected_output / "easymanet-image-release.json"
+
+    monkeypatch.setattr(cli_image, "maybe_show_update_notice", lambda: None)
+    monkeypatch.setattr(cli_image, "build_image", fake_build_image)
+    monkeypatch.setattr(cli_image, "write_release_manifest", fake_write_release_manifest)
+
+    result = CliRunner().invoke(app, ["image", "build", "--output-dir", output_arg])
+
+    assert result.exit_code == 0
+    assert calls["build_output"] == expected_output
+    assert calls["manifest_output"] == expected_output
+    assert calls["build_output"] is calls["manifest_output"]
+    assert f"Output dir:   {expected_output}" in result.output
+
+
 def test_image_cli_compatibility_shim_exposes_register_command():
     import easymanet_image.cli as shim
     from easymanet_image.cli import register_image_commands as shim_register

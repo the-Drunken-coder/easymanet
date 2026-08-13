@@ -64,7 +64,7 @@ async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
     await testZombieOnlyProcessGroupIsComplete();
-    await testPersistentGroupObservationKeepsOperationTracked();
+    await testPersistentGroupObservationDelaysAppQuit();
     await testTerminationFailurePreservesElevatedStage();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
@@ -151,7 +151,7 @@ async function testZombieOnlyProcessGroupIsComplete() {
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 
-async function testPersistentGroupObservationKeepsOperationTracked() {
+async function testPersistentGroupObservationDelaysAppQuit() {
   const pidFile = path.join(tempRoot, "persistent-group-pids.json");
   const bridge = loadBridgeProcess(pidFile);
   const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
@@ -159,9 +159,18 @@ async function testPersistentGroupObservationKeepsOperationTracked() {
   fixturePids.push(pids);
   const originalKill = process.kill;
   let groupKilled = false;
+  let postKillProbes = 0;
+  const app = new EventEmitter();
+  let quitCalls = 0;
+  app.whenReady = () => new Promise(() => {});
+  app.quit = () => {
+    quitCalls += 1;
+  };
+  loadMain(app, bridge);
 
   process.kill = (pid, signal) => {
     if (groupKilled && pid === -pids.leader && signal === 0) {
+      postKillProbes += 1;
       return true;
     }
     const result = originalKill(pid, signal);
@@ -171,22 +180,28 @@ async function testPersistentGroupObservationKeepsOperationTracked() {
     return result;
   };
 
+  const quit = quitEvent();
+  app.emit("before-quit", quit);
+  assert.equal(quit.prevented, true);
   try {
-    await assert.rejects(
-      bridge.shutdownActiveBridgeProcesses(),
-      /process group .* is still active/,
+    await waitForCondition(
+      () => postKillProbes >= 12,
+      "bridge process group did not enter pending cleanup",
     );
     assert.equal(bridge.hasActiveBridgeProcesses(), true);
+    assert.equal(quitCalls, 0);
   } finally {
     process.kill = originalKill;
   }
 
   const result = await resultPromise;
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
   assert.match(result.errors[1], /process group .* is still active/);
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
+  assert.equal(quitCalls, 1);
 }
 
 async function testTerminationFailurePreservesElevatedStage() {
@@ -205,8 +220,12 @@ async function testTerminationFailurePreservesElevatedStage() {
   fixturePids.push(pids);
   const originalKill = process.kill;
   const attemptedSignals = [];
+  let groupProbes = 0;
 
   process.kill = (pid, signal) => {
+    if (pid === -pids.leader && signal === 0) {
+      groupProbes += 1;
+    }
     if (pid === -pids.leader && (signal === "SIGTERM" || signal === "SIGKILL")) {
       attemptedSignals.push(signal);
       const message = signal === "SIGTERM" ? "permission denied" : "operation not permitted";
@@ -217,10 +236,11 @@ async function testTerminationFailurePreservesElevatedStage() {
     return originalKill(pid, signal);
   };
 
+  const shutdownPromise = bridge.shutdownActiveBridgeProcesses();
   try {
-    await assert.rejects(
-      bridge.shutdownActiveBridgeProcesses(),
-      /SIGTERM failed: permission denied.*SIGKILL failed: operation not permitted/,
+    await waitForCondition(
+      () => attemptedSignals.length === 2 && groupProbes >= 12,
+      "bridge cleanup did not enter pending cleanup after both signals failed",
     );
     assert.equal(fs.existsSync(stage.root), true);
     assert.equal(bridge.hasActiveBridgeProcesses(), true);
@@ -235,7 +255,7 @@ async function testTerminationFailurePreservesElevatedStage() {
     }
   }
 
-  const result = await resultPromise;
+  const [, result] = await Promise.all([shutdownPromise, resultPromise]);
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
   assert.match(result.errors[1], /SIGTERM failed: permission denied/);
@@ -555,6 +575,17 @@ async function readPids(pidFile) {
     }
   }
   throw new Error(`Timed out waiting for inert fixture PID file: ${pidFile}`);
+}
+
+async function waitForCondition(predicate, message) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(message);
 }
 
 function assertProcessTreeGone(pids) {

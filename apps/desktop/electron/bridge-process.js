@@ -153,13 +153,13 @@ function runTrackedProcess(launch, handlers) {
               errors: [...payload.errors, `Bridge process cleanup failed: ${error.message}`],
             };
             if (error instanceof BridgeCleanupPendingError) {
-              error.completion
+              return error.completion
                 .then(() => finish(failurePayload))
                 .catch((completionError) => {
                   const prefix = state.stderr ? "\n" : "";
                   state.stderr += `${prefix}Bridge cleanup observation failed: ${completionError.message}`;
+                  throw completionError;
                 });
-              throw error;
             }
             finish(failurePayload);
           });

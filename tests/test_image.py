@@ -466,6 +466,27 @@ def _patch_flash_safety(monkeypatch, tmp_path):
     return device
 
 
+def test_flash_image_dry_run_emits_disk_details(monkeypatch, tmp_path):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img"
+    image.write_bytes(b"FLASH" * 64)
+    events = []
+
+    flash_image(str(device), str(image), dry_run=True, force=True, emit=events.append)
+
+    assert events == [
+        {
+            "type": "disk_details",
+            "message": f"Device: {device}",
+            "device": str(device),
+            "model": "",
+            "size_human": "0.0 MB",
+            "mounted": [],
+            "removable": True,
+        }
+    ]
+
+
 @REAL_DD_TEST
 def test_write_raw_via_dd_writes_payload(tmp_path):
     device = tmp_path / "disk.img"

@@ -694,11 +694,10 @@ async function discoverMesh() {
     appendMeshLog("error", message);
     renderMeshDiscovery({ ok: false, errors: [message], nodes: [], links: [], candidates_checked: 0 });
   } finally {
-    if (!isCurrentMeshDiscovery(sequence, config)) {
-      return;
+    if (isCurrentMeshDiscovery(sequence, config)) {
+      meshRadios.removeAttribute("aria-busy");
+      setMeshBusy(false);
     }
-    meshRadios.removeAttribute("aria-busy");
-    setMeshBusy(false);
   }
 }
 
@@ -1102,9 +1101,10 @@ function setFlashStatus(tone, message) {
 function setProgress({ label = "", percent = null, detail = "", indeterminate = false } = {}) {
   flashProgress.hidden = false;
   const boundedPercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  const measuredPercent = indeterminate || boundedPercent === null ? "" : ` (${Math.round(boundedPercent)}%)`;
   flashProgress.dataset.state = indeterminate || boundedPercent === null ? "active" : "measured";
   flashProgress.dataset.percent = boundedPercent === null ? "" : String(Math.round(boundedPercent));
-  progressText.textContent = detail ? `${label}: ${detail}` : label;
+  progressText.textContent = `${detail ? `${label}: ${detail}` : label}${measuredPercent}`;
   updateCopyFlashLogVisibility();
 }
 

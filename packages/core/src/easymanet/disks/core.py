@@ -52,7 +52,7 @@ def assert_device_identity(expected: DeviceIdentity) -> None:
         raise ValueError(
             f"Device identity could not be revalidated for {expected.path}."
         ) from exc
-    if actual != expected:
+    if _stable_device_identity(actual) != _stable_device_identity(expected):
         raise ValueError(
             f"Device identity changed for {expected.path}; refusing to write."
         )
@@ -83,6 +83,18 @@ def open_device_for_write(
     return fd
 
 
+def _stable_device_identity(identity: DeviceIdentity) -> tuple[object, ...]:
+    return (
+        identity.path,
+        identity.filesystem_device,
+        identity.inode,
+        identity.raw_device,
+        identity.created_ns,
+        identity.generation,
+        identity.diskseq,
+    )
+
+
 def _identity_from_stat(path: str, result: os.stat_result) -> DeviceIdentity:
     diskseq = _linux_diskseq(result)
     if (
@@ -90,7 +102,10 @@ def _identity_from_stat(path: str, result: os.stat_result) -> DeviceIdentity:
         and stat.S_ISBLK(result.st_mode)
         and not diskseq
     ):
-        raise OSError(f"Could not read a stable Linux disk sequence for {path}.")
+        raise OSError(
+            f"Could not read a stable Linux disk sequence for {path}; "
+            "safe flashing requires Linux 5.14 or newer."
+        )
     return DeviceIdentity(
         path=path,
         filesystem_device=result.st_dev,

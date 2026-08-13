@@ -30,7 +30,7 @@ class BuildError(Exception):
 
 
 def build_image(
-    output_dir: str,
+    output_dir: str | Path,
     openmanet_version: str = DEFAULT_OPENMANET_VERSION,
     board: str = DEFAULT_BOARD,
     target: str = DEFAULT_TARGET,

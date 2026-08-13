@@ -11,6 +11,9 @@ FAT boot partition at `/easymanet/provision.json`.
 - `.img` — raw disk image
 - `.img.gz` — gzip-compressed raw disk image
 
+Linux flashing requires kernel 5.14 or newer so EasyMANET can bind safety
+checks to the kernel's stable block-device sequence number.
+
 ## Build the Base Image
 
 ```bash
@@ -101,6 +104,10 @@ easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
 Local `--base-image` files are allowed without a checksum, but EasyMANET
 prints a warning. Pass `--image-sha256 <sha256>` to verify a local image
 before flashing.
+
+Official EasyMANET image downloads also require the GitHub CLI. Install `gh`
+and authenticate it before flashing so EasyMANET can run `gh attestation
+verify` against the pinned image repository and signer workflow.
 
 ### SSH at flash time
 

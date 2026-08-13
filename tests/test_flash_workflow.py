@@ -191,7 +191,8 @@ def test_prepare_flash_workflow_rejects_legacy_downloader_without_trust(monkeypa
     )
 
     assert result.ok is False
-    assert result.code is flash.FlashErrorCode.IMAGE
+    assert result.code is flash.FlashErrorCode.INTERNAL
+    assert "TypeError" in result.errors[0]
     assert "unexpected keyword argument 'trust'" in result.errors[0]
 
 

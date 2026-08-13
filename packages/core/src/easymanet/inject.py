@@ -98,7 +98,9 @@ def inject(
         _cleanup_mount(device, mount_point, mounted_here)
     except InjectError as cleanup_error:
         if stage_error is not None:
-            raise stage_error from cleanup_error
+            raise InjectError(
+                f"{stage_error}; boot-volume cleanup also failed: {cleanup_error}"
+            ) from cleanup_error
         raise
     try:
         _assert_device_identity(device_identity)

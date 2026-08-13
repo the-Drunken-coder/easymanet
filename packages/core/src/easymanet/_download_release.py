@@ -39,6 +39,7 @@ _URL_RETRY_ERRORS = (urllib.error.URLError, OSError, TimeoutError)
 _URL_RETRY_ATTEMPTS = 3
 _URL_RETRY_BACKOFF_SECONDS = 0.25
 _RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
+_MAX_RELEASE_TRUST_ASSET_BYTES = 2 * 1024 * 1024
 
 
 class ImageRef(NamedTuple):
@@ -211,7 +212,11 @@ def _fetch_release_asset(url: str) -> Optional[bytes]:
     try:
         _validate_download_url(url)
         with _urlopen_with_retries(url, timeout=30) as resp:
-            return resp.read()
+            payload = resp.read(_MAX_RELEASE_TRUST_ASSET_BYTES + 1)
+        if len(payload) > _MAX_RELEASE_TRUST_ASSET_BYTES:
+            _debug_note(f"image release trust asset is too large: {url}")
+            return None
+        return payload
     except _GITHUB_API_ERRORS as exc:
         _debug_note(f"image release trust asset lookup failed for {url}: {exc}")
         return None

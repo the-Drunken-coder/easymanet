@@ -1439,6 +1439,41 @@ def test_desktop_server_rejects_invalid_json_without_detail_leakage():
     assert responses == [({"ok": False, "errors": ["Request body must be valid JSON."]}, 400)]
 
 
+@pytest.mark.parametrize("length", ["not-a-number", "-1"])
+def test_desktop_server_rejects_invalid_content_length(length):
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": length}
+    handler.rfile = io.BytesIO()
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [
+        ({"ok": False, "errors": ["Content-Length must be a non-negative integer."]}, 400)
+    ]
+
+
+def test_desktop_server_hides_and_logs_unexpected_error(monkeypatch, capsys):
+    monkeypatch.setattr(
+        server,
+        "validate_payload",
+        lambda _payload: (_ for _ in ()).throw(RuntimeError("private detail")),
+    )
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": "2"}
+    handler.rfile = io.BytesIO(b"{}")
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [({"ok": False, "errors": ["Unexpected request error."]}, 500)]
+    assert "private detail" in capsys.readouterr().err
+
+
 def test_desktop_server_support_bundle_uses_only_default_diagnostics_output(monkeypatch):
     captured_kwargs = {}
 
@@ -2298,12 +2333,13 @@ try {
 }
 """
 
-    subprocess.run(
+    result = subprocess.run(
         [node_bin, "-e", script, str(elevated_flash)],
         capture_output=True,
-        check=True,
+        check=False,
         text=True,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_electron_check_formats_empty_bridge_failure(tmp_path):

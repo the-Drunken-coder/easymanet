@@ -1,5 +1,6 @@
 import os
 import plistlib
+from dataclasses import replace
 
 import pytest
 
@@ -192,6 +193,19 @@ def test_device_identity_rejects_path_replacement(tmp_path):
 
     with pytest.raises(ValueError, match="identity changed"):
         disks.assert_device_identity(identity)
+
+
+def test_device_identity_allows_ctime_only_change(monkeypatch, tmp_path):
+    selected = tmp_path / "selected-device"
+    selected.write_bytes(b"selected")
+    identity = disks.capture_device_identity(str(selected))
+    changed = replace(identity, changed_ns=identity.changed_ns + 1)
+    monkeypatch.setattr(
+        "easymanet.disks.core.capture_device_identity",
+        lambda _path: changed,
+    )
+
+    disks.assert_device_identity(identity)
 
 
 def test_open_device_for_write_rejects_replacement_during_open(monkeypatch, tmp_path):

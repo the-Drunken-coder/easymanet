@@ -287,6 +287,30 @@ def test_inject_propagates_owned_boot_volume_cleanup_failure(monkeypatch, tmp_pa
         inject(device, manifest, "node01", device_identity=identity)
 
 
+def test_inject_reports_staging_and_cleanup_failures(monkeypatch, tmp_path):
+    path = _write_config(tmp_path, VALID_CONFIG)
+    manifest = load_manifest(path)
+    device, identity = _flash_target(tmp_path)
+    boot_mount = tmp_path / "boot"
+    boot_mount.mkdir()
+
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: (str(boot_mount), True),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject.stage_boot_payload",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectError("staging failed")),
+    )
+    monkeypatch.setattr(
+        "easymanet.inject._cleanup_mount",
+        lambda *_args: (_ for _ in ()).throw(InjectError("cleanup failed")),
+    )
+
+    with pytest.raises(InjectError, match="staging failed.*cleanup failed"):
+        inject(device, manifest, "node01", device_identity=identity)
+
+
 def test_inject_rejects_device_replacement_during_mount(monkeypatch, tmp_path):
     path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)

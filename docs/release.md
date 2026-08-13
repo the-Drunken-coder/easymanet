@@ -144,6 +144,11 @@ and Sigstore/cosign signature bundle. Custom local images and custom URLs are
 still allowed with an explicit SHA-256, but they are treated as
 checksum-only/user-supplied rather than official.
 
+Operators downloading official images must have an authenticated GitHub CLI
+available. EasyMANET runs `gh attestation verify` and pins both the public image
+repository and release-workflow identity before marking the cached image as
+official.
+
 Official manifest acceptance is fail closed. The manifest must explicitly use
 schema version 2 and status `current`; its release tag and `stable` or
 `candidate` channel must match the GitHub release. Missing, unknown, unsafe,

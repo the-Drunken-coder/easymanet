@@ -46,6 +46,10 @@ _MACOS_GZIP_WRITE_CHUNK_BYTES = 1024 * 1024
 _IMAGE_READ_BYTES = 1024 * 1024
 
 
+def _gzip_env() -> dict[str, str]:
+    return {**os.environ, "LANG": "C", "LC_ALL": "C"}
+
+
 def _emit_event(
     emit: FlashEventCallback | None,
     event_type: str,
@@ -188,6 +192,7 @@ def _gzip_decompressed_bytes(image_fd: int) -> int:
     with tempfile.TemporaryFile() as gzip_stderr_file:
         gzip_proc = subprocess.Popen(
             gzip_cmd,
+            env=_gzip_env(),
             stdin=image_fd,
             stdout=subprocess.PIPE,
             stderr=gzip_stderr_file,
@@ -274,6 +279,17 @@ def flash_image(
         )
         disk, device_identity = _check_device_safety(device, force=force)
 
+        _emit_event(
+            emit,
+            "disk_details",
+            f"Device: {disk.device}",
+            device=disk.device,
+            model=disk.model,
+            size_human=disk.size_human,
+            mounted=disk.mounted,
+            removable=disk.removable,
+        )
+
         if dry_run:
             return device_identity
 
@@ -293,17 +309,6 @@ def flash_image(
             device_identity
             if overlay_path == device
             else _capture_device_identity(overlay_path)
-        )
-
-        _emit_event(
-            emit,
-            "disk_details",
-            f"Device: {disk.device}",
-            device=disk.device,
-            model=disk.model,
-            size_human=disk.size_human,
-            mounted=disk.mounted,
-            removable=disk.removable,
         )
 
         try:
@@ -375,6 +380,7 @@ def _write_gz_via_dd(
     with tempfile.TemporaryFile() as gzip_stderr_file:
         gzip_proc = subprocess.Popen(
             gzip_cmd,
+            env=_gzip_env(),
             stdin=image_fd,
             stdout=subprocess.PIPE,
             stderr=gzip_stderr_file,
@@ -414,6 +420,7 @@ def _write_gz_via_macos_stream(
     with tempfile.TemporaryFile() as gzip_stderr_file:
         gzip_proc = subprocess.Popen(
             gzip_cmd,
+            env=_gzip_env(),
             stdin=image_fd,
             stdout=subprocess.PIPE,
             stderr=gzip_stderr_file,

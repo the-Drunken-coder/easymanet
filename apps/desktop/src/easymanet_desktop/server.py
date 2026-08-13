@@ -3,6 +3,7 @@
 import json
 import mimetypes
 import threading
+import traceback
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -143,6 +144,7 @@ class _DesktopHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json({"ok": False, "errors": [str(exc)]}, status=400)
         except Exception:  # noqa: BLE001 - converted into desktop JSON.
+            traceback.print_exc()
             self._send_json({"ok": False, "errors": ["Unexpected request error."]}, status=500)
 
     def _read_json(self) -> dict[str, Any]:

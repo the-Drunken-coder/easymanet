@@ -126,8 +126,8 @@ def test_candidate_release_requires_matching_manifest_channel_and_tag(monkeypatc
     assert ref.release_tag == tag
 
 
-@pytest.mark.parametrize("failure", ["malformed bundle", "bad signature", "identity mismatch"])
-def test_manifest_bundle_verification_failures_are_fail_closed(monkeypatch, failure):
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError, Exception])
+def test_manifest_verification_exceptions_are_fail_closed(monkeypatch, error_type):
     payloads = {
         "https://example.invalid/manifest": json.dumps(_manifest()).encode(),
         "https://example.invalid/bundle": b"bundle",
@@ -136,13 +136,35 @@ def test_manifest_bundle_verification_failures_are_fail_closed(monkeypatch, fail
     monkeypatch.setattr(
         _download_release,
         "verify_release_manifest_bundle",
-        lambda *_args: (_ for _ in ()).throw(ValueError(failure)),
+        lambda *_args: (_ for _ in ()).throw(error_type("verification failed")),
     )
 
     assert _download_release._fetch_release_manifest(
         "https://example.invalid/manifest",
         "https://example.invalid/bundle",
     ) is None
+
+
+def test_release_trust_asset_read_is_bounded(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, limit):
+            assert limit == _download_release._MAX_RELEASE_TRUST_ASSET_BYTES + 1
+            return b"x" * limit
+
+    monkeypatch.setattr(_download_release, "_validate_download_url", lambda _url: None)
+    monkeypatch.setattr(
+        _download_release,
+        "_urlopen_with_retries",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+    assert _download_release._fetch_release_asset("https://example.invalid/asset") is None
 
 
 def test_manifest_is_verified_over_exact_raw_bytes_before_json_parsing(monkeypatch):
@@ -256,6 +278,29 @@ def test_manifest_requires_fixed_bundle_and_checksum_assets():
 
     assert trust.status == UNTRUSTED_STATUS
     assert "required trust assets" in trust.warnings[0]
+
+
+def test_unverified_manifest_signature_is_untrusted():
+    trust = trust_from_manifest(
+        _manifest(),
+        assets=_release()["assets"],
+        expected_repo=OFFICIAL_IMAGE_REPO,
+        expected_channel="stable",
+        target=TARGET,
+        release_tag=STABLE_TAG,
+        manifest_url="https://example.invalid/easymanet-image-release.json",
+        manifest_signature_verified=False,
+    )
+
+    assert trust.status == UNTRUSTED_STATUS
+    assert trust.manifest_signature_verified is False
+
+
+def test_attestation_digest_must_match_artifact_sha256():
+    manifest = _manifest()
+    manifest["trust"]["attestation_subject_digest"] = f"sha256:{'b' * 64}"
+
+    assert _trust(manifest).status == UNTRUSTED_STATUS
 
 
 def test_nonofficial_github_repo_is_checksum_only(monkeypatch):

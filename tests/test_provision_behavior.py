@@ -928,9 +928,39 @@ def test_provision_missing_led_status_service_is_nonfatal(tmp_path):
 def test_provision_missing_optional_wifi_command_is_degraded(tmp_path):
     prefix = tmp_path / "root"
     uci_state = tmp_path / "uci-state"
+    controlled_bin = tmp_path / "controlled-bin"
+    controlled_bin.mkdir()
+    commands = (
+        "awk",
+        "cat",
+        "chmod",
+        "cp",
+        "cut",
+        "date",
+        "dirname",
+        "grep",
+        "head",
+        "mkdir",
+        "mv",
+        "python3",
+        "rm",
+        "sed",
+        "sh",
+        "tee",
+        "tr",
+    )
+    for command in commands:
+        executable = shutil.which(command)
+        assert executable is not None
+        (controlled_bin / command).symlink_to(executable)
     _seed_wireless_radios(uci_state)
 
-    result = _run_provision(prefix, _gate_provision_json(), uci_state)
+    result = _run_provision(
+        prefix,
+        _gate_provision_json(),
+        uci_state,
+        extra_env={"PATH": f"{controlled_bin}:{HARNESS}"},
+    )
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert (prefix / "etc" / "easymanet" / "provisioned").exists()

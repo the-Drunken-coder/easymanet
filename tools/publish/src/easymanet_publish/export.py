@@ -34,6 +34,10 @@ def export_public_surfaces(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     requested_ref = source_ref or _git_ref(repo_root)
+    if not requested_ref:
+        raise RuntimeError(
+            f"Could not resolve a Git commit in {repo_root}; pass --source-ref explicitly."
+        )
     with tempfile.TemporaryDirectory(prefix="easymanet-export-source-") as temp_dir:
         source_root, source_sha = materialize_commit(
             repo_root,

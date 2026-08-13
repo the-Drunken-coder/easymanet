@@ -141,10 +141,13 @@ async function testTerminationFailureSettlesShutdown() {
   const pids = await readPids(pidFile);
   fixturePids.push(pids);
   const originalKill = process.kill;
+  const attemptedSignals = [];
 
   process.kill = (pid, signal) => {
-    if (pid === -pids.leader && signal === "SIGTERM") {
-      const error = new Error("permission denied");
+    if (pid === -pids.leader && (signal === "SIGTERM" || signal === "SIGKILL")) {
+      attemptedSignals.push(signal);
+      const message = signal === "SIGTERM" ? "permission denied" : "operation not permitted";
+      const error = new Error(message);
       error.code = "EACCES";
       throw error;
     }
@@ -162,7 +165,9 @@ async function testTerminationFailureSettlesShutdown() {
 
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
-  assert.match(result.errors[1], /cleanup failed: permission denied/);
+  assert.match(result.errors[1], /SIGTERM failed: permission denied/);
+  assert.match(result.errors[1], /SIGKILL failed: operation not permitted/);
+  assert.deepEqual(attemptedSignals, ["SIGTERM", "SIGKILL"]);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 

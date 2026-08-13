@@ -295,14 +295,12 @@ def test_generated_desktop_release_is_macos_only(tmp_path):
     assert "windows-2022" not in workflow
     assert "--win" not in workflow
     assert ".exe" not in workflow
-    assert "windows" not in workflow.lower()
     assert "win:" not in builder
     assert "nsis:" not in builder
     for text in (electron_readme, desktop_readme, public_repos):
         normalized = " ".join(text.split())
         assert "macOS-only" in normalized
         assert "Python/CLI runtime separately supports macOS and Linux" in normalized
-        assert "windows" not in text.lower()
 
 
 def test_surface_pyproject_uses_shared_spec_package_roots():

@@ -171,6 +171,7 @@ def test_release_smoke_builds_from_temporary_tracked_source(tmp_path, monkeypatc
     (repo_root / "pyproject.toml").write_text(
         '[project]\nname = "easymanet"\nversion = "0.2.4"\n'
     )
+    (repo_root / "untracked.txt").write_text("must not be packaged\n")
     subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
     subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
     wheelhouse = tmp_path / "wheelhouse"
@@ -182,6 +183,7 @@ def test_release_smoke_builds_from_temporary_tracked_source(tmp_path, monkeypatc
         source_paths.append(Path(command[-1]))
         assert source_paths[-1] != repo_root
         assert (source_paths[-1] / "pyproject.toml").is_file()
+        assert not (source_paths[-1] / "untracked.txt").exists()
         wheelhouse.mkdir(parents=True, exist_ok=True)
         wheel.touch()
 
@@ -204,7 +206,10 @@ def test_release_smoke_preserves_existing_source_build_content(tmp_path, monkeyp
     subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
     subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
 
-    def fake_run(*_args, **_kwargs):
+    source_paths = []
+
+    def fake_run(command, **_kwargs):
+        source_paths.append(Path(command[-1]))
         raise SystemExit(23)
 
     monkeypatch.setattr(release_smoke, "run", fake_run)
@@ -214,6 +219,8 @@ def test_release_smoke_preserves_existing_source_build_content(tmp_path, monkeyp
 
     assert exc_info.value.code == 23
     assert keep.read_text() == "operator content\n"
+    assert len(source_paths) == 1
+    assert not source_paths[0].exists()
 
 
 def test_release_smoke_run_passes_timeout_to_subprocess(monkeypatch):

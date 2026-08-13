@@ -239,14 +239,38 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
     return;
   }
 
-  signalProcessGroup(pid, "SIGTERM");
-  if (!(await waitForProcessGroupExit(pid, graceMs))) {
+  let terminationError = null;
+  try {
+    signalProcessGroup(pid, "SIGTERM");
+    if (await waitForProcessGroupExit(pid, graceMs)) {
+      await waitForClose(closePromise, graceMs);
+      return;
+    }
+  } catch (error) {
+    terminationError = error;
+  }
+
+  let killError = null;
+  try {
     signalProcessGroup(pid, "SIGKILL");
+  } catch (error) {
+    killError = error;
   }
   await Promise.all([
     waitForClose(closePromise, graceMs),
     waitForProcessGroupExit(pid, graceMs),
   ]);
+  if (terminationError && killError) {
+    throw new Error(
+      `SIGTERM failed: ${terminationError.message}; SIGKILL failed: ${killError.message}`,
+    );
+  }
+  if (terminationError) {
+    throw terminationError;
+  }
+  if (killError) {
+    throw killError;
+  }
 }
 
 function signalProcessGroup(pid, signal) {

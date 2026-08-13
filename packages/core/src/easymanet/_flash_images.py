@@ -221,7 +221,7 @@ def resolve_base_image(
         if pending_official:
             latest_payload["trust_status"] = OFFICIAL_TRUST_STATUS
             latest_trust["status"] = OFFICIAL_TRUST_STATUS
-    except (OSError, TypeError) as exc:
+    except OSError as exc:
         raise FlashWorkflowError(
             FlashErrorCode.IMAGE,
             f"Image download error: {exc}",

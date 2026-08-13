@@ -26,6 +26,13 @@ def test_export_public_surfaces_writes_local_outputs(tmp_path):
     assert payload["surfaces"]["images"]["files"]
 
 
+def test_export_public_surfaces_rejects_unresolvable_default_ref(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_mod, "_git_ref", lambda _repo_root: "")
+
+    with pytest.raises(RuntimeError, match="pass --source-ref explicitly"):
+        export_public_surfaces(tmp_path / "public", repo_root=tmp_path)
+
+
 def test_export_surfaces_include_installable_python_roots(tmp_path):
     output = tmp_path / "public"
 

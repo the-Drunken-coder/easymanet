@@ -225,8 +225,8 @@ def register_image_commands(image_app: typer.Typer) -> None:
     ):
         """Write image release metadata for a built artifact."""
         manifest = write_release_manifest(
-            artifact=Path(image),
-            output_dir=Path(output_dir),
+            artifact=Path(image).expanduser().resolve(),
+            output_dir=Path(output_dir).expanduser().resolve(),
             target=target,
             openmanet_version=openmanet_version,
             board=board,

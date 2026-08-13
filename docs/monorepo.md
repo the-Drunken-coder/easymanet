@@ -18,9 +18,7 @@ publish/export tooling.
 
 Import from the explicit surface that owns the behavior: `easymanet_cli`,
 `easymanet_image`, `easymanet_desktop`, `easymanet_publish`, or shared core
-modules under `easymanet`. Compatibility imports may remain when public tests
-or downstream users already rely on them, but new ownership should follow the
-surface boundaries above.
+modules under `easymanet`.
 
 ## Product Surfaces
 

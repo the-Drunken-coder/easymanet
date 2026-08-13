@@ -21,6 +21,7 @@ REMOVED_IMPORTS = (
     "easymanet.build",
     "easymanet.cli_flash",
     "easymanet.cli_common",
+    "easymanet_image.cli",
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
 ELECTRON_SMOKE_TIMEOUT_SECONDS = 60

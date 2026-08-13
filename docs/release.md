@@ -67,10 +67,12 @@ To reuse already-flashed nodes, omit `--gate-device` and `--point-device`; pass
 the exact local `--base-image` and its `--image-sha256` as well. Any run that
 reuses even one node verifies that local artifact before flashing or probing and
 fails closed for missing or mismatched identity. A mixed flash/reuse run also
-requires the flashed and reused artifact digests to match. Reuse evidence proves
-the local artifact only, not the identity of an already-running node. Without a
-verified release-trust object on the HIL input, its trust state is recorded
-honestly as `checksum-only` rather than as an official-release claim.
+requires the flashed and reused artifact digests to match. Reuse currently
+records checksum-only provenance for the local artifact: its canonical path,
+SHA-256, and `local_digest_verified: true`. It records
+`node_image_identity: not-attested`, so it cannot establish what is running on
+either node. Reuse-only and mixed flash/reuse runs are physical observation
+evidence, never product physical acceptance.
 
 Pass `--gate-ip` or `--point-ip` only when the fleet IPs are not the active
 probe addresses. Flashing never auto-selects disks and will not write media
@@ -84,9 +86,10 @@ only for lab fixtures where flashed media is automatically booted before probing
 
 HIL schema v2 records exact runner/source Git SHAs and whether that worktree was
 dirty. A dry run is synthetic evidence only: it is neither calibration nor
-physical acceptance. A successful physical HIL record is limited to its named
-gate/point pair and artifact identity; it does not establish simulation parity,
-calibration results, fleet-wide acceptance, or a general radio-range claim.
+physical acceptance. Product physical acceptance requires both named nodes to
+be flashed and the shared artifact digest to be verified in that run. It does
+not establish simulation parity, calibration results, fleet-wide acceptance, or
+a general radio-range claim.
 
 Flashed media is sensitive until first boot completes: `provision.json` is
 written in cleartext on the boot volume until provisioning succeeds, and the

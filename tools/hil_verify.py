@@ -279,7 +279,7 @@ def run_hil(
         "wait_seconds": 0 if args.dry_run else args.wait_seconds,
         "provenance": provenance,
         "image": image,
-        "evidence_scope": _evidence_scope(mode, ok),
+        "evidence_scope": _evidence_scope(mode, ok, flash_results, image),
         "flash": flash_results,
         "nodes": nodes,
         "topology": topology,
@@ -420,7 +420,8 @@ def _flash_image_evidence(
     try:
         artifact = Path(path).expanduser().resolve()
         normalized_sha256 = normalize_sha256(sha256)
-    except ValueError as exc:
+        verify_image_sha256(artifact, normalized_sha256)
+    except (OSError, ValueError) as exc:
         message = f"Flash image identity failed: {exc}"
         errors.append(message)
         _add_check(checks, "flash image identity", False, message)
@@ -480,18 +481,44 @@ def _mixed_image_evidence(
     return evidence
 
 
-def _evidence_scope(mode: str, ok: bool) -> dict[str, Any]:
-    physical = mode in {"flash", "reuse"}
+def _evidence_scope(
+    mode: str,
+    ok: bool,
+    flash_results: dict[str, dict[str, Any]],
+    image: dict[str, Any],
+) -> dict[str, Any]:
+    if mode == "dry-run":
+        return {
+            "kind": "synthetic-dry-run",
+            "simulation": False,
+            "calibration": False,
+            "physical_acceptance": False,
+            "detail": "Dry-run evidence does not probe hardware or establish physical acceptance.",
+        }
+
+    full_flash_evidence = (
+        len(flash_results) == 2
+        and all(
+            result.get("ok") is True and result.get("mode") != "reuse"
+            for result in flash_results.values()
+        )
+        and image.get("node_image_identity") == "flashed"
+        and image.get("local_digest_verified") is True
+    )
+    if mode == "flash" and ok and full_flash_evidence:
+        return {
+            "kind": "physical-hil",
+            "simulation": False,
+            "calibration": False,
+            "physical_acceptance": True,
+            "detail": "Physical acceptance is limited to nodes flashed and identity-verified in this run.",
+        }
     return {
-        "kind": "physical-hil" if physical else "synthetic-dry-run",
+        "kind": "physical-observation",
         "simulation": False,
         "calibration": False,
-        "physical_acceptance": physical and ok,
-        "detail": (
-            "Physical acceptance is limited to the configured gate/point pair and this record."
-            if physical
-            else "Dry-run evidence does not probe hardware or establish physical acceptance."
-        ),
+        "physical_acceptance": False,
+        "detail": "This record is physical observation evidence, not product physical acceptance.",
     }
 
 

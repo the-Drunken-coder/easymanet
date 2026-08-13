@@ -341,6 +341,7 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     assert any(check["name"] == "post-flash boot handoff confirmed" and check["ok"] for check in payload["checks"])
     assert payload["image"]["node_image_identity"] == "flashed"
     assert payload["image"]["sha256"] == sha256
+    assert payload["evidence_scope"]["kind"] == "physical-hil"
     assert payload["evidence_scope"]["physical_acceptance"] is True
 
 
@@ -428,6 +429,8 @@ def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):
         "node_image_identity": "not-attested",
         "trust": hil_verify.image_trust_payload(hil_verify.custom_trust()),
     }
+    assert payload["evidence_scope"]["kind"] == "physical-observation"
+    assert payload["evidence_scope"]["physical_acceptance"] is False
 
 
 def test_git_provenance_records_clean_runner_and_source_shas(monkeypatch):
@@ -566,6 +569,60 @@ def test_mixed_flash_and_reuse_requires_image_identity_before_flash_or_probes(tm
     assert payload["flash"] == {}
     assert payload["nodes"] == {}
     assert any("Reuse requires --base-image" in error for error in payload["errors"])
+
+
+def test_mixed_flash_and_reuse_is_physical_observation_not_acceptance(tmp_path, monkeypatch):
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
+    artifact, sha256 = _image_artifact(tmp_path)
+
+    class FakeFlashResult:
+        ok = True
+        errors = []
+
+        def to_dict(self, include_events=False):
+            return {
+                "ok": True,
+                "image": {"path": str(artifact), "sha256": sha256},
+                "events": [] if include_events else None,
+            }
+
+    monkeypatch.setattr(hil_verify, "_flash_node", lambda *_args: FakeFlashResult())
+    monkeypatch.setattr(hil_verify, "_probe_node", lambda *_args: {"ok": True})
+    monkeypatch.setattr(hil_verify, "_probe_topology", lambda *_args: {"ok": True})
+    args = hil_verify.parse_args(
+        [
+            "--config",
+            "examples/three-node-field-mesh.yml",
+            "--gate-node",
+            "gate01",
+            "--point-node",
+            "point01",
+            "--gate-device",
+            "/dev/disk4",
+            "--base-image",
+            str(artifact),
+            "--image-sha256",
+            sha256,
+            "--point-ssh-enabled",
+            "--allow-flash",
+            "--yes",
+            "--wait-seconds",
+            "90",
+        ]
+    )
+
+    payload = hil_verify.run_hil(
+        args,
+        input_fn=lambda _prompt: "",
+        sleep_fn=lambda _seconds: None,
+        now_fn=_now,
+    )
+
+    assert payload["ok"] is True
+    assert payload["mode"] == "flash"
+    assert payload["image"]["node_image_identity"] == "mixed"
+    assert payload["evidence_scope"]["kind"] == "physical-observation"
+    assert payload["evidence_scope"]["physical_acceptance"] is False
 
 
 def test_real_run_requires_boot_report_when_point_ssh_is_disabled(capsys):

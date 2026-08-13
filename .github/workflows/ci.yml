@@ -61,7 +61,7 @@ jobs:
           EASYMANET_PYTHON=python npm --prefix apps/desktop/electron run check
 
       - name: Run unit tests
-        run: pytest -q --cov=easymanet --cov-report=term-missing --cov-fail-under=50
+        run: pytest -q --cov=packages --cov=apps --cov=tools --cov-report=term-missing --cov-fail-under=50
 
       - name: Syntax-check overlay shell scripts
         run: |

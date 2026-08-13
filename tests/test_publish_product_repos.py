@@ -245,6 +245,36 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert pyproject["tool"]["setuptools"]["package-data"]["easymanet_desktop"] == ["static/*"]
 
 
+def test_generated_desktop_release_is_macos_only(tmp_path):
+    publish = load_publish_module()
+    repo = publish.generate_repo(
+        publish.REPO_SPECS["desktop"],
+        tmp_path,
+        "review-branch",
+        "source-sha",
+    )
+
+    workflow = (repo / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
+    builder = (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").read_text(encoding="utf-8")
+    electron_readme = (repo / "apps" / "desktop" / "electron" / "README.md").read_text(encoding="utf-8")
+    desktop_readme = (repo / "README.md").read_text(encoding="utf-8")
+    public_repos = (ROOT / "docs" / "public-repos.md").read_text(encoding="utf-8")
+
+    assert "runs-on: macos-14" in workflow
+    assert "--mac dmg zip" in workflow
+    assert "windows-2022" not in workflow
+    assert "--win" not in workflow
+    assert ".exe" not in workflow
+    assert "windows" not in workflow.lower()
+    assert "win:" not in builder
+    assert "nsis:" not in builder
+    for text in (electron_readme, desktop_readme, public_repos):
+        normalized = " ".join(text.split())
+        assert "macOS-only" in normalized
+        assert "Python/CLI runtime separately supports macOS and Linux" in normalized
+        assert "windows" not in text.lower()
+
+
 def test_surface_pyproject_uses_shared_spec_package_roots():
     publish = load_publish_module()
 

@@ -63,6 +63,7 @@ setInterval(() => {}, 1000);
 async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
+    await testZombieOnlyProcessGroupIsComplete();
     await testPersistentGroupObservationKeepsOperationTracked();
     await testTerminationFailurePreservesElevatedStage();
     await testShutdownReapsProcessTree();
@@ -88,6 +89,64 @@ async function testTimeoutReapsProcessTree() {
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /timed out/);
   assertTermSignals(signalFileFor(pidFile));
+  assertProcessTreeGone(pids);
+  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testZombieOnlyProcessGroupIsComplete() {
+  const pidFile = path.join(tempRoot, "zombie-group-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const originalKill = process.kill;
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalReadFileSync = fs.readFileSync;
+  const originalReaddirSync = fs.readdirSync;
+  let groupKilled = false;
+
+  process.kill = (pid, signal) => {
+    if (groupKilled && pid === -pids.leader && signal === 0) {
+      return true;
+    }
+    const result = originalKill(pid, signal);
+    if (pid === -pids.leader && signal === "SIGKILL") {
+      groupKilled = true;
+    }
+    return result;
+  };
+  Object.defineProperty(process, "platform", {value: "linux"});
+  fs.readdirSync = (target, options) => {
+    if (target !== "/proc") {
+      return originalReaddirSync(target, options);
+    }
+    return Object.values(pids).map((pid) => ({
+      name: String(pid),
+      isDirectory: () => true,
+    }));
+  };
+  fs.readFileSync = (target, encoding) => {
+    if (!String(target).startsWith("/proc/")) {
+      return originalReadFileSync(target, encoding);
+    }
+    const procPid = path.basename(path.dirname(String(target)));
+    const state = groupKilled ? "Z" : "S";
+    return `${procPid} (fixture) ${state} 1 ${pids.leader}`;
+  };
+
+  try {
+    await bridge.shutdownActiveBridgeProcesses();
+  } finally {
+    process.kill = originalKill;
+    Object.defineProperty(process, "platform", originalPlatform);
+    fs.readFileSync = originalReadFileSync;
+    fs.readdirSync = originalReaddirSync;
+  }
+
+  const result = await resultPromise;
+  assert.equal(groupKilled, true);
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /application shutdown/);
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
@@ -167,7 +226,13 @@ async function testTerminationFailurePreservesElevatedStage() {
     assert.equal(bridge.hasActiveBridgeProcesses(), true);
   } finally {
     process.kill = originalKill;
-    originalKill(-pids.leader, "SIGKILL");
+    try {
+      originalKill(-pids.leader, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") {
+        throw error;
+      }
+    }
   }
 
   const result = await resultPromise;

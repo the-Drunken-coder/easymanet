@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const { bridgeTimeoutMs, flashBridgeTimeoutMs } = require("./constants");
 const { bridgeCommand, bridgeEnv, bridgeWorkingDirectory } = require("./environment");
 const { parseBridgeJsonOutput, processBridgeStreamBuffer, processBridgeStreamLine } = require("./stream");
@@ -322,6 +323,9 @@ async function waitForProcessGroupExit(pid, timeoutMs = null) {
 function processGroupExists(pid) {
   try {
     process.kill(-pid, 0);
+    if (process.platform === "linux" && !linuxProcessGroupHasLiveMembers(pid)) {
+      return false;
+    }
     return true;
   } catch (error) {
     if (error.code === "ESRCH") {
@@ -332,6 +336,40 @@ function processGroupExists(pid) {
     }
     throw error;
   }
+}
+
+function linuxProcessGroupHasLiveMembers(pid) {
+  let entries;
+  try {
+    entries = fs.readdirSync("/proc", {withFileTypes: true});
+  } catch (_error) {
+    return true;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) {
+      continue;
+    }
+    let processStat;
+    try {
+      processStat = fs.readFileSync(`/proc/${entry.name}/stat`, "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        return true;
+      }
+      continue;
+    }
+    const commandEnd = processStat.lastIndexOf(")");
+    if (commandEnd === -1) {
+      return true;
+    }
+    const fields = processStat.slice(commandEnd + 2).split(" ");
+    const state = fields[0];
+    const processGroup = Number(fields[2]);
+    if (processGroup === pid && state !== "Z" && state !== "X") {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function waitForClose(closePromise, timeoutMs) {

@@ -7,19 +7,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .surfaces import SURFACES, SurfaceSpec, project_version, render_surface_pyproject
+from .surfaces import (
+    SURFACES,
+    SurfaceSpec,
+    project_version,
+    render_surface_pyproject,
+    tracked_files,
+)
 
 EXPORT_RECORD = "easymanet-public-surfaces.json"
-EXPORT_IGNORE = shutil.ignore_patterns(
-    "__pycache__",
-    "*.pyc",
-    "*.egg-info",
-    ".pytest_cache",
-    "build",
-    "dist",
-    "node_modules",
-    "out",
-)
+
+
 def export_public_surfaces(
     output_dir: Path,
     *,
@@ -64,23 +62,13 @@ def export_public_surfaces(
 
 def _copy_paths(repo_root: Path, surface_dir: Path, paths: Iterable[str]) -> list[str]:
     copied: list[str] = []
-    missing: list[str] = []
     for rel in paths:
-        source = repo_root / rel
-        if not source.exists():
-            missing.append(rel)
-            continue
-        dest = surface_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, dest, ignore=EXPORT_IGNORE)
-            copied.extend(_relative_files(dest, surface_dir))
-        else:
+        for tracked_path in tracked_files(repo_root, rel):
+            source = repo_root / tracked_path
+            dest = surface_dir / tracked_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
-            copied.append(rel)
-    if missing:
-        missing_text = ", ".join(sorted(missing))
-        raise FileNotFoundError(f"Export source path(s) missing: {missing_text}")
+            copied.append(tracked_path)
     return sorted(set(copied))
 
 
@@ -89,9 +77,9 @@ def _copy_templates(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) ->
     if not template_root.exists():
         return []
     copied: list[str] = []
-    for source in template_root.rglob("*"):
-        if not source.is_file():
-            continue
+    template_path = template_root.relative_to(repo_root).as_posix()
+    for tracked_path in tracked_files(repo_root, template_path):
+        source = repo_root / tracked_path
         rel = source.relative_to(template_root)
         dest = surface_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -104,14 +92,6 @@ def _write_surface_pyproject(repo_root: Path, surface_dir: Path, surface: Surfac
     version = project_version(repo_root / "pyproject.toml")
     (surface_dir / "pyproject.toml").write_text(render_surface_pyproject(surface, version))
     return "pyproject.toml"
-
-
-def _relative_files(path: Path, root: Path) -> list[str]:
-    return [
-        item.relative_to(root).as_posix()
-        for item in path.rglob("*")
-        if item.is_file()
-    ]
 
 
 def _write_surface_readme(surface_dir: Path, surface: str, copied: list[str]) -> None:

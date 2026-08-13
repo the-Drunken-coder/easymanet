@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,50 @@ class SurfaceSpec:
 
     def template_dir(self, repo_root: Path) -> Path:
         return repo_root / "product_repos" / "templates" / self.key
+
+
+def tracked_files(repo_root: Path, rel_path: str) -> tuple[str, ...]:
+    """Return the tracked files contained by one declared surface input."""
+    source_path = Path(rel_path)
+    if source_path.is_absolute() or ".." in source_path.parts:
+        raise ValueError(f"Source path must be relative to the repository: {rel_path}")
+
+    root = repo_root.resolve()
+    source = root / source_path
+    if not source.exists():
+        raise FileNotFoundError(f"Source path does not exist: {rel_path}")
+
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", source_path.as_posix()],
+        cwd=root,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    files = tuple(sorted(path for path in result.stdout.split("\0") if path))
+    if not files:
+        raise FileNotFoundError(f"Source path has no tracked files: {rel_path}")
+
+    for tracked_path in files:
+        tracked = Path(tracked_path)
+        if tracked.is_absolute() or ".." in tracked.parts:
+            raise ValueError(f"Git returned an unsafe tracked path: {tracked_path}")
+        candidate = root / tracked
+        if candidate.is_symlink():
+            raise ValueError(f"Tracked surface files cannot be symbolic links: {tracked_path}")
+        if source.is_dir():
+            try:
+                candidate.relative_to(source)
+            except ValueError as error:
+                raise ValueError(
+                    f"Git returned a path outside source path {rel_path}: {tracked_path}"
+                ) from error
+        elif candidate != source:
+            raise ValueError(
+                f"Git returned a path outside source path {rel_path}: {tracked_path}"
+            )
+
+    return files
 
 
 PRODUCT_DOC_PATHS = (

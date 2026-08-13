@@ -189,8 +189,8 @@ nodes:
     assert access["gate01"]["ethernet_mesh_access"] is False
 
 
-def test_node_access_normalizes_wifi_uplink_gate_booleans(tmp_path):
-    config = tmp_path / "string-bool-wifi-gate.yml"
+def test_node_access_uses_canonical_wifi_uplink_gate_booleans(tmp_path):
+    config = tmp_path / "wifi-gate.yml"
     config.write_text(
         """version: 1
 
@@ -207,10 +207,10 @@ defaults:
     enabled: true
     password: local-ap-password
   gateway:
-    enabled: "true"
+    enabled: true
     uplink_interface: wifi
     wifi:
-      enabled: "true"
+      enabled: true
       ssid: uplink
       password: uplink-password
 
@@ -230,8 +230,8 @@ nodes:
     assert access["gate01"]["wifi_uplink_gate"] is True
 
 
-def test_node_access_matches_disabled_gate_flashed_eth0_wan_behavior(tmp_path):
-    config = tmp_path / "disabled-gateway.yml"
+def test_node_access_derives_gate_eth0_wan_behavior_from_role(tmp_path):
+    config = tmp_path / "gate.yml"
     config.write_text(
         """version: 1
 
@@ -256,7 +256,6 @@ nodes:
     local_ap:
       ssid: gate01-local
     gateway:
-      enabled: false
       uplink_interface: eth0
 """
     )

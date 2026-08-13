@@ -309,12 +309,12 @@ nodes:
     ip: 10.41.1.1
 """
     )
-    string_bool_wifi_gate = tmp_path / "string-bool-wifi-gate.yml"
-    string_bool_wifi_gate.write_text(
+    wifi_gate = tmp_path / "wifi-gate.yml"
+    wifi_gate.write_text(
         """\
 version: 1
 mesh:
-  id: string-bool
+  id: wifi-gate
   password: mesh-password
   channel: 42
   bandwidth_mhz: 2
@@ -324,10 +324,10 @@ defaults:
   local_ap:
     enabled: false
   gateway:
-    enabled: "true"
+    enabled: true
     uplink_interface: wifi
     wifi:
-      enabled: "true"
+      enabled: true
       ssid: uplink
       password: uplink-password
   management:
@@ -351,7 +351,7 @@ nodes:
         ("examples/three-node-field-mesh.yml", "gate01", {"enable_wan_api": True}, True, True),
         ("examples/three-node-field-mesh.yml", "point01", {"enable_wan_api": True}, False, False),
         (str(ethernet_gate), "gate01", {"enable_wan_api": True}, False, False),
-        (str(string_bool_wifi_gate), "gate01", {"enable_wan_api": True}, True, True),
+        (str(wifi_gate), "gate01", {"enable_wan_api": True}, True, True),
     ]
 
     for config, node, overrides, expected_enabled, expected_applicable in cases:

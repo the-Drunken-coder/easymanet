@@ -3,8 +3,10 @@
 import os
 import tempfile
 
-from easymanet.manifest import load_manifest
-from easymanet.validate import resolve_node, validate, validate_ip
+import pytest
+
+from easymanet.manifest import ManifestError, load_manifest
+from easymanet.validate import validate, validate_ip
 
 
 VALID_CONFIG = """
@@ -61,8 +63,34 @@ def test_valid_config():
     os.unlink(path)
 
 
+def test_target_defaults_to_supported_hardware():
+    config = VALID_CONFIG.replace("  target: rpi4-mm6108-spi\n", "")
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    result = validate(manifest)
+
+    assert result.valid, result.errors
+    os.unlink(path)
+
+
+def test_targetless_fleet_still_applies_mm6108_mesh_policy():
+    config = VALID_CONFIG.replace("  target: rpi4-mm6108-spi\n", "").replace(
+        "channel: 42",
+        "channel: 36",
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    result = validate(manifest)
+
+    assert not result.valid
+    assert any("rpi4-mm6108-spi in US" in error for error in result.errors)
+    os.unlink(path)
+
+
 def test_missing_mesh_id():
-    config = VALID_CONFIG.replace("id: test-mesh", "id:")
+    config = VALID_CONFIG.replace("  id: test-mesh\n", "")
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
@@ -113,23 +141,19 @@ def test_mm6108_us_rejects_untested_channel_bandwidth_pair():
     os.unlink(path)
 
 
-def test_mesh_channel_must_be_numeric():
+def test_mesh_channel_must_be_integer():
     config = VALID_CONFIG.replace("channel: 42", "channel: abc")
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("mesh.channel must be numeric" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="mesh.channel must be an integer"):
+        load_manifest(path)
     os.unlink(path)
 
 
-def test_mesh_bandwidth_must_be_numeric():
+def test_mesh_bandwidth_rejects_boolean():
     config = VALID_CONFIG.replace("bandwidth_mhz: 2", "bandwidth_mhz: true")
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("mesh.bandwidth_mhz must be numeric" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="mesh.bandwidth_mhz must be an integer"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -175,10 +199,8 @@ def test_invalid_ip():
 def test_numeric_node_ip_is_invalid():
     config = VALID_CONFIG.replace("ip: 10.41.2.1", "ip: 101")
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("IP address must be a string" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="nodes.node02.ip must be a string"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -239,7 +261,11 @@ def test_invalid_role():
 
 
 def test_zero_gate_nodes_is_invalid():
-    config = VALID_CONFIG.replace("role: gate", "role: point", 1)
+    config = VALID_CONFIG.replace("role: gate", "role: point", 1).replace(
+        "      enabled: true\n      uplink_interface: eth0",
+        "      enabled: false\n      uplink_interface: eth0",
+        1,
+    )
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
@@ -310,7 +336,7 @@ def test_warning_gate_without_uplink_defaults_to_eth0_wan():
     os.unlink(path)
 
 
-def test_warning_gate_wifi_false_string_still_treats_eth0_as_wan():
+def test_gateway_wifi_enabled_rejects_string_boolean():
     config = VALID_CONFIG.replace(
         "      uplink_interface: eth0",
         """
@@ -322,20 +348,18 @@ def test_warning_gate_wifi_false_string_still_treats_eth0_as_wan():
 """.rstrip(),
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert result.valid
-    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    with pytest.raises(ManifestError, match="gateway.wifi.enabled must be a boolean"):
+        load_manifest(path)
     os.unlink(path)
 
 
-def test_disabled_gate_gateway_still_warns_eth0_wan_to_match_flash_behavior():
+def test_gateway_enabled_must_match_gate_role():
     config = VALID_CONFIG.replace("      enabled: true", "      enabled: false", 1)
     path = _write_config(config)
     m = load_manifest(path)
     result = validate(m)
-    assert result.valid
-    assert any("gate Ethernet (eth0) is the WAN uplink" in w for w in result.warnings)
+    assert not result.valid
+    assert any("gateway.enabled must match role 'gate' (true)" in e for e in result.errors)
     os.unlink(path)
 
 
@@ -407,10 +431,8 @@ def test_defaults_local_ap_must_be_mapping():
         1,
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("defaults.local_ap must be a mapping" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="defaults.local_ap must be a mapping"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -437,10 +459,8 @@ def test_local_ap_enabled_requires_password():
 def test_local_ap_password_must_be_string():
     config = VALID_CONFIG.replace('password: "ap-password"', "password: 12345678", 1)
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("local_ap.password must be a string" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="local_ap.password must be a string"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -462,10 +482,8 @@ def test_defaults_gateway_must_be_mapping():
         "defaults:\n  target: rpi4-mm6108-spi\n  gateway: not-a-mapping",
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("defaults.gateway must be a mapping" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="defaults.gateway must be a mapping"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -481,10 +499,8 @@ def test_defaults_management_must_be_mapping():
         "  management: not-a-mapping",
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("defaults.management must be a mapping" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="defaults.management must be a mapping"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -494,10 +510,8 @@ def test_ssh_authorized_keys_must_be_list():
         "ssh_authorized_keys: not-a-list",
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("ssh_authorized_keys must be a list" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="ssh_authorized_keys must be a list"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -507,20 +521,16 @@ def test_ssh_authorized_keys_entries_must_be_strings():
         "      - 123",
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("ssh_authorized_keys entries must be strings" in e for e in result.errors)
+    with pytest.raises(ManifestError, match=r"ssh_authorized_keys\[0\] must be a string"):
+        load_manifest(path)
     os.unlink(path)
 
 
 def test_node_names_must_be_strings():
     config = VALID_CONFIG.replace("  node02:", "  2:", 1)
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("Node name must be a string" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="nodes keys must be strings"):
+        load_manifest(path)
     os.unlink(path)
 
 
@@ -530,14 +540,12 @@ def test_node_gateway_must_be_mapping():
         '    gateway: "not-a-mapping"',
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    result = validate(m)
-    assert not result.valid
-    assert any("Node 'node01': gateway must be a mapping" in e for e in result.errors)
+    with pytest.raises(ManifestError, match="nodes.node01.gateway must be a mapping"):
+        load_manifest(path)
     os.unlink(path)
 
 
-def test_resolve_node_non_dict_local_ap_and_gateway():
+def test_manifest_rejects_non_mapping_node_overrides():
     config = VALID_CONFIG.replace(
         "    local_ap:\n      ssid: node01-local",
         "    local_ap: true",
@@ -546,16 +554,17 @@ def test_resolve_node_non_dict_local_ap_and_gateway():
         "    gateway: disabled",
     )
     path = _write_config(config)
-    m = load_manifest(path)
-    resolved = resolve_node(m, "node01")
-    assert isinstance(resolved["local_ap"], dict)
-    assert isinstance(resolved["gateway"], dict)
-    assert resolved["local_ap"]["ssid"] == "node01-local"
+    with pytest.raises(ManifestError, match="nodes.node01.local_ap must be a mapping"):
+        load_manifest(path)
     os.unlink(path)
 
 
 def test_gateway_wifi_requires_ssid_and_password():
-    config = VALID_CONFIG.replace("role: gate", "role: point", 1) + """
+    config = VALID_CONFIG.replace("role: gate", "role: point", 1).replace(
+        "      enabled: true\n      uplink_interface: eth0",
+        "      enabled: false\n      uplink_interface: eth0",
+        1,
+    ) + """
   node03:
     role: gate
     hostname: node03
@@ -576,6 +585,10 @@ def test_gateway_wifi_requires_ssid_and_password():
 
 def test_gateway_wifi_validation_uses_deep_merge_defaults():
     config = VALID_CONFIG.replace("role: gate", "role: point", 1).replace(
+        "      enabled: true\n      uplink_interface: eth0",
+        "      enabled: false\n      uplink_interface: eth0",
+        1,
+    ).replace(
         "defaults:\n  target: rpi4-mm6108-spi",
         """
 defaults:
@@ -600,6 +613,53 @@ defaults:
     result = validate(m, node_name="node03")
     assert result.valid
     assert result.errors == []
+    os.unlink(path)
+
+
+def test_gateway_enabled_must_match_point_role():
+    config = VALID_CONFIG.replace(
+        "    local_ap:\n      ssid: node02-local",
+        """    local_ap:
+      ssid: node02-local
+    gateway:
+      enabled: true""",
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+    result = validate(manifest)
+
+    assert not result.valid
+    assert any("gateway.enabled must match role 'point' (false)" in error for error in result.errors)
+    os.unlink(path)
+
+
+def test_gateway_wifi_enabled_requires_wifi_uplink_interface():
+    config = VALID_CONFIG.replace(
+        "      uplink_interface: eth0",
+        """      uplink_interface: eth0
+      wifi:
+        enabled: true
+        ssid: operator-wifi
+        password: operator-password""",
+        1,
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+    result = validate(manifest)
+
+    assert not result.valid
+    assert any("gateway.wifi.enabled requires gateway.uplink_interface: wifi" in error for error in result.errors)
+    os.unlink(path)
+
+
+def test_gateway_wifi_uplink_requires_enabled_wifi():
+    config = VALID_CONFIG.replace("uplink_interface: eth0", "uplink_interface: wifi", 1)
+    path = _write_config(config)
+    manifest = load_manifest(path)
+    result = validate(manifest)
+
+    assert not result.valid
+    assert any("gateway.uplink_interface: wifi requires gateway.wifi.enabled: true" in error for error in result.errors)
     os.unlink(path)
 
 

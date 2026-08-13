@@ -28,13 +28,13 @@ easymanet flash     ──→  write base image + stage boot payload
 /etc/uci-defaults/99-easymanet  (runs once on first boot)
     │
     ▼
-/usr/lib/easymanet/provision.sh  (copies JSON into overlay, applies UCI)
+/usr/lib/easymanet/provision.sh  (copies JSON, applies UCI, accepts activation commands)
     │
     ▼
-/etc/easymanet/provisioned  (marker file, prevents re-run)
+/etc/easymanet/provisioned  (marker after accepted required activation)
     │
     ▼
-network restart + boot report ──→ node is ready
+boot report ──→ node is ready to continue service startup
 ```
 
 ## Component Responsibilities
@@ -125,7 +125,11 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 3. **Explicit safety**: Never auto-select a disk. Require `--yes`.
    Detect and warn about system disks.
 4. **Idempotent provision**: The first-boot script checks for
-   `/etc/easymanet/provisioned` and skips if already provisioned.
+   `/etc/easymanet/provisioned` and skips if already provisioned. It writes the
+   marker only after the network, configured API, and configured Wi-Fi activation
+   commands accept. The marker does not prove radio association, WAN reachability,
+   or physical mesh connectivity; a failure before it is written is retried on the
+   next first-boot run.
 
 ## File Layout on Flashed Drive
 
@@ -136,7 +140,7 @@ Shipped in the OpenWrt `files/` overlay and baked into the firmware image:
 
 /etc/easymanet/
     provision.json          ← copied from boot partition on first boot
-    provisioned             ← created by provision.sh on success
+    provisioned             ← created after accepted required activation
 
 /etc/uci-defaults/
     99-easymanet            ← triggers provision.sh on first boot
@@ -160,8 +164,9 @@ and a stable support code such as `EM-OK`, `EM-MESH-DOWN`, `EM-INET-DOWN`, or
 `EM-NODE-MISSING`.
 
 Gate nodes include a simple fleet list in status output so an attached display
-can show expected nodes as `OK`, `MISSING`, or `UNKNOWN`. Point nodes show only
-their own local status.
+can show expected nodes as `OK`, `MISSING`, or `UNKNOWN`. A peer skipped by the
+topology probe cap is `UNKNOWN`; only a peer that was attempted and did not
+answer is `MISSING`. Point nodes show only their own local status.
 
 ## Firmware Build Requirement
 

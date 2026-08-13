@@ -50,7 +50,6 @@ nodes:
     local_ap:
       ssid: gate01-local
     gateway:
-      enabled: true
       uplink_interface: wifi
       wifi:
         enabled: true

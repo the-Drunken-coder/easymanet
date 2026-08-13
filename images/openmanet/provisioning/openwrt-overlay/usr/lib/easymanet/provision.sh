@@ -66,7 +66,7 @@ echo "=== EasyMANET provisioning started $(date) ===" >> "$LOG_FILE"
 # shellcheck source=provision-runtime.sh
 . "$SCRIPT_DIR/provision-runtime.sh"
 
-if [ -f "$PROVISIONED_FLAG" ]; then
+if [ -s "$PROVISIONED_FLAG" ]; then
     echo "Already provisioned, skipping." >> "$LOG_FILE"
     exit 0
 fi
@@ -88,6 +88,7 @@ fi
 PROVISION_VERSION="$(json_val version)"
 MESH_ID="$(json_val mesh id)"
 MESH_PASSWORD="$(json_val mesh password)"
+NODE_NAME="$(json_val node name)"
 HOSTNAME="$(json_val node hostname)"
 NODE_ROLE="$(json_val node role)"
 NODE_IP="$(json_val node ip)"
@@ -95,6 +96,8 @@ NODE_TARGET="$(json_val node target)"
 MESH_CHANNEL="$(json_val mesh channel)"
 MESH_BW="$(json_val mesh bandwidth_mhz)"
 MESH_COUNTRY="$(json_val mesh country)"
+GATEWAY_ENABLED_VALUE="$(json_val node gateway enabled)"
+WIFI_UPLINK_ENABLED_VALUE="$(json_val node gateway wifi enabled)"
 
 missing_fields=""
 [ -n "$PROVISION_VERSION" ] || missing_fields="$missing_fields version"
@@ -103,10 +106,12 @@ missing_fields=""
 [ -n "$MESH_CHANNEL" ] || missing_fields="$missing_fields mesh.channel"
 [ -n "$MESH_BW" ] || missing_fields="$missing_fields mesh.bandwidth_mhz"
 [ -n "$MESH_COUNTRY" ] || missing_fields="$missing_fields mesh.country"
+[ -n "$NODE_NAME" ] || missing_fields="$missing_fields node.name"
 [ -n "$HOSTNAME" ] || missing_fields="$missing_fields node.hostname"
 [ -n "$NODE_ROLE" ] || missing_fields="$missing_fields node.role"
 [ -n "$NODE_IP" ] || missing_fields="$missing_fields node.ip"
 [ -n "$NODE_TARGET" ] || missing_fields="$missing_fields node.target"
+[ -n "$GATEWAY_ENABLED_VALUE" ] || missing_fields="$missing_fields node.gateway.enabled"
 if [ -n "$missing_fields" ]; then
     echo "FATAL: missing required provision.json fields:$missing_fields" | tee -a "$LOG_FILE"
     exit 1
@@ -154,17 +159,51 @@ fi
 
 BATMAN_GW_MODE="client"
 MESH_GATE_ANNOUNCEMENTS="0"
-WIFI_UPLINK_ENABLED=0
-if json_bool node gateway wifi enabled; then
-    WIFI_UPLINK_ENABLED=1
-fi
-if [ "$NODE_ROLE" = "gate" ]; then
-    BATMAN_GW_MODE="server"
-    MESH_GATE_ANNOUNCEMENTS="1"
-fi
+case "$WIFI_UPLINK_ENABLED_VALUE" in
+    ""|false) WIFI_UPLINK_ENABLED=0 ;;
+    true) WIFI_UPLINK_ENABLED=1 ;;
+    *)
+        echo "FATAL: node.gateway.wifi.enabled must be a boolean in provision.json" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
+case "${NODE_ROLE}:${GATEWAY_ENABLED_VALUE}" in
+    gate:true)
+        BATMAN_GW_MODE="server"
+        MESH_GATE_ANNOUNCEMENTS="1"
+        ;;
+    point:false) ;;
+    *)
+        echo "FATAL: node.gateway.enabled must match node.role in provision.json" | tee -a "$LOG_FILE"
+        exit 1
+        ;;
+esac
 
 UPLINK_INTERFACE="$(json_val node gateway uplink_interface 2>/dev/null || true)"
 [ -n "$UPLINK_INTERFACE" ] || UPLINK_INTERFACE="eth0"
+if [ "$WIFI_UPLINK_ENABLED" -eq 1 ] && [ "$UPLINK_INTERFACE" != "wifi" ]; then
+    echo "FATAL: node.gateway.wifi.enabled requires node.gateway.uplink_interface wifi" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if [ "$WIFI_UPLINK_ENABLED" -ne 1 ] && [ "$UPLINK_INTERFACE" = "wifi" ]; then
+    echo "FATAL: node.gateway.uplink_interface wifi requires node.gateway.wifi.enabled" | tee -a "$LOG_FILE"
+    exit 1
+fi
+WIFI_UPLINK_SSID=""
+WIFI_UPLINK_PASSWORD=""
+WIFI_UPLINK_ENCRYPTION=""
+if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
+    WIFI_UPLINK_SSID="$(json_val node gateway wifi ssid)"
+    WIFI_UPLINK_PASSWORD="$(json_val node gateway wifi password)"
+    WIFI_UPLINK_ENCRYPTION="$(json_val node gateway wifi encryption)"
+    if [ -z "$WIFI_UPLINK_ENCRYPTION" ]; then
+        WIFI_UPLINK_ENCRYPTION="$EM_WIFI_UPLINK_ENCRYPTION_DEFAULT"
+    fi
+    if [ -z "$WIFI_UPLINK_SSID" ] || [ -z "$WIFI_UPLINK_PASSWORD" ]; then
+        echo "FATAL: gateway.wifi.enabled requires gateway.wifi.ssid and gateway.wifi.password" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+fi
 ETH0_MESH_SIDE=1
 if ! easymanet_eth0_mesh_side_for_values "$NODE_ROLE" "$WIFI_UPLINK_ENABLED" "$UPLINK_INTERFACE"; then
     ETH0_MESH_SIDE=0
@@ -267,16 +306,6 @@ if json_bool node local_ap enabled && [ "$WIFI_UPLINK_ENABLED" -ne 1 ]; then
 fi
 
 if [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
-    WIFI_UPLINK_SSID="$(json_val node gateway wifi ssid)"
-    WIFI_UPLINK_PASSWORD="$(json_val node gateway wifi password)"
-    WIFI_UPLINK_ENCRYPTION="$(json_val node gateway wifi encryption)"
-    if [ -z "$WIFI_UPLINK_ENCRYPTION" ]; then
-        WIFI_UPLINK_ENCRYPTION="$EM_WIFI_UPLINK_ENCRYPTION_DEFAULT"
-    fi
-    if [ -z "$WIFI_UPLINK_SSID" ] || [ -z "$WIFI_UPLINK_PASSWORD" ]; then
-        echo "FATAL: gateway.wifi.enabled requires gateway.wifi.ssid and gateway.wifi.password" | tee -a "$LOG_FILE"
-        exit 1
-    fi
     if [ -z "${AP_RADIO:-}" ]; then
         AP_RADIO="$(find_local_ap_radio)"
     fi
@@ -508,21 +537,26 @@ if [ -f "$openmanetd_config" ]; then
     fi
     old_umask="$(umask)"
     umask 077
+    yaml_single_quote() {
+        printf "'"
+        printf '%s' "$1" | sed "s/'/''/g"
+        printf "'"
+    }
     # OpenMANETd expects the mesh LAN bridge, not raw bat0, so its
     # gateway route and DNS management sees the same interface as clients.
     if ! cat > "$openmanetd_config" <<EOF
-meshNetInterface: "$EM_AHWLAN_BRIDGE"
+meshNetInterface: $(yaml_single_quote "$EM_AHWLAN_BRIDGE")
 mesh:
-  id: "${MESH_ID}"
-  password: "${MESH_PASSWORD}"
+  id: $(yaml_single_quote "$MESH_ID")
+  password: $(yaml_single_quote "$MESH_PASSWORD")
   channel: ${MESH_CHANNEL}
   bandwidth_mhz: ${MESH_BW}
-  country: "${MESH_COUNTRY}"
+  country: $(yaml_single_quote "$MESH_COUNTRY")
 node:
-  name: "$(json_val node name)"
-  hostname: "${HOSTNAME}"
-  role: "${NODE_ROLE}"
-  ip: "${NODE_IP}"
+  name: $(yaml_single_quote "$NODE_NAME")
+  hostname: $(yaml_single_quote "$HOSTNAME")
+  role: $(yaml_single_quote "$NODE_ROLE")
+  ip: $(yaml_single_quote "$NODE_IP")
 EOF
     then
         umask "$old_umask"
@@ -532,26 +566,43 @@ EOF
     umask "$old_umask"
 fi
 
+activation_failure() {
+    echo "FATAL: activation failed: $1" | tee -a "$LOG_FILE"
+    exit 1
+}
+
+require_init_action() {
+    init_script="$1"
+    service_name="$2"
+    action="$3"
+    if [ ! -x "$init_script" ]; then
+        activation_failure "$service_name init script not found"
+    fi
+    if ! "$init_script" "$action" >> "$LOG_FILE" 2>&1; then
+        activation_failure "$service_name $action command failed"
+    fi
+}
+
 network_init="$(_prefix_path /etc/init.d/network)"
-if [ -x "$network_init" ]; then
-    "$network_init" enable 2>/dev/null || true
-    "$network_init" restart 2>/dev/null || true
-fi
+require_init_action "$network_init" network enable
+require_init_action "$network_init" network restart
 if [ "$EASYMANET_API_CONFIGURED" = "1" ]; then
     uhttpd_init="$(_prefix_path /etc/init.d/uhttpd)"
-    if [ -x "$uhttpd_init" ]; then
-        echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
-        "$uhttpd_init" enable 2>/dev/null || true
-        "$uhttpd_init" restart 2>/dev/null || "$uhttpd_init" start 2>/dev/null || true
-    else
-        echo "WARNING: uhttpd init script not found; EasyMANET topology API will not start" >> "$LOG_FILE"
-    fi
+    echo "Enabling EasyMANET topology API (uhttpd)..." >> "$LOG_FILE"
+    require_init_action "$uhttpd_init" uhttpd enable
+    require_init_action "$uhttpd_init" uhttpd restart
 fi
 echo "Reapplying Morse mesh wireless settings after network restart..." >> "$LOG_FILE"
 configure_mesh_radio_device "$MESH_RADIO"
 uci_commit wireless
 if command -v wifi >/dev/null 2>&1; then
-    wifi reload "$MESH_RADIO" >> "$LOG_FILE" 2>&1 || true
+    if ! wifi reload "$MESH_RADIO" >> "$LOG_FILE" 2>&1; then
+        activation_failure "wifi reload command failed"
+    fi
+elif [ "$WIFI_UPLINK_ENABLED" -eq 1 ]; then
+    activation_failure "configured Wi-Fi uplink requires wifi command"
+else
+    echo "WARNING: wifi command not found; continuing without immediate wireless reload" >> "$LOG_FILE"
 fi
 mesh11sd_init="$(_prefix_path /etc/init.d/mesh11sd)"
 if [ -x "$mesh11sd_init" ]; then
@@ -562,12 +613,27 @@ if [ -x "$openmanetd_init" ]; then
     "$openmanetd_init" enable 2>/dev/null || true
 fi
 
-{
-    date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date
+provisioned_tmp="${PROVISIONED_FLAG}.tmp.$$"
+if ! provisioned_at="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to write provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if ! {
+    printf '%s\n' "$provisioned_at"
     echo "hostname: $HOSTNAME"
     echo "role: $NODE_ROLE"
     echo "ip: $NODE_IP"
-} > "$PROVISIONED_FLAG"
+} > "$provisioned_tmp"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to write provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if ! mv "$provisioned_tmp" "$PROVISIONED_FLAG"; then
+    rm -f "$provisioned_tmp"
+    echo "FATAL: failed to publish provisioning marker" | tee -a "$LOG_FILE"
+    exit 1
+fi
 
 status_cache_init="$(_prefix_path /etc/init.d/easymanet-status-cache)"
 if [ -x "$status_cache_init" ]; then

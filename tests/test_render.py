@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 
 import pytest
+import yaml
 
 from easymanet.manifest import ManifestError, load_manifest
 from easymanet.provision import ProvisionPayload, provision_json_bool, resolve_provision
@@ -58,12 +59,10 @@ def _write_config(content: str) -> str:
     return path
 
 
-def test_provision_json_bool_normalizes_string_values():
-    true_values = [True, 1, "1", "true", "TRUE", "True", "True ", " yes ", "Yes"]
-    false_values = [False, 0, 2, "0", "false", "trueish", "", None]
-
-    assert [provision_json_bool(value) for value in true_values] == [True] * len(true_values)
-    assert [provision_json_bool(value) for value in false_values] == [False] * len(false_values)
+def test_provision_json_bool_does_not_coerce_non_booleans():
+    assert provision_json_bool(True) is True
+    for value in (False, 1, 0, "true", "false", "yes", None):
+        assert provision_json_bool(value) is False
 
 
 def test_render_valid_provision_json():
@@ -247,7 +246,7 @@ nodes:
     os.unlink(path)
 
 
-def test_render_does_not_inherit_gateway_wifi_defaults_for_disabled_gateways():
+def test_render_omits_disabled_gateway_wifi_defaults():
     config = """
 version: 1
 mesh:
@@ -260,7 +259,7 @@ defaults:
   target: rpi4-mm6108-spi
   gateway:
     wifi:
-      enabled: true
+      enabled: false
       ssid: operator-uplink
       password: operator-password
   management:
@@ -275,8 +274,6 @@ nodes:
     role: gate
     hostname: n2
     ip: 10.41.3.1
-    gateway:
-      enabled: false
 """
     path = _write_config(config)
     m = load_manifest(path)
@@ -284,7 +281,7 @@ nodes:
         payload = resolve_provision(m, node_name)
         data = render_dict(m, node_name)
 
-        assert payload.node.gateway.enabled is False
+        assert payload.node.gateway.enabled is (node_name == "n2")
         assert payload.node.gateway.wifi is None
         assert "wifi" not in data["node"]["gateway"]
     os.unlink(path)
@@ -301,6 +298,51 @@ def test_render_starter_gate_uses_wifi_uplink_shape():
     assert gate["node"]["gateway"]["wifi"]["ssid"]
     assert gate["node"]["gateway"]["wifi"]["password"]
     assert gate["management"]["ssh_enabled"] is True
+
+
+def test_render_preserves_safe_scalar_content_and_canonical_booleans(tmp_path):
+    data = yaml.safe_load(VALID_CONFIG)
+    scalar = "  ops 'east' / west \\\\ \"quoted\"  "
+    data["mesh"]["id"] = scalar
+    data["mesh"]["password"] = scalar
+    data["defaults"]["local_ap"]["password"] = scalar
+    data["defaults"]["management"]["root_password_hash"] = scalar
+    data["nodes"]["node01"]["local_ap"]["ssid"] = scalar
+    data["nodes"]["node01"]["gateway"] = {
+        "enabled": True,
+        "uplink_interface": "wifi",
+        "wifi": {
+            "enabled": True,
+            "ssid": scalar,
+            "password": scalar,
+        },
+    }
+    path = tmp_path / "safe-scalars.yml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    manifest = load_manifest(str(path))
+    result = render_dict(manifest, "node01")
+
+    assert result["mesh"]["id"] == scalar
+    assert result["mesh"]["password"] == scalar
+    assert result["node"]["local_ap"]["ssid"] == scalar
+    assert result["node"]["local_ap"]["password"] == scalar
+    assert result["node"]["gateway"]["wifi"]["ssid"] == scalar
+    assert result["node"]["gateway"]["wifi"]["password"] == scalar
+    assert result["management"]["root_password_hash"] == scalar
+    assert type(result["node"]["local_ap"]["enabled"]) is bool
+    assert type(result["node"]["gateway"]["enabled"]) is bool
+    assert type(result["node"]["gateway"]["wifi"]["enabled"]) is bool
+
+
+def test_render_derives_gateway_enabled_from_role():
+    config = VALID_CONFIG.replace("      enabled: true\n", "", 1)
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    assert render_dict(manifest, "node01")["node"]["gateway"]["enabled"] is True
+    assert render_dict(manifest, "node02")["node"]["gateway"]["enabled"] is False
+    os.unlink(path)
 
 
 def test_render_omits_ssh_enabled_when_unspecified():
@@ -366,9 +408,8 @@ def test_render_rejects_malformed_management_defaults():
         "  management: not-a-mapping",
     )
     path = _write_config(config)
-    m = load_manifest(path)
     with pytest.raises(ManifestError, match="defaults.management must be a mapping"):
-        render(m, "node01")
+        load_manifest(path)
     os.unlink(path)
 
 

@@ -63,8 +63,8 @@ setInterval(() => {}, 1000);
 async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
-    await testPersistentGroupObservationDoesNotBlockShutdown();
-    await testTerminationFailureSettlesShutdown();
+    await testPersistentGroupObservationKeepsOperationTracked();
+    await testTerminationFailurePreservesElevatedStage();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
     await testElevatedTimeoutReapsBeforeCleanup();
@@ -92,7 +92,7 @@ async function testTimeoutReapsProcessTree() {
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 
-async function testPersistentGroupObservationDoesNotBlockShutdown() {
+async function testPersistentGroupObservationKeepsOperationTracked() {
   const pidFile = path.join(tempRoot, "persistent-group-pids.json");
   const bridge = loadBridgeProcess(pidFile);
   const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
@@ -112,32 +112,36 @@ async function testPersistentGroupObservationDoesNotBlockShutdown() {
     return result;
   };
 
-  let deadlineTimer;
   try {
-    const deadline = new Promise((_, reject) => {
-      deadlineTimer = setTimeout(
-        () => reject(new Error("Bridge shutdown did not settle after SIGKILL")),
-        2000,
-      );
-    });
-    const shutdownPromise = bridge.shutdownActiveBridgeProcesses();
-    await Promise.race([Promise.all([shutdownPromise, resultPromise]), deadline]);
+    await assert.rejects(
+      bridge.shutdownActiveBridgeProcesses(),
+      /process group .* is still active/,
+    );
+    assert.equal(bridge.hasActiveBridgeProcesses(), true);
   } finally {
-    clearTimeout(deadlineTimer);
     process.kill = originalKill;
   }
 
   const result = await resultPromise;
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
+  assert.match(result.errors[1], /process group .* is still active/);
   assertProcessTreeGone(pids);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 
-async function testTerminationFailureSettlesShutdown() {
+async function testTerminationFailurePreservesElevatedStage() {
   const pidFile = path.join(tempRoot, "termination-failure-pids.json");
   const bridge = loadBridgeProcess(pidFile);
-  const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
+  const elevated = loadElevatedFlash(pidFile, bridge);
+  const stage = createElevatedStage("termination-failure");
+  const resultPromise = elevated.runBridgeWithAdministratorPrivileges([], {
+    adminPassword: "test-password",
+    authenticationGraceMs: 0,
+    stage,
+    terminationGraceMs: 250,
+    timeoutMs: 10000,
+  });
   const pids = await readPids(pidFile);
   fixturePids.push(pids);
   const originalKill = process.kill;
@@ -154,20 +158,25 @@ async function testTerminationFailureSettlesShutdown() {
     return originalKill(pid, signal);
   };
 
-  let result;
   try {
-    await bridge.shutdownActiveBridgeProcesses();
-    result = await resultPromise;
+    await assert.rejects(
+      bridge.shutdownActiveBridgeProcesses(),
+      /SIGTERM failed: permission denied.*SIGKILL failed: operation not permitted/,
+    );
+    assert.equal(fs.existsSync(stage.root), true);
+    assert.equal(bridge.hasActiveBridgeProcesses(), true);
   } finally {
     process.kill = originalKill;
     originalKill(-pids.leader, "SIGKILL");
   }
 
+  const result = await resultPromise;
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /application shutdown/);
   assert.match(result.errors[1], /SIGTERM failed: permission denied/);
   assert.match(result.errors[1], /SIGKILL failed: operation not permitted/);
   assert.deepEqual(attemptedSignals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(fs.existsSync(stage.root), false);
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 

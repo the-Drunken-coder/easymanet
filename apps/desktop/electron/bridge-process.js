@@ -8,6 +8,14 @@ const processExitPollMs = 25;
 const terminationGraceMs = 5000;
 let bridgeShutdownStarted = false;
 
+class BridgeCleanupPendingError extends Error {
+  constructor(message, completion) {
+    super(message);
+    this.name = "BridgeCleanupPendingError";
+    this.completion = completion;
+  }
+}
+
 function runBridge(args, options = {}) {
   return runBridgeJson(args, { timeoutMs: options.timeoutMs || bridgeTimeoutMs });
 }
@@ -138,11 +146,21 @@ function runTrackedProcess(launch, handlers) {
         )
           .then(() => finish(payload))
           .catch((error) => {
-            finish({
+            const failurePayload = {
               ...payload,
               ok: false,
               errors: [...payload.errors, `Bridge process cleanup failed: ${error.message}`],
-            });
+            };
+            if (error instanceof BridgeCleanupPendingError) {
+              error.completion
+                .then(() => finish(failurePayload))
+                .catch((completionError) => {
+                  const prefix = state.stderr ? "\n" : "";
+                  state.stderr += `${prefix}Bridge cleanup observation failed: ${completionError.message}`;
+                });
+              throw error;
+            }
+            finish(failurePayload);
           });
       }
       return operation.terminating;
@@ -256,20 +274,27 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   } catch (error) {
     killError = error;
   }
-  await Promise.all([
+  const [, processGroupExited] = await Promise.all([
     waitForClose(closePromise, graceMs),
     waitForProcessGroupExit(pid, graceMs),
   ]);
+  let cleanupError = null;
   if (terminationError && killError) {
-    throw new Error(
+    cleanupError = new Error(
       `SIGTERM failed: ${terminationError.message}; SIGKILL failed: ${killError.message}`,
     );
+  } else {
+    cleanupError = terminationError || killError;
   }
-  if (terminationError) {
-    throw terminationError;
+  if (!processGroupExited) {
+    const detail = cleanupError ? `${cleanupError.message}; ` : "";
+    throw new BridgeCleanupPendingError(
+      `${detail}process group ${pid} is still active`,
+      waitForProcessGroupExit(pid),
+    );
   }
-  if (killError) {
-    throw killError;
+  if (cleanupError) {
+    throw cleanupError;
   }
 }
 

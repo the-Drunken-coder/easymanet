@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import zlib
 
+from ._image_validation import check_gzip_payload
+
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
@@ -47,14 +49,7 @@ def valid_image_payload(path: Path, filename: str) -> bool:
     if suffix != ".gz" or not named_path.stem.lower().endswith(".img"):
         return False
     try:
-        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        total = 0
-        with path.open("rb") as f:
-            while not decompressor.eof:
-                chunk = f.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(decompressor.decompress(chunk))
+        check_gzip_payload(path)
     except (OSError, zlib.error):
         return False
-    return decompressor.eof and total > 0
+    return True

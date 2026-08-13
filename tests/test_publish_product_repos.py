@@ -160,6 +160,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
             assert (repo / "tools" / "release_smoke.py").exists()
 
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
+    assert (generated["images"] / "tests" / "test_download_manifest.py").exists()
+    assert (generated["cli"] / "tests" / "test_download_manifest.py").exists()
     assert (generated["images"] / "tools" / "packaging" / "cleanup_image_releases.py").exists()
     assert (generated["images"] / "tools" / "packaging" / "generate_image_release_notes.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
@@ -190,6 +192,7 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     image_pyproject = tomllib.loads((generated["images"] / "pyproject.toml").read_text(encoding="utf-8"))
     assert image_pyproject["project"]["name"] == "easymanet-images"
     assert image_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
+    assert "sigstore>=4.5,<5" in image_pyproject["project"]["dependencies"]
     assert (image_workflows / "image-release.yml").exists()
     assert not (image_workflows / "build-openmanet-image.yml").exists()
     assert not (image_workflows / "prove-overlay-weekly.yml").exists()
@@ -198,6 +201,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
     assert "actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45" in image_release
+    assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in image_release
+    assert "cosign-release: v3.0.6" in image_release
     assert "cosign sign-blob" in image_release
     assert "generate_image_release_notes.py" in image_release
     assert "OPENCODE_GO_API_KEY" in image_release

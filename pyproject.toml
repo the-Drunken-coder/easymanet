@@ -26,6 +26,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
+    "sigstore>=4.5,<5",
     "typer>=0.9",
     "pyyaml>=6",
     "rich>=13",

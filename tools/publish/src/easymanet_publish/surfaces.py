@@ -23,7 +23,11 @@ class SurfaceSpec:
     package_name: str | None = None
     package_data: tuple[tuple[str, tuple[str, ...]], ...] = ()
     include_image_data: bool = False
-    dependencies: tuple[str, ...] = ("typer>=0.9", "pyyaml>=6")
+    dependencies: tuple[str, ...] = (
+        "sigstore>=4.5,<5",
+        "typer>=0.9",
+        "pyyaml>=6",
+    )
     dev_dependencies: tuple[str, ...] = (
         "pytest>=7",
         "pytest-cov",
@@ -60,6 +64,7 @@ PRODUCT_TEST_PATHS = (
     "tests/test_cli_common.py",
     "tests/test_disks.py",
     "tests/test_download.py",
+    "tests/test_download_manifest.py",
     "tests/test_extra_packages.py",
     "tests/test_firstboot.py",
     "tests/test_image.py",

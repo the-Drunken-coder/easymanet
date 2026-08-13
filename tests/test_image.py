@@ -57,6 +57,54 @@ def test_check_image_accepts_openwrt_trailing_metadata(tmp_path):
     assert written == len(b"image-bytes")
 
 
+def test_check_image_counts_all_concatenated_gzip_members(tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(gzip.compress(b"first") + gzip.compress(b"second"))
+
+    _, written = _check_image(str(image))
+
+    assert written == len(b"firstsecond")
+
+
+def test_check_image_accepts_payload_after_empty_gzip_member(tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(gzip.compress(b"") + gzip.compress(b"payload"))
+
+    _, written = _check_image(str(image))
+
+    assert written == len(b"payload")
+
+
+@pytest.mark.parametrize("damage", ["crc", "truncated"])
+def test_check_image_rejects_corrupt_later_gzip_member(tmp_path, damage):
+    image = tmp_path / "openmanet.img.gz"
+    corrupt_member = bytearray(gzip.compress(b"second"))
+    if damage == "crc":
+        corrupt_member[-1] ^= 0xFF
+    else:
+        del corrupt_member[-4:]
+    image.write_bytes(gzip.compress(b"first") + corrupt_member)
+
+    with pytest.raises(FlashError, match="Invalid gzip-compressed image"):
+        _check_image(str(image))
+
+
+def test_check_image_rejects_partial_later_gzip_member_header(tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(gzip.compress(b"first") + b"\x1f")
+
+    with pytest.raises(FlashError, match="Invalid gzip-compressed image"):
+        _check_image(str(image))
+
+
+def test_check_image_rejects_zero_total_concatenated_payload(tmp_path):
+    image = tmp_path / "openmanet.img.gz"
+    image.write_bytes(gzip.compress(b"") + gzip.compress(b""))
+
+    with pytest.raises(FlashError, match="did not contain a disk image payload"):
+        _check_image(str(image))
+
+
 def test_clear_stale_overlay_skips_trailing_metadata_gzip_when_payload_covers_region(
     monkeypatch, tmp_path
 ):

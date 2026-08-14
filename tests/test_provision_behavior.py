@@ -40,6 +40,7 @@ def _policy_parity_config(
     channel: object = 42,
     bandwidth_mhz: object = 2,
 ) -> str:
+    gateway_enabled = "true" if role == "gate" else "false"
     return f"""
 version: 1
 
@@ -64,7 +65,7 @@ nodes:
     local_ap:
       enabled: false
     gateway:
-      enabled: true
+      enabled: {gateway_enabled}
       uplink_interface: eth0
 """
 

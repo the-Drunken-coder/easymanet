@@ -302,7 +302,7 @@ def resolve_node_model(manifest: Manifest, node_name: str) -> ResolvedNode:
         _resolved_local_ap(defaults, node, node_name)
     )
     gateway = GatewayConfig.from_mapping(
-        _resolved_gateway(defaults, node, role=role)
+        _resolved_gateway(defaults, node, role=role, node_name=node_name)
     )
     _require_distinct_local_wifi_modes(node_name, local_ap, gateway)
     return ResolvedNode(
@@ -487,6 +487,7 @@ def _resolved_gateway(
     node: dict[str, object],
     *,
     role: str,
+    node_name: str,
 ) -> dict[str, object]:
     default_gateway = _mapping_value(defaults, "gateway", "defaults.gateway")
     node_gateway = _mapping_value(node, "gateway", "node.gateway")
@@ -501,7 +502,15 @@ def _resolved_gateway(
             resolved["wifi"] = dict(default_wifi)
         elif isinstance(node_wifi, dict):
             resolved["wifi"] = {**default_wifi, **node_wifi}
-    resolved["enabled"] = role == "gate"
+    expected_enabled = role == "gate"
+    if "enabled" in resolved:
+        authored_enabled = _bool_value(resolved, "enabled", "gateway.enabled")
+        if authored_enabled is not expected_enabled:
+            raise ManifestError(
+                f"Node '{node_name}': gateway.enabled must match role '{role}' "
+                f"({str(expected_enabled).lower()})"
+            )
+    resolved["enabled"] = expected_enabled
 
     wifi = resolved.get("wifi")
     if wifi is not None and not isinstance(wifi, dict):
@@ -512,6 +521,22 @@ def _resolved_gateway(
         isinstance(wifi, dict)
         and _bool_value(wifi, "enabled", "gateway.wifi.enabled")
     )
+    if "uplink_interface" in resolved:
+        uplink_interface = _string_value(
+            resolved,
+            "uplink_interface",
+            "gateway.uplink_interface",
+        )
+        if wifi_enabled and uplink_interface != "wifi":
+            raise ManifestError(
+                f"Node '{node_name}': gateway.wifi.enabled requires "
+                "gateway.uplink_interface: wifi"
+            )
+        if not wifi_enabled and uplink_interface == "wifi":
+            raise ManifestError(
+                f"Node '{node_name}': gateway.uplink_interface: wifi requires "
+                "gateway.wifi.enabled: true"
+            )
     if wifi_enabled:
         if not resolved.get("uplink_interface"):
             resolved["uplink_interface"] = "wifi"

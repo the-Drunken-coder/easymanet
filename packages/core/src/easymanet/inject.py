@@ -73,6 +73,11 @@ def inject(
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
 
+    if device != device_identity.path:
+        raise InjectError(
+            f"Device path {device} does not match checked identity path "
+            f"{device_identity.path}."
+        )
     _assert_device_identity(device_identity)
     mount_point, mounted_here = _mount_boot_partition(device)
     results: List[Tuple[str, bool]] | None = None

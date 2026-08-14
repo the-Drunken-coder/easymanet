@@ -487,6 +487,28 @@ def test_flash_image_dry_run_emits_disk_details(monkeypatch, tmp_path):
     ]
 
 
+def test_flash_image_treats_uppercase_gzip_suffix_as_compressed(monkeypatch, tmp_path):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    image = tmp_path / "firmware.img.GZ"
+    with gzip.open(image, "wb") as handle:
+        handle.write(b"FLASH-GZ" * 64)
+    gzip_writes = []
+
+    monkeypatch.setattr(
+        "easymanet.image._write_gz_via_dd",
+        lambda *args, **kwargs: gzip_writes.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "easymanet.image._write_raw_via_dd",
+        lambda *_args, **_kwargs: pytest.fail("gzip image must not use raw writer"),
+    )
+    monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
+
+    flash_image(str(device), str(image), force=True, skip_overlay_wipe=True)
+
+    assert len(gzip_writes) == 1
+
+
 @REAL_DD_TEST
 def test_write_raw_via_dd_writes_payload(tmp_path):
     device = tmp_path / "disk.img"
@@ -698,6 +720,26 @@ def test_finish_flash_raises_when_eject_fails(monkeypatch, tmp_path):
     messages = [event["message"] for event in events]
     assert any(f"eject {device} manually" in message for message in messages)
     assert "Safe to remove." not in messages
+
+
+@pytest.mark.parametrize("eject", [True, False])
+def test_finish_flash_rejects_device_argument_that_does_not_match_identity(
+    monkeypatch,
+    tmp_path,
+    eject,
+):
+    selected = tmp_path / "selected-disk"
+    other = tmp_path / "other-disk"
+    selected.write_bytes(b"selected")
+    other.write_bytes(b"other")
+    identity = capture_device_identity(str(selected))
+    monkeypatch.setattr(
+        "easymanet.image.os.sync",
+        lambda: pytest.fail("mismatched device must fail before sync"),
+    )
+
+    with pytest.raises(FlashError, match="does not match checked identity path"):
+        finish_flash(str(other), device_identity=identity, eject=eject)
 
 
 def test_finish_flash_raises_when_eject_times_out(monkeypatch, tmp_path):

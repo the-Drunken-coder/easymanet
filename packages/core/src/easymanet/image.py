@@ -294,9 +294,10 @@ def flash_image(
             return device_identity
 
         device = disk.device
+        image_suffix = image.suffix.lower()
         write_path = (
             _stream_dd_device_path(device)
-            if image.suffix == ".gz"
+            if image_suffix == ".gz"
             else _dd_device_path(device)
         )
         write_identity = (
@@ -324,7 +325,7 @@ def flash_image(
             companions = () if write_identity == device_identity else (device_identity,)
             device_fd = _open_device_for_write(write_identity, companions=companions)
             try:
-                if image.suffix == ".gz":
+                if image_suffix == ".gz":
                     _write_gz_via_dd(image_fd, device_fd, emit=emit)
                 else:
                     _write_raw_via_dd(image_fd, device_fd, emit=emit)
@@ -705,6 +706,11 @@ def finish_flash(
     eject: bool = True,
     emit: FlashEventCallback | None = None,
 ) -> None:
+    if device != device_identity.path:
+        raise FlashError(
+            f"Device path {device} does not match checked identity path "
+            f"{device_identity.path}."
+        )
     os.sync()
     _assert_device_identity(device_identity)
     if eject:

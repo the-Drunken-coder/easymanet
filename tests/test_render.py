@@ -368,6 +368,49 @@ def test_render_derives_gateway_enabled_from_role():
     os.unlink(path)
 
 
+@pytest.mark.parametrize(
+    ("node_name", "gateway", "expected"),
+    [
+        (
+            "node02",
+            {"enabled": True, "uplink_interface": "eth0"},
+            r"gateway.enabled must match role 'point' \(false\)",
+        ),
+        (
+            "node01",
+            {
+                "enabled": True,
+                "uplink_interface": "eth0",
+                "wifi": {
+                    "enabled": True,
+                    "ssid": "operator-uplink",
+                    "password": "operator-password",
+                },
+            },
+            "gateway.wifi.enabled requires gateway.uplink_interface: wifi",
+        ),
+        (
+            "node01",
+            {"enabled": True, "uplink_interface": "wifi"},
+            "gateway.uplink_interface: wifi requires gateway.wifi.enabled: true",
+        ),
+    ],
+)
+def test_render_rejects_gateway_contract_mismatches(
+    tmp_path,
+    node_name,
+    gateway,
+    expected,
+):
+    data = yaml.safe_load(VALID_CONFIG)
+    data["nodes"][node_name]["gateway"] = gateway
+    path = tmp_path / "fleet.yml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ManifestError, match=expected):
+        render_dict(load_manifest(str(path)), node_name)
+
+
 def test_render_omits_ssh_enabled_when_unspecified():
     path = _write_config(VALID_CONFIG)
     m = load_manifest(path)

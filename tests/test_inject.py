@@ -311,6 +311,24 @@ def test_inject_reports_staging_and_cleanup_failures(monkeypatch, tmp_path):
         inject(device, manifest, "node01", device_identity=identity)
 
 
+def test_inject_rejects_device_argument_that_does_not_match_identity(
+    monkeypatch,
+    tmp_path,
+):
+    path = _write_config(tmp_path, VALID_CONFIG)
+    manifest = load_manifest(path)
+    _selected, identity = _flash_target(tmp_path)
+    other = tmp_path / "other-device"
+    other.write_bytes(b"other")
+    monkeypatch.setattr(
+        "easymanet.inject._mount_boot_partition",
+        lambda _device: pytest.fail("mismatched device must not be mounted"),
+    )
+
+    with pytest.raises(InjectError, match="does not match checked identity path"):
+        inject(str(other), manifest, "node01", device_identity=identity)
+
+
 def test_inject_rejects_device_replacement_during_mount(monkeypatch, tmp_path):
     path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)

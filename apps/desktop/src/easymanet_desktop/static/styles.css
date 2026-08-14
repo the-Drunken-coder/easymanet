@@ -996,7 +996,7 @@ select:disabled {
   overflow-wrap: anywhere;
 }
 
-.table-message td,
+.table-message:not(.inline-error) td,
 .evidence-cell {
   color: var(--muted);
 }

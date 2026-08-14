@@ -291,7 +291,19 @@ def test_unsafe_ip_override_stops_before_throughput_command(tmp_path, monkeypatc
     assert any(check["name"] == "point01 probe address is IPv4" and not check["ok"] for check in payload["checks"])
 
 
-def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("reported_nonce", "accepted"),
+    [
+        (HIL_NONCE, True),
+        ("0" * 32, False),
+    ],
+)
+def test_flash_mode_prompts_before_waiting_and_probing(
+    tmp_path,
+    monkeypatch,
+    reported_nonce,
+    accepted,
+):
     monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "EasyMANET"))
     monkeypatch.setattr(hil_verify, "_git_provenance", _clean_provenance)
     artifact, sha256 = _image_artifact(tmp_path)
@@ -347,13 +359,15 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
                 **flash_attestations[0],
                 "image_sha256": sha256,
             }
+            reported = _runtime_attestation(expected)
+            reported["hil_run_nonce"] = reported_nonce
             return _api_result(
                 host,
                 endpoint,
                 {
                     "ok": True,
                     "node": {"name": node_name, "role": role, "ip": host},
-                    "attestation": _runtime_attestation(expected),
+                    "attestation": reported,
                 },
             )
         if endpoint == "status":
@@ -406,7 +420,7 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
         nonce_fn=lambda: HIL_NONCE,
     )
 
-    assert payload["ok"] is True
+    assert payload["ok"] is accepted
     assert events[:4] == ["flash gate01", "flash point01", "prompt", "sleep 90"]
     assert any(check["name"] == "post-flash boot handoff confirmed" and check["ok"] for check in payload["checks"])
     assert payload["image"]["node_image_identity"] == "flashed"
@@ -425,8 +439,16 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
         }
     ] * 2
     assert payload["attestation"]["image_sha256"] == sha256
-    assert payload["evidence_scope"]["kind"] == "physical-hil"
-    assert payload["evidence_scope"]["physical_acceptance"] is True
+    assert payload["evidence_scope"]["physical_acceptance"] is accepted
+    if accepted:
+        assert payload["evidence_scope"]["kind"] == "physical-hil"
+    else:
+        assert payload["evidence_scope"]["kind"] == "physical-observation"
+        assert any(
+            check["name"].endswith("runtime attestation")
+            and check["ok"] is False
+            for check in payload["checks"]
+        )
 
 
 def test_reuse_nodes_collects_mock_hardware_evidence(tmp_path, monkeypatch):

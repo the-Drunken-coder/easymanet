@@ -12,11 +12,11 @@ from .manifest import Manifest, ManifestError
 from .provision import (
     GatewayConfig,
     LocalApConfig,
+    VALID_ROLES,
     eth0_mesh_side,
     resolve_node_model,
 )
 
-VALID_ROLES = {"gate", "point"}
 VALID_TARGETS = {"rpi4-mm6108-spi"}
 VALID_BANDWIDTHS = {1, 2, 4, 8}
 MM6108_TARGET = "rpi4-mm6108-spi"

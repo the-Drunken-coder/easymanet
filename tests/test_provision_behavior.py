@@ -151,7 +151,6 @@ if json_bool node gateway wifi enabled; then echo wifi_on; else echo wifi_off; f
     ("name", "config", "expected_valid"),
     [
         ("valid baseline", _policy_parity_config(), True),
-        ("unsupported role", _policy_parity_config(role="relay"), False),
         ("unsupported target", _policy_parity_config(target="rpi5"), False),
         ("unsupported bandwidth", _policy_parity_config(bandwidth_mhz=3), False),
         ("untested US channel", _policy_parity_config(channel=36), False),

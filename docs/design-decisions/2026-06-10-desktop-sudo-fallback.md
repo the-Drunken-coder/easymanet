@@ -24,4 +24,6 @@ inputs are staged only for the command lifetime and cleaned after confirmed
 process-group exit. If cleanup cannot be confirmed within the bounded shutdown
 window, the result records the process-group ID and preserves the stage with a
 `cleanup-pending.json` recovery record. The operator still gets an inspectable
-terminal command when native elevation cannot run.
+terminal command when native elevation cannot run. A preserved stage contains
+cleartext fleet secrets on an unencrypted temporary path; remove it after the
+privileged flash process has ended.

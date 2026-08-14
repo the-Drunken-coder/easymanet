@@ -11,6 +11,9 @@ from typing import Optional
 from .manifest import Manifest, ManifestError
 
 
+VALID_ROLES = frozenset({"gate", "point"})
+
+
 @dataclass(frozen=True)
 class MeshConfig:
     id: str = ""
@@ -354,6 +357,11 @@ def resolve_node_model(manifest: Manifest, node_name: str) -> ResolvedNode:
         f"nodes.{node_name}.role",
         default=default_role,
     )
+    if role not in VALID_ROLES:
+        raise ManifestError(
+            f"Node '{node_name}': role must be one of {sorted(VALID_ROLES)}, "
+            f"got '{role}'"
+        )
     local_ap = LocalApConfig.from_mapping(
         _resolved_local_ap(defaults, node, node_name)
     )

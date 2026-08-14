@@ -189,6 +189,16 @@ def test_render_gate_node():
     os.unlink(path)
 
 
+def test_render_rejects_unknown_node_role():
+    path = _write_config(VALID_CONFIG.replace("role: point", "role: gateway"))
+    manifest = load_manifest(path)
+
+    with pytest.raises(ManifestError, match="role must be one of"):
+        render_dict(manifest, "node02")
+
+    os.unlink(path)
+
+
 def test_render_defaults_merge():
     config = """
 version: 1

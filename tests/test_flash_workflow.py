@@ -1,3 +1,4 @@
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -568,7 +569,9 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
         "complete",
     ]
     assert events[0].event_type == "warning"
-    assert flash_calls[0]["expected_sha256"] == (result.image["sha256"] or None)
+    expected_sha256 = hashlib.sha256(b"firmware").hexdigest()
+    assert result.image["sha256"] == expected_sha256
+    assert flash_calls[0]["expected_sha256"] == expected_sha256
     assert inject_calls[0]["device_identity"] is device_identity
     assert inject_calls[0]["ssh_enabled"] is False
     assert inject_calls[0]["attestation"].to_dict() == {

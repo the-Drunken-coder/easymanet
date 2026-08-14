@@ -204,9 +204,7 @@ async function testPersistentGroupObservationSettlesAppQuit() {
     try {
       originalKill(-pids.leader, "SIGKILL");
     } catch (error) {
-      if (!["ESRCH", "EPERM"].includes(error.code)) {
-        throw error;
-      }
+      reportFixtureCleanupError(error);
     }
   }
 }
@@ -248,6 +246,7 @@ async function testTerminationFailurePreservesElevatedStage() {
     const [, result] = await Promise.all([shutdownPromise, resultPromise]);
     assert.equal(fs.existsSync(stage.root), true);
     assert.equal(fs.existsSync(result.cleanup.recovery_record), true);
+    assert.equal(fs.statSync(result.cleanup.recovery_record).mode & 0o777, 0o600);
     assert.equal(result.cleanup.state, "pending");
     assert.equal(result.cleanup.stage_path, stage.root);
     assert.equal(result.ok, false);
@@ -262,9 +261,7 @@ async function testTerminationFailurePreservesElevatedStage() {
     try {
       originalKill(-pids.leader, "SIGKILL");
     } catch (error) {
-      if (!["ESRCH", "EPERM"].includes(error.code)) {
-        throw error;
-      }
+      reportFixtureCleanupError(error);
     }
   }
 
@@ -304,16 +301,16 @@ async function testCleanupObservationFailurePreservesElevatedStage() {
     assert.match(result.errors[1], /could not confirm process group/);
     assert.equal(result.cleanup.state, "unknown");
     assert.equal(result.cleanup.stage_path, stage.root);
+    assert.equal(fs.existsSync(stage.root), true);
     assert.equal(fs.existsSync(result.cleanup.recovery_record), true);
+    assert.equal(fs.statSync(result.cleanup.recovery_record).mode & 0o777, 0o600);
     assert.equal(bridge.hasActiveBridgeProcesses(), false);
   } finally {
     process.kill = originalKill;
     try {
       originalKill(-pids.leader, "SIGKILL");
     } catch (error) {
-      if (!["ESRCH", "EPERM"].includes(error.code)) {
-        throw error;
-      }
+      reportFixtureCleanupError(error);
     }
   }
 }
@@ -730,6 +727,14 @@ function processExists(pid) {
     }
     throw error;
   }
+}
+
+function reportFixtureCleanupError(error) {
+  if (["ESRCH", "EPERM"].includes(error.code)) {
+    return;
+  }
+  console.error(`Fixture process-group cleanup failed: ${error.message}`);
+  process.exitCode = 1;
 }
 
 function quitEvent() {

@@ -110,6 +110,9 @@ function finalizeElevatedStage(stage, payload) {
     stage_path: stage.root,
     recovery_record: recordPath,
   };
+  const recoveryWarning =
+    `Elevated flash inputs at ${stage.root} retain cleartext fleet secrets. `
+    + "Remove that directory after the privileged flash process has ended.";
   try {
     fs.writeFileSync(
       recordPath,
@@ -117,7 +120,7 @@ function finalizeElevatedStage(stage, payload) {
         {
           recorded_at: new Date().toISOString(),
           cleanup,
-          errors: payload.errors || [],
+          errors: [...(payload.errors || []), recoveryWarning],
         },
         null,
         2,
@@ -127,12 +130,11 @@ function finalizeElevatedStage(stage, payload) {
   } catch (error) {
     cleanup.recovery_record_error = error.message;
   }
-  console.error(
-    `EasyMANET preserved elevated flash inputs after cleanup became ${cleanupState}: ${stage.root}`,
-  );
+  console.error(recoveryWarning);
   return {
     ...payload,
     cleanup,
+    errors: [...(payload.errors || []), recoveryWarning],
   };
 }
 

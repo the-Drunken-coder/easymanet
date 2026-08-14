@@ -269,14 +269,13 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   }
 
   let terminationError = null;
-  let observationError = null;
   try {
     signalProcessGroup(pid, "SIGTERM");
     let processGroupExited = false;
     try {
       processGroupExited = await waitForProcessGroupExit(pid, graceMs);
-    } catch (error) {
-      observationError = error;
+    } catch (_error) {
+      // Retry observation after SIGKILL before reporting an unknown state.
     }
     if (processGroupExited) {
       await waitForClose(closePromise, graceMs);
@@ -287,6 +286,7 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   }
 
   let killError = null;
+  let observationError = null;
   try {
     signalProcessGroup(pid, "SIGKILL");
   } catch (error) {
@@ -299,7 +299,7 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
       waitForProcessGroupExit(pid, graceMs),
     ]);
   } catch (error) {
-    observationError = observationError || error;
+    observationError = error;
   }
   let cleanupError = null;
   if (terminationError && killError) {
@@ -322,9 +322,6 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
       `${detail}process group ${pid} is still active`,
       pid,
     );
-  }
-  if (cleanupError) {
-    throw cleanupError;
   }
 }
 

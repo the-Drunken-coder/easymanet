@@ -66,6 +66,7 @@ async function main() {
     await testZombieOnlyProcessGroupIsComplete();
     await testPersistentGroupObservationSettlesAppQuit();
     await testTerminationFailurePreservesElevatedStage();
+    await testTransientObservationFailureStillConfirmsCleanup();
     await testCleanupObservationFailurePreservesElevatedStage();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
@@ -314,6 +315,49 @@ async function testCleanupObservationFailurePreservesElevatedStage() {
         throw error;
       }
     }
+  }
+}
+
+async function testTransientObservationFailureStillConfirmsCleanup() {
+  const pidFile = path.join(tempRoot, "transient-observation-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const elevated = loadElevatedFlash(pidFile, bridge);
+  const stage = createElevatedStage("transient-observation");
+  const resultPromise = elevated.runBridgeWithAdministratorPrivileges([], {
+    adminPassword: "test-password",
+    authenticationGraceMs: 0,
+    stage,
+    terminationGraceMs: 250,
+    timeoutMs: 10000,
+  });
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const originalKill = process.kill;
+  let observationFailed = false;
+
+  process.kill = (pid, signal) => {
+    if (!observationFailed && pid === -pids.leader && signal === 0) {
+      observationFailed = true;
+      const error = new Error("transient observation failure");
+      error.code = "EIO";
+      throw error;
+    }
+    return originalKill(pid, signal);
+  };
+
+  try {
+    const [, result] = await Promise.all([
+      bridge.shutdownActiveBridgeProcesses(),
+      resultPromise,
+    ]);
+    assert.equal(observationFailed, true);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.errors, ["EasyMANET bridge stopped during application shutdown"]);
+    assert.equal("cleanup" in result, false);
+    assert.equal(fs.existsSync(stage.root), false);
+    assert.equal(bridge.hasActiveBridgeProcesses(), false);
+  } finally {
+    process.kill = originalKill;
   }
 }
 

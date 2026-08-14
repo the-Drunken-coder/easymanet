@@ -42,6 +42,7 @@ from .download import (
     check_latest_version,
     download_image,
     get_cached_image,
+    image_sha256,
     normalize_sha256,
     set_image_config,
     verify_image_sha256,
@@ -342,10 +343,21 @@ def _prepare_flash_workflow(
             send("warning", warning, level="warning")
 
         if options.attestation is not None:
+            resolved_image_sha256 = str(image_details.get("sha256") or "")
+            if not resolved_image_sha256:
+                try:
+                    resolved_image_sha256 = image_sha256(Path(image_path))
+                except OSError as exc:
+                    raise FlashWorkflowError(
+                        FlashErrorCode.IMAGE,
+                        f"Attested image checksum error: {exc}",
+                    ) from exc
+                image_details = {
+                    **image_details,
+                    "sha256": resolved_image_sha256,
+                }
             attestation_values: dict[str, object] = dict(options.attestation)
-            attestation_values["image_sha256"] = str(
-                image_details.get("sha256") or ""
-            )
+            attestation_values["image_sha256"] = resolved_image_sha256
             attestation = ProvisionAttestation.from_mapping(attestation_values)
         provision = resolve_provision(
             manifest,

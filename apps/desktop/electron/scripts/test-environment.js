@@ -50,7 +50,7 @@ try {
   assert.notEqual(sudo.command, fakeSudo);
   assert.equal(sudo.command, "/usr/bin/sudo");
   assert.equal(sudo.args[4], "/usr/bin/env");
-  assert.equal(bridge.command, "/usr/bin/python3");
+  assert.equal(path.isAbsolute(bridge.command), true);
   assert.notEqual(bridge.command, fakePython);
   assert.deepEqual(bridge.args.slice(0, 2), ["-I", "-c"]);
   assert.equal(privilegedEnv.PATH, "/usr/bin:/bin:/usr/sbin:/sbin");

@@ -930,9 +930,9 @@ def _provisioned_during_run(provisioned_at: str, started_at: str) -> bool:
     try:
         provisioned = datetime.fromisoformat(provisioned_at.replace("Z", "+00:00"))
         started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-    except ValueError:
+        return provisioned >= started
+    except (TypeError, ValueError):
         return False
-    return provisioned >= started
 
 
 def _probe_topology(gate: NodeSpec, point: NodeSpec, checks: list[dict[str, Any]]) -> dict[str, Any]:

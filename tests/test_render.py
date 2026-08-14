@@ -118,6 +118,38 @@ def test_render_includes_hil_attestation_when_supplied():
     os.unlink(path)
 
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"hil_run_nonce": ""}, "attestation.hil_run_nonce"),
+        ({"image_sha256": "not-a-digest"}, "attestation.image_sha256"),
+        ({"fleet_config_sha256": "E" * 64}, "attestation.fleet_config_sha256"),
+        ({"source_git_sha": "f" * 39}, "attestation.source_git_sha"),
+        ({"hil_started_at": "2026-06-30T12:00:00"}, "must include a timezone"),
+    ],
+)
+def test_provision_attestation_rejects_incomplete_or_malformed_values(
+    changes,
+    message,
+):
+    values = {
+        "hil_run_nonce": "c" * 32,
+        "image_sha256": "d" * 64,
+        "fleet_config_sha256": "e" * 64,
+        "source_git_sha": "f" * 40,
+        "hil_started_at": "2026-06-30T12:00:00Z",
+        **changes,
+    }
+
+    with pytest.raises(ManifestError, match=message):
+        ProvisionAttestation.from_mapping(values)
+
+
+def test_provision_attestation_requires_every_field():
+    with pytest.raises(ManifestError, match="attestation.hil_run_nonce is required"):
+        ProvisionAttestation.from_mapping({})
+
+
 def test_render_includes_non_secret_fleet_inventory():
     path = _write_config(VALID_CONFIG)
     m = load_manifest(path)

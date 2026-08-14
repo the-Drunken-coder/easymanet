@@ -76,11 +76,21 @@ function elevatedBridgeEnv(extraEnv = {}) {
 }
 
 function elevatedPythonPath() {
-  const systemPython = "/usr/bin/python3";
-  if (isExecutableFile(systemPython)) {
-    return systemPython;
+  const projectPython = venvPython(path.join(repoRoot, ".codex-venv"));
+  for (const candidate of [
+    projectPython,
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/opt/homebrew/bin/python3.14",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.14",
+    "/usr/local/bin/python3",
+    "/usr/bin/python3",
+  ]) {
+    if (path.isAbsolute(candidate) && isExecutableFile(candidate)) {
+      return candidate;
+    }
   }
-  throw new Error("No trusted system Python interpreter is available for elevated flashing");
+  throw new Error("No fixed Python interpreter is available for elevated flashing");
 }
 
 function isExecutableFile(candidate) {

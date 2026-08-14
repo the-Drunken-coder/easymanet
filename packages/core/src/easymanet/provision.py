@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 from .manifest import Manifest, ManifestError
@@ -276,30 +278,29 @@ class ProvisionAttestation:
         attestation: dict[str, object],
     ) -> "ProvisionAttestation":
         return cls(
-            hil_run_nonce=_string_value(
+            hil_run_nonce=_attestation_hex_value(
                 attestation,
                 "hil_run_nonce",
-                "attestation.hil_run_nonce",
+                32,
             ),
-            image_sha256=_string_value(
+            image_sha256=_attestation_hex_value(
                 attestation,
                 "image_sha256",
-                "attestation.image_sha256",
+                64,
             ),
-            fleet_config_sha256=_string_value(
+            fleet_config_sha256=_attestation_hex_value(
                 attestation,
                 "fleet_config_sha256",
-                "attestation.fleet_config_sha256",
+                64,
             ),
-            source_git_sha=_string_value(
+            source_git_sha=_attestation_hex_value(
                 attestation,
                 "source_git_sha",
-                "attestation.source_git_sha",
+                40,
             ),
-            hil_started_at=_string_value(
+            hil_started_at=_attestation_timestamp_value(
                 attestation,
                 "hil_started_at",
-                "attestation.hil_started_at",
             ),
         )
 
@@ -480,6 +481,39 @@ def _optional_string_value(
     if key not in mapping:
         return None
     return _string_value(mapping, key, path)
+
+
+def _attestation_hex_value(
+    attestation: dict[str, object],
+    key: str,
+    length: int,
+) -> str:
+    path = f"attestation.{key}"
+    if key not in attestation:
+        raise ManifestError(f"{path} is required")
+    value = _string_value(attestation, key, path)
+    if re.fullmatch(rf"[0-9a-f]{{{length}}}", value) is None:
+        raise ManifestError(
+            f"{path} must be {length} lowercase hexadecimal characters"
+        )
+    return value
+
+
+def _attestation_timestamp_value(
+    attestation: dict[str, object],
+    key: str,
+) -> str:
+    path = f"attestation.{key}"
+    if key not in attestation:
+        raise ManifestError(f"{path} is required")
+    value = _string_value(attestation, key, path)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ManifestError(f"{path} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ManifestError(f"{path} must include a timezone")
+    return value
 
 
 def _int_value(

@@ -660,6 +660,13 @@ def test_stale_node_attestation_blocks_physical_acceptance():
     assert "did not attest" in scope["detail"]
 
 
+def test_naive_provisioning_timestamp_is_not_current_run_evidence():
+    assert hil_verify._provisioned_during_run(
+        "2026-06-30T12:00:01",
+        "2026-06-30T12:00:00Z",
+    ) is False
+
+
 def test_manifest_snapshot_is_stable_when_source_changes_during_load(tmp_path, monkeypatch):
     source = hil_verify.REPO_ROOT / "examples" / "three-node-field-mesh.yml"
     config = tmp_path / "fleet.yml"

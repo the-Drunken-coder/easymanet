@@ -1650,8 +1650,13 @@ def test_identity_endpoint_reports_provisioned_hil_attestation(tmp_path):
     }
     provision_data["attestation"] = expected
     env = _status_env(tmp_path, provision_data)
+    marker_lines = [
+        "2026-06-30T12:00:01Z",
+        "provisioned_at: 2026-06-30T12:00:01Z",
+        *(f"{key}: {value}" for key, value in expected.items()),
+    ]
     Path(env["EASYMANET_PROVISIONED_FLAG"]).write_text(
-        "2026-06-30T12:00:01Z\nprovisioned_at: 2026-06-30T12:00:01Z\n"
+        "\n".join(marker_lines) + "\n"
     )
     boot_id = tmp_path / "boot-id"
     boot_id.write_text("11111111-2222-3333-4444-555555555555\n")
@@ -1672,6 +1677,17 @@ def test_identity_endpoint_reports_provisioned_hil_attestation(tmp_path):
         "provisioned_at": "2026-06-30T12:00:01Z",
         "boot_id": "11111111-2222-3333-4444-555555555555",
     }
+
+    provision_data["attestation"]["hil_run_nonce"] = "0" * 32
+    Path(env["EASYMANET_PROVISION_JSON"]).write_text(json.dumps(provision_data))
+    repeated = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "identity"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert json.loads(repeated.stdout)["attestation"] == payload["attestation"]
 
 
 def test_status_helper_failure_returns_status_fallback(tmp_path):

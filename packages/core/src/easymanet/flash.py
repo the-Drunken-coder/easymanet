@@ -51,7 +51,7 @@ from .inject import InjectError, inject, inject_dry_run_info
 from .manifest import Manifest, ManifestError, load_manifest
 from .platform import check_platform
 from .privileges import PrivilegeError, check_privileges
-from .provision import provision_json_bool, resolve_provision
+from .provision import ProvisionAttestation, provision_json_bool, resolve_provision
 from .validate import validate
 from .workspace import resolve_fleet_config
 
@@ -108,6 +108,7 @@ class _PreparedFlash:
     image_path: str = ""
     ssh_enabled: bool | None = None
     api_wan_enabled: bool = False
+    attestation: ProvisionAttestation | None = None
 
 
 def prepare_flash_workflow(
@@ -141,6 +142,7 @@ def run_flash_workflow(
     image_path = prepared.image_path
     ssh_enabled = prepared.ssh_enabled
     api_wan_enabled = prepared.api_wan_enabled
+    attestation = prepared.attestation
     send = _event_sender(events, emit)
 
     try:
@@ -189,6 +191,7 @@ def run_flash_workflow(
                     device_identity=device_identity,
                     ssh_enabled=ssh_enabled,
                     api_wan_enabled=api_wan_enabled,
+                    attestation=attestation,
                 )
             ]
             for item in inject_results:
@@ -272,6 +275,7 @@ def _prepare_flash_workflow(
     image_path = ""
     ssh_enabled: bool | None = None
     api_wan_enabled = False
+    attestation = None
     send = _event_sender(events, emit)
 
     try:
@@ -319,14 +323,6 @@ def _prepare_flash_workflow(
             enable_ssh=options.enable_ssh,
             disable_ssh=options.disable_ssh,
         )
-        provision = resolve_provision(
-            manifest,
-            options.node,
-            ssh_enabled=ssh_enabled,
-            api_wan_enabled=api_wan_enabled,
-        )
-        provision_dict = provision.to_dict()
-        public_provision = redact_provision_for_display(provision_dict)
         image_path, image_details, image_warnings = resolve_base_image(
             target,
             options.base_image,
@@ -344,6 +340,22 @@ def _prepare_flash_workflow(
         warnings.extend(image_warnings)
         for warning in image_warnings:
             send("warning", warning, level="warning")
+
+        if options.attestation is not None:
+            attestation_values: dict[str, object] = dict(options.attestation)
+            attestation_values["image_sha256"] = str(
+                image_details.get("sha256") or ""
+            )
+            attestation = ProvisionAttestation.from_mapping(attestation_values)
+        provision = resolve_provision(
+            manifest,
+            options.node,
+            ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
+        )
+        provision_dict = provision.to_dict()
+        public_provision = redact_provision_for_display(provision_dict)
 
         disk = _disk_details(options.device)
         try:
@@ -428,6 +440,7 @@ def _prepare_flash_workflow(
             image_path=image_path,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
     except FlashWorkflowError as exc:
         send("error", exc.message, level="error")
@@ -448,6 +461,7 @@ def _prepare_flash_workflow(
             image_path=image_path,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
     except Exception as exc:  # noqa: BLE001 - API boundary returns structured failures.
         message = f"Unexpected flash workflow error: {type(exc).__name__}: {exc}"
@@ -470,6 +484,7 @@ def _prepare_flash_workflow(
             image_path=image_path,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
 
 

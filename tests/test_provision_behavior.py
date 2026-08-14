@@ -1639,6 +1639,41 @@ def test_status_helper_failure_does_not_break_identity_endpoint(tmp_path):
     assert payload["node"]["name"] == "point01"
 
 
+def test_identity_endpoint_reports_provisioned_hil_attestation(tmp_path):
+    provision_data = _point_provision_json()
+    expected = {
+        "hil_run_nonce": "c" * 32,
+        "image_sha256": "d" * 64,
+        "fleet_config_sha256": "e" * 64,
+        "source_git_sha": "f" * 40,
+        "hil_started_at": "2026-06-30T12:00:00Z",
+    }
+    provision_data["attestation"] = expected
+    env = _status_env(tmp_path, provision_data)
+    Path(env["EASYMANET_PROVISIONED_FLAG"]).write_text(
+        "2026-06-30T12:00:01Z\nprovisioned_at: 2026-06-30T12:00:01Z\n"
+    )
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("11111111-2222-3333-4444-555555555555\n")
+    env["EASYMANET_BOOT_ID_FILE"] = str(boot_id)
+
+    result = subprocess.run(
+        ["sh", str(OVERLAY / "usr" / "lib" / "easymanet" / "api.sh"), "identity"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["attestation"] == {
+        **expected,
+        "provisioned_at": "2026-06-30T12:00:01Z",
+        "boot_id": "11111111-2222-3333-4444-555555555555",
+    }
+
+
 def test_status_helper_failure_returns_status_fallback(tmp_path):
     lib_dir = _copy_status_lib_dir(tmp_path)
     (lib_dir / "status-lib.sh").write_text("this is not valid shell syntax (\n")

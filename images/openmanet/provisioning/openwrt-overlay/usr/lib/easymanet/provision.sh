@@ -634,6 +634,13 @@ if ! provisioned_at="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"; then
 fi
 if ! {
     printf '%s\n' "$provisioned_at"
+    echo "provisioned_at: $provisioned_at"
+    echo "hil_run_nonce: $(json_val attestation hil_run_nonce)"
+    echo "image_sha256: $(json_val attestation image_sha256)"
+    echo "fleet_config_sha256: $(json_val attestation fleet_config_sha256)"
+    echo "source_git_sha: $(json_val attestation source_git_sha)"
+    echo "hil_started_at: $(json_val attestation hil_started_at)"
+    echo "boot_id: $(cat "${EASYMANET_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}" 2>/dev/null | head -n 1 || true)"
     echo "hostname: $HOSTNAME"
     echo "role: $NODE_ROLE"
     echo "ip: $NODE_IP"

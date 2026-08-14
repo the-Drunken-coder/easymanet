@@ -269,13 +269,12 @@ def test_clear_stale_overlay_uses_large_bulk_dd(monkeypatch, tmp_path):
     )
 
     start_bytes = max(tail_start, written_bytes)
-    adjusted_wipe = wipe_bytes - (start_bytes - tail_start)
     sector_bytes = 512
     bulk_bytes = 16 * 1024 * 1024
     expected_seek = (start_bytes + sector_bytes - 1) // sector_bytes
     aligned_start = expected_seek * sector_bytes
-    span_bytes = adjusted_wipe + (aligned_start - start_bytes)
-    expected_count = max(1, (span_bytes + sector_bytes - 1) // sector_bytes)
+    wipe_end = tail_start + wipe_bytes
+    expected_count = (wipe_end - aligned_start) // sector_bytes
     expected_total_bytes = expected_count * sector_bytes
     expected_prefix_bytes = bulk_bytes - (aligned_start % bulk_bytes)
     expected_bulk_blocks = (expected_total_bytes - expected_prefix_bytes) // bulk_bytes
@@ -347,6 +346,47 @@ def test_clear_stale_overlay_places_each_dd_phase_at_absolute_offset(monkeypatch
     assert written[:10] == b"x" * 10
     assert written[10:2060] == b"\x00" * 2050
     assert written[2060:] == b"x" * (4096 - 2060)
+
+
+def test_clear_stale_overlay_never_writes_past_partition_range(
+    monkeypatch,
+    tmp_path,
+):
+    device = tmp_path / "device"
+    device.write_bytes(b"x" * 4096)
+    identity = capture_device_identity(str(device))
+
+    def emulate_dd(cmd, check=False, stdout=None, **_kwargs):
+        assert check is True
+        assert stdout is not None
+        args = dict(arg.split("=", 1) for arg in cmd[1:] if "=" in arg)
+        block_bytes = int(args["bs"])
+        seek_blocks = int(args["seek"])
+        count_blocks = int(args["count"])
+        os.lseek(stdout, seek_blocks * block_bytes, os.SEEK_CUR)
+        os.write(stdout, b"\x00" * block_bytes * count_blocks)
+
+    monkeypatch.setattr("easymanet.image._OVERLAY_WIPE_BULK_BYTES", 1024)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr(
+        "easymanet.image.get_partition2_wipe_range",
+        lambda _d: (1024, 2048),
+    )
+    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
+    monkeypatch.setattr("easymanet.image.subprocess.run", emulate_dd)
+
+    _clear_stale_overlay(
+        str(device),
+        1025,
+        device_identity=identity,
+        output_identity=identity,
+    )
+
+    written = device.read_bytes()
+    assert written[:1536] == b"x" * 1536
+    assert written[1536:3072] == b"\x00" * 1536
+    assert written[3072:] == b"x" * 1024
 
 
 def test_clear_stale_overlay_rejects_replacement_during_layout_reread(

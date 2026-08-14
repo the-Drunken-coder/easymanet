@@ -547,9 +547,9 @@ def _clear_stale_overlay(
         )
 
     tail_start, wipe_bytes = wipe_range
+    wipe_end = tail_start + wipe_bytes
     start_bytes = max(tail_start, written_bytes)
-    wipe_bytes = wipe_bytes - (start_bytes - tail_start)
-    if wipe_bytes <= 0:
+    if start_bytes >= wipe_end:
         _emit_event(
             emit,
             "overlay_wipe_skipped",
@@ -561,15 +561,22 @@ def _clear_stale_overlay(
     bulk_bytes = _OVERLAY_WIPE_BULK_BYTES
     seek_sectors = _ceil_div(start_bytes, sector_bytes)
     aligned_start = seek_sectors * sector_bytes
-    span_bytes = wipe_bytes + (aligned_start - start_bytes)
-    count_sectors = max(1, _ceil_div(span_bytes, sector_bytes))
+    remaining_bytes = wipe_end - aligned_start
+    count_sectors = remaining_bytes // sector_bytes
+    if count_sectors <= 0:
+        _emit_event(
+            emit,
+            "overlay_wipe_skipped",
+            "Skipping stale overlay wipe; no complete sector remains inside the wipe region.",
+        )
+        return
     total_mib = count_sectors * sector_bytes / (1024 * 1024)
     _emit_event(
         emit,
         "overlay_wipe_started",
-        f"Clearing stale OpenWrt overlay area ({total_mib:.1f} MiB at offset {start_bytes} bytes)...",
+        f"Clearing stale OpenWrt overlay area ({total_mib:.1f} MiB at offset {aligned_start} bytes)...",
         total_mib=total_mib,
-        start_bytes=start_bytes,
+        start_bytes=aligned_start,
     )
 
     companions = () if output_identity == device_identity else (device_identity,)

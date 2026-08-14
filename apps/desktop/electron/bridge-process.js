@@ -10,10 +10,20 @@ const terminationGraceMs = 5000;
 let bridgeShutdownStarted = false;
 
 class BridgeCleanupPendingError extends Error {
-  constructor(message, completion) {
+  constructor(message, pid) {
     super(message);
     this.name = "BridgeCleanupPendingError";
-    this.completion = completion;
+    this.cleanupState = "pending";
+    this.pid = pid;
+  }
+}
+
+class BridgeCleanupUnknownError extends Error {
+  constructor(message, pid) {
+    super(message);
+    this.name = "BridgeCleanupUnknownError";
+    this.cleanupState = "unknown";
+    this.pid = pid;
   }
 }
 
@@ -152,14 +162,14 @@ function runTrackedProcess(launch, handlers) {
               ok: false,
               errors: [...payload.errors, `Bridge process cleanup failed: ${error.message}`],
             };
-            if (error instanceof BridgeCleanupPendingError) {
-              return error.completion
-                .then(() => finish(failurePayload))
-                .catch((completionError) => {
-                  const prefix = state.stderr ? "\n" : "";
-                  state.stderr += `${prefix}Bridge cleanup observation failed: ${completionError.message}`;
-                  throw completionError;
-                });
+            if (
+              error instanceof BridgeCleanupPendingError
+              || error instanceof BridgeCleanupUnknownError
+            ) {
+              failurePayload.cleanup = {
+                state: error.cleanupState,
+                process_group_pid: error.pid,
+              };
             }
             finish(failurePayload);
           });
@@ -259,9 +269,16 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   }
 
   let terminationError = null;
+  let observationError = null;
   try {
     signalProcessGroup(pid, "SIGTERM");
-    if (await waitForProcessGroupExit(pid, graceMs)) {
+    let processGroupExited = false;
+    try {
+      processGroupExited = await waitForProcessGroupExit(pid, graceMs);
+    } catch (error) {
+      observationError = error;
+    }
+    if (processGroupExited) {
       await waitForClose(closePromise, graceMs);
       return;
     }
@@ -275,10 +292,15 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   } catch (error) {
     killError = error;
   }
-  const [, processGroupExited] = await Promise.all([
-    waitForClose(closePromise, graceMs),
-    waitForProcessGroupExit(pid, graceMs),
-  ]);
+  let processGroupExited = false;
+  try {
+    [, processGroupExited] = await Promise.all([
+      waitForClose(closePromise, graceMs),
+      waitForProcessGroupExit(pid, graceMs),
+    ]);
+  } catch (error) {
+    observationError = observationError || error;
+  }
   let cleanupError = null;
   if (terminationError && killError) {
     cleanupError = new Error(
@@ -287,11 +309,18 @@ async function terminateBridgeProcessTree(child, closePromise, graceMs) {
   } else {
     cleanupError = terminationError || killError;
   }
+  if (observationError) {
+    const detail = cleanupError ? `${cleanupError.message}; ` : "";
+    throw new BridgeCleanupUnknownError(
+      `${detail}could not confirm process group ${pid} exit: ${observationError.message}`,
+      pid,
+    );
+  }
   if (!processGroupExited) {
     const detail = cleanupError ? `${cleanupError.message}; ` : "";
     throw new BridgeCleanupPendingError(
       `${detail}process group ${pid} is still active`,
-      waitForProcessGroupExit(pid),
+      pid,
     );
   }
   if (cleanupError) {

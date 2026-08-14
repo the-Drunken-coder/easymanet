@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 from .disks import DeviceIdentity, assert_device_identity
 from .manifest import Manifest
 from .platform import is_linux, is_macos
+from .provision import ProvisionAttestation
 from .render import render
 
 ROOT_BLOCK_DEVICE_PATTERN = re.compile(r"root=(/dev/[^\s]+)")
@@ -60,6 +61,7 @@ def inject(
     device_identity: DeviceIdentity,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
 ) -> List[Tuple[str, bool]]:
     if dry_run:
         render(
@@ -67,6 +69,7 @@ def inject(
             node_name,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
         return [
             ("/boot/easymanet/provision.json", True),
@@ -90,6 +93,7 @@ def inject(
             node_name,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
         _assert_device_identity(device_identity)
     except OSError as exc:
@@ -133,12 +137,14 @@ def stage_boot_payload(
     *,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
 ) -> List[Tuple[str, bool]]:
     provision_json = render(
         manifest,
         node_name,
         ssh_enabled=ssh_enabled,
         api_wan_enabled=api_wan_enabled,
+        attestation=attestation,
     )
     dest_dir = boot_root / "easymanet"
     dest_dir.mkdir(parents=True, exist_ok=True)

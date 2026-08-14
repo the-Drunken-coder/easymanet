@@ -545,7 +545,16 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "finish_flash", fake_finish_flash)
     events = []
 
-    result = flash.run_flash_workflow(_options(tmp_path), emit=events.append)
+    attestation = {
+        "hil_run_nonce": "c" * 32,
+        "fleet_config_sha256": "e" * 64,
+        "source_git_sha": "f" * 40,
+        "hil_started_at": "2026-06-30T12:00:00Z",
+    }
+    result = flash.run_flash_workflow(
+        _options(tmp_path, attestation=attestation),
+        emit=events.append,
+    )
 
     assert result.ok is True
     assert result.code is flash.FlashErrorCode.OK
@@ -562,6 +571,10 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
     assert flash_calls[0]["expected_sha256"] == (result.image["sha256"] or None)
     assert inject_calls[0]["device_identity"] is device_identity
     assert inject_calls[0]["ssh_enabled"] is False
+    assert inject_calls[0]["attestation"].to_dict() == {
+        **attestation,
+        "image_sha256": result.image["sha256"],
+    }
     assert finish_calls == [device_identity]
     assert result.inject_results == [{"path": "/easymanet/provision.json", "ok": True}]
 

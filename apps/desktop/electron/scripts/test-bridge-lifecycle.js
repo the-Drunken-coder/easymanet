@@ -64,8 +64,9 @@ async function main() {
   if (process.platform !== "win32") {
     await testTimeoutReapsProcessTree();
     await testZombieOnlyProcessGroupIsComplete();
-    await testPersistentGroupObservationDelaysAppQuit();
+    await testPersistentGroupObservationSettlesAppQuit();
     await testTerminationFailurePreservesElevatedStage();
+    await testCleanupObservationFailurePreservesElevatedStage();
     await testShutdownReapsProcessTree();
     await testUnexpectedParentExitReapsProcessTree();
     await testElevatedTimeoutReapsBeforeCleanup();
@@ -151,7 +152,7 @@ async function testZombieOnlyProcessGroupIsComplete() {
   assert.equal(bridge.hasActiveBridgeProcesses(), false);
 }
 
-async function testPersistentGroupObservationDelaysAppQuit() {
+async function testPersistentGroupObservationSettlesAppQuit() {
   const pidFile = path.join(tempRoot, "persistent-group-pids.json");
   const bridge = loadBridgeProcess(pidFile);
   const resultPromise = bridge.runBridgeProcess([], inertHandlers(10000));
@@ -186,25 +187,27 @@ async function testPersistentGroupObservationDelaysAppQuit() {
   app.emit("before-quit", quit);
   assert.equal(quit.prevented, true);
   try {
-    await waitForCondition(
-      () => postKillProbes >= 12,
-      "bridge process group did not enter pending cleanup",
-    );
-    assert.equal(bridge.hasActiveBridgeProcesses(), true);
-    assert.equal(quitCalls, 0);
+    const result = await resultPromise;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(result.ok, false);
+    assert.match(result.errors[0], /application shutdown/);
+    assert.match(result.errors[1], /process group .* is still active/);
+    assert.equal(result.cleanup.state, "pending");
+    assert.equal(result.cleanup.process_group_pid, pids.leader);
+    assert.equal(postKillProbes >= 4, true);
+    assert.equal(bridge.hasActiveBridgeProcesses(), false);
+    assert.equal(quitCalls, 1);
   } finally {
     process.kill = originalKill;
     Object.defineProperty(process, "platform", originalPlatform);
+    try {
+      originalKill(-pids.leader, "SIGKILL");
+    } catch (error) {
+      if (!["ESRCH", "EPERM"].includes(error.code)) {
+        throw error;
+      }
+    }
   }
-
-  const result = await resultPromise;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(result.ok, false);
-  assert.match(result.errors[0], /application shutdown/);
-  assert.match(result.errors[1], /process group .* is still active/);
-  assertProcessTreeGone(pids);
-  assert.equal(bridge.hasActiveBridgeProcesses(), false);
-  assert.equal(quitCalls, 1);
 }
 
 async function testTerminationFailurePreservesElevatedStage() {
@@ -241,31 +244,77 @@ async function testTerminationFailurePreservesElevatedStage() {
 
   const shutdownPromise = bridge.shutdownActiveBridgeProcesses();
   try {
-    await waitForCondition(
-      () => attemptedSignals.length === 2 && groupProbes >= 12,
-      "bridge cleanup did not enter pending cleanup after both signals failed",
-    );
+    const [, result] = await Promise.all([shutdownPromise, resultPromise]);
     assert.equal(fs.existsSync(stage.root), true);
-    assert.equal(bridge.hasActiveBridgeProcesses(), true);
+    assert.equal(fs.existsSync(result.cleanup.recovery_record), true);
+    assert.equal(result.cleanup.state, "pending");
+    assert.equal(result.cleanup.stage_path, stage.root);
+    assert.equal(result.ok, false);
+    assert.match(result.errors[0], /application shutdown/);
+    assert.match(result.errors[1], /SIGTERM failed: permission denied/);
+    assert.match(result.errors[1], /SIGKILL failed: operation not permitted/);
+    assert.deepEqual(attemptedSignals, ["SIGTERM", "SIGKILL"]);
+    assert.equal(groupProbes >= 4, true);
+    assert.equal(bridge.hasActiveBridgeProcesses(), false);
   } finally {
     process.kill = originalKill;
     try {
       originalKill(-pids.leader, "SIGKILL");
     } catch (error) {
-      if (error.code !== "ESRCH") {
+      if (!["ESRCH", "EPERM"].includes(error.code)) {
         throw error;
       }
     }
   }
 
-  const [, result] = await Promise.all([shutdownPromise, resultPromise]);
-  assert.equal(result.ok, false);
-  assert.match(result.errors[0], /application shutdown/);
-  assert.match(result.errors[1], /SIGTERM failed: permission denied/);
-  assert.match(result.errors[1], /SIGKILL failed: operation not permitted/);
-  assert.deepEqual(attemptedSignals, ["SIGTERM", "SIGKILL"]);
-  assert.equal(fs.existsSync(stage.root), false);
-  assert.equal(bridge.hasActiveBridgeProcesses(), false);
+}
+
+async function testCleanupObservationFailurePreservesElevatedStage() {
+  const pidFile = path.join(tempRoot, "observation-failure-pids.json");
+  const bridge = loadBridgeProcess(pidFile);
+  const elevated = loadElevatedFlash(pidFile, bridge);
+  const stage = createElevatedStage("observation-failure");
+  const resultPromise = elevated.runBridgeWithAdministratorPrivileges([], {
+    adminPassword: "test-password",
+    authenticationGraceMs: 0,
+    stage,
+    terminationGraceMs: 250,
+    timeoutMs: 10000,
+  });
+  const pids = await readPids(pidFile);
+  fixturePids.push(pids);
+  const originalKill = process.kill;
+
+  process.kill = (pid, signal) => {
+    if (pid === -pids.leader && signal === 0) {
+      const error = new Error("process observation unavailable");
+      error.code = "EIO";
+      throw error;
+    }
+    return originalKill(pid, signal);
+  };
+
+  try {
+    const [, result] = await Promise.all([
+      bridge.shutdownActiveBridgeProcesses(),
+      resultPromise,
+    ]);
+    assert.equal(result.ok, false);
+    assert.match(result.errors[1], /could not confirm process group/);
+    assert.equal(result.cleanup.state, "unknown");
+    assert.equal(result.cleanup.stage_path, stage.root);
+    assert.equal(fs.existsSync(result.cleanup.recovery_record), true);
+    assert.equal(bridge.hasActiveBridgeProcesses(), false);
+  } finally {
+    process.kill = originalKill;
+    try {
+      originalKill(-pids.leader, "SIGKILL");
+    } catch (error) {
+      if (!["ESRCH", "EPERM"].includes(error.code)) {
+        throw error;
+      }
+    }
+  }
 }
 
 async function testShutdownReapsProcessTree() {

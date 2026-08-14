@@ -263,21 +263,76 @@ class FleetConfig:
 
 
 @dataclass(frozen=True)
+class ProvisionAttestation:
+    hil_run_nonce: str
+    image_sha256: str
+    fleet_config_sha256: str
+    source_git_sha: str
+    hil_started_at: str
+
+    @classmethod
+    def from_mapping(
+        cls,
+        attestation: dict[str, object],
+    ) -> "ProvisionAttestation":
+        return cls(
+            hil_run_nonce=_string_value(
+                attestation,
+                "hil_run_nonce",
+                "attestation.hil_run_nonce",
+            ),
+            image_sha256=_string_value(
+                attestation,
+                "image_sha256",
+                "attestation.image_sha256",
+            ),
+            fleet_config_sha256=_string_value(
+                attestation,
+                "fleet_config_sha256",
+                "attestation.fleet_config_sha256",
+            ),
+            source_git_sha=_string_value(
+                attestation,
+                "source_git_sha",
+                "attestation.source_git_sha",
+            ),
+            hil_started_at=_string_value(
+                attestation,
+                "hil_started_at",
+                "attestation.hil_started_at",
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "hil_run_nonce": self.hil_run_nonce,
+            "image_sha256": self.image_sha256,
+            "fleet_config_sha256": self.fleet_config_sha256,
+            "source_git_sha": self.source_git_sha,
+            "hil_started_at": self.hil_started_at,
+        }
+
+
+@dataclass(frozen=True)
 class ProvisionPayload:
     version: int
     mesh: MeshConfig
     node: ResolvedNode
     management: ManagementConfig
     fleet: FleetConfig
+    attestation: ProvisionAttestation | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "version": self.version,
             "mesh": self.mesh.to_dict(),
             "node": self.node.to_dict(),
             "management": self.management.to_dict(),
             "fleet": self.fleet.to_dict(),
         }
+        if self.attestation is not None:
+            payload["attestation"] = self.attestation.to_dict()
+        return payload
 
     def to_json(self, *, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
@@ -350,6 +405,7 @@ def resolve_provision(
     *,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
 ) -> ProvisionPayload:
     mesh = _require_mapping(manifest.mesh, "mesh")
     defaults = _require_mapping(manifest.defaults, "defaults")
@@ -369,6 +425,7 @@ def resolve_provision(
             api_wan_enabled=api_wan_enabled,
         ),
         fleet=resolve_fleet_model(manifest),
+        attestation=attestation,
     )
 
 

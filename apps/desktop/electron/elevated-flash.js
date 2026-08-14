@@ -88,7 +88,52 @@ function runBridgeWithAdministratorPrivileges(args, options = {}) {
       },
     },
   );
-  return result.finally(() => cleanupElevatedStage(options.stage));
+  return result.then(
+    (payload) => finalizeElevatedStage(options.stage, payload),
+    (error) => {
+      cleanupElevatedStage(options.stage);
+      throw error;
+    },
+  );
+}
+
+function finalizeElevatedStage(stage, payload) {
+  const cleanupState = String((payload.cleanup || {}).state || "");
+  if (!stage || !["pending", "unknown"].includes(cleanupState)) {
+    cleanupElevatedStage(stage);
+    return payload;
+  }
+
+  const recordPath = path.join(stage.root, "cleanup-pending.json");
+  const cleanup = {
+    ...payload.cleanup,
+    stage_path: stage.root,
+    recovery_record: recordPath,
+  };
+  try {
+    fs.writeFileSync(
+      recordPath,
+      JSON.stringify(
+        {
+          recorded_at: new Date().toISOString(),
+          cleanup,
+          errors: payload.errors || [],
+        },
+        null,
+        2,
+      ) + "\n",
+      {mode: 0o600},
+    );
+  } catch (error) {
+    cleanup.recovery_record_error = error.message;
+  }
+  console.error(
+    `EasyMANET preserved elevated flash inputs after cleanup became ${cleanupState}: ${stage.root}`,
+  );
+  return {
+    ...payload,
+    cleanup,
+  };
 }
 
 function stageElevatedFlashInputs(validated, plan) {
@@ -174,6 +219,7 @@ function baseImageArgs(image) {
 module.exports = {
   baseImageArgs,
   cleanupElevatedStage,
+  finalizeElevatedStage,
   runBridgeWithAdministratorPrivileges,
   runFlashWithAdministratorPrivileges,
   stageElevatedFlashInputs,

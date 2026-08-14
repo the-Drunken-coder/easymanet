@@ -9,7 +9,12 @@ import pytest
 import yaml
 
 from easymanet.manifest import ManifestError, load_manifest
-from easymanet.provision import ProvisionPayload, provision_json_bool, resolve_provision
+from easymanet.provision import (
+    ProvisionAttestation,
+    ProvisionPayload,
+    provision_json_bool,
+    resolve_provision,
+)
 from easymanet.render import render, render_dict
 
 
@@ -93,6 +98,23 @@ def test_render_valid_provision_json():
     assert data["management"]["root_password_hash"] == ""
     assert len(data["management"]["ssh_authorized_keys"]) == 1
 
+    os.unlink(path)
+
+
+def test_render_includes_hil_attestation_when_supplied():
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    attestation = ProvisionAttestation(
+        hil_run_nonce="c" * 32,
+        image_sha256="d" * 64,
+        fleet_config_sha256="e" * 64,
+        source_git_sha="f" * 40,
+        hil_started_at="2026-06-30T12:00:00Z",
+    )
+
+    data = render_dict(manifest, "node02", attestation=attestation)
+
+    assert data["attestation"] == attestation.to_dict()
     os.unlink(path)
 
 

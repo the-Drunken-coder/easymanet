@@ -2244,7 +2244,8 @@ def test_electron_shell_files_exist():
     assert "fullStdout" in electron_text
     assert "isDestroyed" in electron_text
     assert "runFlashWithAdministratorPrivileges" in electron_text
-    assert '"sudo"' in electron_text
+    assert '"/usr/bin/sudo"' in electron_text
+    assert '"/usr/bin/env"' in electron_text
     assert '"-S"' in electron_text
     assert "stageElevatedFlashInputs" in electron_text
     assert "fs.chmodSync(configPath, 0o600)" in electron_text
@@ -2257,7 +2258,9 @@ def test_electron_shell_files_exist():
     assert "ensureCachedImageForElevatedFlash" not in electron_text
     assert '"ensure-image"' not in electron_text
     assert "runTrackedProcess" in electron_text
-    assert "return result.finally(() => cleanupElevatedStage(options.stage))" in electron_text
+    assert "finalizeElevatedStage(options.stage, payload)" in electron_text
+    assert 'cleanupState))' in electron_text
+    assert '"cleanup-pending.json"' in electron_text
     assert "const authenticationGraceMs = options.authenticationGraceMs ?? 60000" in electron_text
     assert "after ${effectiveTimeoutMs / 1000}s" in electron_text
     assert "EasyMANET Flash Helper.app" not in electron_text

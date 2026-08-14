@@ -49,6 +49,18 @@ def _stable_config_evidence():
     }
 
 
+HIL_NONCE = "c" * 32
+HIL_BOOT_ID = "11111111-2222-3333-4444-555555555555"
+
+
+def _runtime_attestation(expected):
+    return {
+        **expected,
+        "provisioned_at": "2026-06-30T12:00:01Z",
+        "boot_id": HIL_BOOT_ID,
+    }
+
+
 def test_parse_args_refuses_flash_without_guardrails():
     with pytest.raises(SystemExit):
         hil_verify.parse_args(
@@ -319,8 +331,11 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
                 "events": [] if include_events else None,
             }
 
+    flash_attestations = []
+
     def fake_flash(options):
         events.append(f"flash {options.node}")
+        flash_attestations.append(options.attestation)
         return FakeFlashResult(options.node)
 
     def fake_fetch(host, endpoint, timeout=diagnostics.HTTP_TIMEOUT_SECONDS):
@@ -328,7 +343,19 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
         node_name = "gate01" if host == "10.41.1.1" else "point01"
         role = "gate" if node_name == "gate01" else "point"
         if endpoint == "identity":
-            return _api_result(host, endpoint, {"ok": True, "node": {"name": node_name, "role": role, "ip": host}})
+            expected = {
+                **flash_attestations[0],
+                "image_sha256": sha256,
+            }
+            return _api_result(
+                host,
+                endpoint,
+                {
+                    "ok": True,
+                    "node": {"name": node_name, "role": role, "ip": host},
+                    "attestation": _runtime_attestation(expected),
+                },
+            )
         if endpoint == "status":
             return _api_result(host, endpoint, {"ok": True, "support_code": "EM-OK", "mesh": {"neighbor_count": 1}})
         if endpoint == "neighbors":
@@ -376,6 +403,7 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
         input_fn=lambda prompt: events.append("prompt") or "",
         sleep_fn=lambda seconds: events.append(f"sleep {seconds}"),
         now_fn=_now,
+        nonce_fn=lambda: HIL_NONCE,
     )
 
     assert payload["ok"] is True
@@ -388,6 +416,15 @@ def test_flash_mode_prompts_before_waiting_and_probing(tmp_path, monkeypatch):
     config_path = Path(payload["config"]["path"])
     assert payload["config"]["sha256"] == hashlib.sha256(config_path.read_bytes()).hexdigest()
     assert payload["config"]["stable"] is True
+    assert flash_attestations == [
+        {
+            "hil_run_nonce": HIL_NONCE,
+            "fleet_config_sha256": payload["config"]["sha256"],
+            "source_git_sha": "a" * 40,
+            "hil_started_at": "2026-06-30T12:00:00Z",
+        }
+    ] * 2
+    assert payload["attestation"]["image_sha256"] == sha256
     assert payload["evidence_scope"]["kind"] == "physical-hil"
     assert payload["evidence_scope"]["physical_acceptance"] is True
 
@@ -587,11 +624,40 @@ def test_attribution_gaps_preserve_observation_but_block_acceptance(missing_attr
         },
         provenance,
         config,
+        {
+            "gate01": {"attestation": {"ok": True}},
+            "point01": {"attestation": {"ok": True}},
+        },
     )
 
     assert scope["kind"] == "physical-observation"
     assert scope["physical_acceptance"] is False
     assert "Behavioral HIL passed" in scope["detail"]
+
+
+def test_stale_node_attestation_blocks_physical_acceptance():
+    scope = hil_verify._evidence_scope(
+        "flash",
+        False,
+        {
+            "gate01": {"ok": True, "mode": "flash"},
+            "point01": {"ok": True, "mode": "flash"},
+        },
+        {
+            "node_image_identity": "flashed",
+            "local_digest_verified": True,
+        },
+        _clean_provenance(),
+        _stable_config_evidence(),
+        {
+            "gate01": {"attestation": {"ok": False}},
+            "point01": {"attestation": {"ok": True}},
+        },
+    )
+
+    assert scope["kind"] == "physical-observation"
+    assert scope["physical_acceptance"] is False
+    assert "did not attest" in scope["detail"]
 
 
 def test_manifest_snapshot_is_stable_when_source_changes_during_load(tmp_path, monkeypatch):
@@ -664,7 +730,11 @@ def test_flash_acceptance_uses_one_config_snapshot_when_source_changes_between_f
         return FakeFlashResult(options.node)
 
     monkeypatch.setattr(hil_verify, "run_flash_workflow", fake_flash)
-    monkeypatch.setattr(hil_verify, "_probe_node", lambda *_args: {"ok": True})
+    monkeypatch.setattr(
+        hil_verify,
+        "_probe_node",
+        lambda *_args, **_kwargs: {"attestation": {"ok": True}},
+    )
     monkeypatch.setattr(hil_verify, "_probe_topology", lambda *_args: {"ok": True})
     args = hil_verify.parse_args(
         [
@@ -830,7 +900,11 @@ def test_mixed_flash_and_reuse_is_physical_observation_not_acceptance(tmp_path, 
             }
 
     monkeypatch.setattr(hil_verify, "_flash_node", lambda *_args: FakeFlashResult())
-    monkeypatch.setattr(hil_verify, "_probe_node", lambda *_args: {"ok": True})
+    monkeypatch.setattr(
+        hil_verify,
+        "_probe_node",
+        lambda *_args, **_kwargs: {"attestation": {"ok": True}},
+    )
     monkeypatch.setattr(hil_verify, "_probe_topology", lambda *_args: {"ok": True})
     args = hil_verify.parse_args(
         [

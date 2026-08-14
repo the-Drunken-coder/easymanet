@@ -88,8 +88,12 @@ fleet-config SHA-256, and image identity and trust metadata. A dry run is
 synthetic evidence only: it is neither calibration nor physical acceptance.
 Product physical acceptance requires both named nodes to be flashed with the
 same verified artifact in that run, a clean full source commit, and a stable
-fleet-config digest. It does not establish simulation parity, calibration
-results, fleet-wide acceptance, or a general radio-range claim.
+fleet-config digest. Each running node must also return the one-time HIL nonce,
+image digest, fleet-config digest, source commit, provisioning timestamp, and
+current boot ID injected by that run. Missing or stale runtime attestation
+keeps the result at physical observation evidence. It does not establish
+simulation parity, calibration results, fleet-wide acceptance, or a general
+radio-range claim.
 
 Flashed media is sensitive until first-boot provisioning accepts its required
 activation commands: `provision.json` is written in cleartext on the boot

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,7 @@ CommandRunner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
 SleepFn = Callable[[int], None]
 NowFn = Callable[[], datetime]
 InputFn = Callable[[str], str]
+NonceFn = Callable[[], str]
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,7 @@ def run_hil(
     sleep_fn: SleepFn = time.sleep,
     input_fn: InputFn = input,
     now_fn: NowFn | None = None,
+    nonce_fn: NonceFn | None = None,
 ) -> dict[str, Any]:
     now = (now_fn or _utc_now)()
     ensure_workspace()
@@ -205,6 +208,8 @@ def run_hil(
     gate = None
     point = None
     reuse_image = _empty_image_evidence()
+    attestation: dict[str, str] = {}
+    expected_attestation: dict[str, str] = {}
 
     with tempfile.TemporaryDirectory(prefix="easymanet-hil-config-") as temp_dir:
         config_snapshot = Path(temp_dir) / "fleet.yml"
@@ -237,6 +242,13 @@ def run_hil(
                 checks,
                 errors,
             )
+            if _has_device(args) and not args.dry_run:
+                attestation = _hil_attestation(
+                    nonce=(nonce_fn or _new_hil_nonce)(),
+                    started_at=now,
+                    provenance=provenance,
+                    config=config_evidence,
+                )
 
         if gate is not None and point is not None:
             reuse_requested = any(not spec.device for spec in (gate, point))
@@ -246,7 +258,12 @@ def run_hil(
             if not errors:
                 for spec in (gate, point):
                     if spec.device:
-                        result = _flash_node(args, spec, config_snapshot)
+                        result = _flash_node(
+                            args,
+                            spec,
+                            config_snapshot,
+                            attestation,
+                        )
                         flash_results[spec.name] = result.to_dict(include_events=True)
                         _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
                         if not result.ok:
@@ -260,6 +277,11 @@ def run_hil(
         elif _has_device(args) and flash_results:
             flashed_image = _flash_image_evidence(flash_results, checks, errors)
             image = _mixed_image_evidence(reuse_image, flashed_image, checks, errors)
+            if attestation and image.get("sha256"):
+                expected_attestation = {
+                    **attestation,
+                    "image_sha256": str(image["sha256"]),
+                }
 
         flash_failed = any(not result.get("ok") for result in flash_results.values())
         if args.dry_run:
@@ -270,8 +292,19 @@ def run_hil(
                 ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
             if ready_to_probe:
                 sleep_fn(args.wait_seconds)
+                probe_attestation = (
+                    expected_attestation
+                    if gate.device and point.device
+                    else None
+                )
                 for spec in (gate, point):
-                    nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
+                    nodes[spec.name] = _probe_node(
+                        args,
+                        spec,
+                        command_runner,
+                        checks,
+                        expected_attestation=probe_attestation,
+                    )
                 topology = _probe_topology(gate, point, checks)
                 if args.throughput_smoke:
                     throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
@@ -291,6 +324,7 @@ def run_hil(
             "wait_seconds": 0 if args.dry_run else args.wait_seconds,
             "provenance": provenance,
             "image": image,
+            "attestation": expected_attestation,
             "evidence_scope": _evidence_scope(
                 mode,
                 ok,
@@ -298,6 +332,7 @@ def run_hil(
                 image,
                 provenance,
                 config_evidence,
+                nodes,
             ),
             "flash": flash_results,
             "nodes": nodes,
@@ -355,6 +390,25 @@ def _git_provenance() -> dict[str, Any]:
             "path": str(REPO_ROOT),
             "detail": detail,
         },
+    }
+
+
+def _new_hil_nonce() -> str:
+    return secrets.token_hex(16)
+
+
+def _hil_attestation(
+    *,
+    nonce: str,
+    started_at: datetime,
+    provenance: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, str]:
+    return {
+        "hil_run_nonce": nonce,
+        "fleet_config_sha256": str(config.get("sha256", "")),
+        "source_git_sha": str(provenance.get("source", {}).get("git_sha", "")),
+        "hil_started_at": _iso(started_at),
     }
 
 
@@ -536,6 +590,7 @@ def _evidence_scope(
     image: dict[str, Any],
     provenance: dict[str, Any],
     config: dict[str, Any],
+    nodes: dict[str, Any],
 ) -> dict[str, Any]:
     if mode == "dry-run":
         return {
@@ -556,7 +611,20 @@ def _evidence_scope(
         and image.get("local_digest_verified") is True
     )
     attribution_complete = _acceptance_attribution_complete(provenance, config)
-    if mode == "flash" and ok and full_flash_evidence and attribution_complete:
+    runtime_attested = (
+        len(nodes) == 2
+        and all(
+            node.get("attestation", {}).get("ok") is True
+            for node in nodes.values()
+        )
+    )
+    if (
+        mode == "flash"
+        and ok
+        and full_flash_evidence
+        and attribution_complete
+        and runtime_attested
+    ):
         return {
             "kind": "physical-hil",
             "simulation": False,
@@ -565,7 +633,12 @@ def _evidence_scope(
             "detail": "Physical acceptance is limited to nodes flashed and identity-verified in this run.",
         }
     detail = "This record is physical observation evidence, not product physical acceptance."
-    if mode == "flash" and ok and full_flash_evidence and not attribution_complete:
+    if mode == "flash" and full_flash_evidence and not runtime_attested:
+        detail = (
+            "The running nodes did not attest the "
+            "nonce and artifact identity injected during this run."
+        )
+    elif mode == "flash" and ok and full_flash_evidence and not attribution_complete:
         detail = (
             "Behavioral HIL passed, but physical acceptance requires a clean full "
             "source commit and a stable fleet-config digest."
@@ -724,7 +797,12 @@ def _node_spec(
     )
 
 
-def _flash_node(args: argparse.Namespace, spec: NodeSpec, config_snapshot: Path):
+def _flash_node(
+    args: argparse.Namespace,
+    spec: NodeSpec,
+    config_snapshot: Path,
+    attestation: dict[str, str],
+):
     enable_ssh, disable_ssh = _ssh_flash_overrides(spec)
     return run_flash_workflow(
         FlashOptions(
@@ -742,6 +820,7 @@ def _flash_node(args: argparse.Namespace, spec: NodeSpec, config_snapshot: Path)
             no_eject=args.no_eject,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            attestation=attestation,
         )
     )
 
@@ -751,6 +830,8 @@ def _probe_node(
     spec: NodeSpec,
     command_runner: CommandRunner,
     checks: list[dict[str, Any]],
+    *,
+    expected_attestation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     identity = fetch_node_api(spec.host, "identity", timeout=HTTP_TIMEOUT_SECONDS)
     status = fetch_node_api(spec.host, "status", timeout=STATUS_TIMEOUT_SECONDS)
@@ -758,6 +839,12 @@ def _probe_node(
 
     _add_check(checks, f"{spec.name} /v1/identity", identity.ok, _api_detail(identity))
     _check_identity(spec, identity, checks)
+    attestation = _check_runtime_attestation(
+        spec,
+        identity,
+        expected_attestation,
+        checks,
+    )
     _add_check(checks, f"{spec.name} /v1/status", status.ok, _api_detail(status))
     _check_status(spec, status, checks)
     _add_check(checks, f"{spec.name} /v1/neighbors", neighbors.ok, _api_detail(neighbors))
@@ -786,7 +873,66 @@ def _probe_node(
         "neighbors": neighbors.to_dict(),
         "ssh": ssh,
         "boot_report": boot_report,
+        "attestation": attestation,
     }
+
+
+def _check_runtime_attestation(
+    spec: NodeSpec,
+    identity: ApiResult,
+    expected: dict[str, str] | None,
+    checks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if expected is None:
+        return {"ok": None, "required": False, "reported": {}}
+
+    reported = (
+        identity.payload.get("attestation")
+        if isinstance(identity.payload.get("attestation"), dict)
+        else {}
+    )
+    mismatches = [
+        key
+        for key in (
+            "hil_run_nonce",
+            "image_sha256",
+            "fleet_config_sha256",
+            "source_git_sha",
+            "hil_started_at",
+        )
+        if str(reported.get(key, "")) != expected.get(key, "")
+    ]
+    provisioned_at = str(reported.get("provisioned_at", ""))
+    boot_id = str(reported.get("boot_id", ""))
+    if not _provisioned_during_run(provisioned_at, expected["hil_started_at"]):
+        mismatches.append("provisioned_at")
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        boot_id.lower(),
+    ) is None:
+        mismatches.append("boot_id")
+
+    ok = identity.ok and not mismatches
+    detail = "exact run and artifact identity reported"
+    if mismatches:
+        detail = "missing or mismatched: " + ", ".join(mismatches)
+    _add_check(checks, f"{spec.name} runtime attestation", ok, detail)
+    return {
+        "ok": ok,
+        "required": True,
+        "expected": expected,
+        "reported": reported,
+        "mismatches": mismatches,
+    }
+
+
+def _provisioned_during_run(provisioned_at: str, started_at: str) -> bool:
+    try:
+        provisioned = datetime.fromisoformat(provisioned_at.replace("Z", "+00:00"))
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return provisioned >= started
 
 
 def _probe_topology(gate: NodeSpec, point: NodeSpec, checks: list[dict[str, Any]]) -> dict[str, Any]:

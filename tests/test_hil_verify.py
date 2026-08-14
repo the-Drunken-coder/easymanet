@@ -2,7 +2,7 @@ import hashlib
 import json
 import subprocess
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -686,6 +686,22 @@ def test_naive_provisioning_timestamp_is_not_current_run_evidence():
     assert hil_verify._provisioned_during_run(
         "2026-06-30T12:00:01",
         "2026-06-30T12:00:00Z",
+    ) is False
+
+
+def test_future_provisioning_timestamp_is_not_current_run_evidence(monkeypatch):
+    observed = _now()
+    monkeypatch.setattr(hil_verify, "_utc_now", lambda: observed)
+
+    assert hil_verify._provisioned_during_run(
+        hil_verify._iso(observed + hil_verify.MAX_NODE_CLOCK_SKEW),
+        hil_verify._iso(observed),
+    ) is True
+    assert hil_verify._provisioned_during_run(
+        hil_verify._iso(
+            observed + hil_verify.MAX_NODE_CLOCK_SKEW + timedelta(seconds=1)
+        ),
+        hil_verify._iso(observed),
     ) is False
 
 

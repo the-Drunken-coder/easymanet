@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -56,6 +56,7 @@ MAX_WAIT_SECONDS = 120
 DEFAULT_SSH_TIMEOUT_SECONDS = 8
 DEFAULT_IPERF_SECONDS = 8
 MAX_CAPTURE_CHARS = 4000
+MAX_NODE_CLOCK_SKEW = timedelta(minutes=5)
 
 
 CommandRunner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
@@ -930,7 +931,8 @@ def _provisioned_during_run(provisioned_at: str, started_at: str) -> bool:
     try:
         provisioned = datetime.fromisoformat(provisioned_at.replace("Z", "+00:00"))
         started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        return provisioned >= started
+        observed = _utc_now()
+        return started <= provisioned <= observed + MAX_NODE_CLOCK_SKEW
     except (TypeError, ValueError):
         return False
 

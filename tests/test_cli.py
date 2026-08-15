@@ -7,8 +7,7 @@ import pytest
 import typer
 
 import easymanet.flash as core_flash
-from easymanet_cli import flash as cli_flash
-from easymanet_cli.flash import (
+from easymanet.flash import (
     CUSTOM_IMAGE_VERSION,
     REDACTED_VALUE,
     redact_provision_for_display,
@@ -16,6 +15,7 @@ from easymanet_cli.flash import (
     resolve_flash_api_wan_enabled,
     resolve_flash_ssh_enabled,
 )
+from easymanet_cli import flash as cli_flash
 from easymanet_cli import image as cli_image
 
 

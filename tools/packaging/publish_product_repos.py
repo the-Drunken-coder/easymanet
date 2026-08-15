@@ -34,17 +34,6 @@ DEFAULT_OUTPUT_DIR = ROOT / "build" / "product-repos"
 GITHUB_HOST = "github.com"
 
 
-def existing_path(*candidates: str) -> str:
-    for rel_path in candidates:
-        if (ROOT / rel_path).exists():
-            return rel_path
-    raise FileNotFoundError(f"None of these source paths exist: {', '.join(candidates)}")
-
-
-def optional_existing_paths(*candidates: str) -> tuple[str, ...]:
-    return tuple(rel_path for rel_path in candidates if (ROOT / rel_path).exists())
-
-
 RepoSpec = SurfaceSpec
 REPO_SPECS = SURFACES
 

@@ -414,7 +414,7 @@ def _prepare_flash_workflow(
             provision_dict,
             show_secrets=options.show_secrets,
         )
-        dry_run_info = inject_dry_run_info(manifest, options.node)
+        dry_run_info = inject_dry_run_info()
         send(
             "plan",
             "Flash plan ready.",

@@ -1,9 +1,4 @@
 #!/bin/sh
-# EasyMANET generic first-boot provisioning script.
-#
-# Expects node-specific provision.json on the FAT boot partition at:
-#   /boot/easymanet/provision.json
-# and copies it into overlay storage before applying configuration.
 
 set -eu
 
@@ -25,8 +20,6 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 : "${EM_WIFI_UPLINK_ENCRYPTION_DEFAULT:=psk2}"
 : "${EM_BATMAN_ROUTING_ALGO:=BATMAN_V}"
 : "${EM_MESH_NETMASK:=255.255.0.0}"
-: "${EM_LAN_FALLBACK_IP:=10.41.254.1}"
-: "${EM_LAN_NETMASK:=255.255.255.0}"
 : "${EM_UPLINK_DNS:=1.1.1.1 8.8.8.8}"
 : "${EM_AHWLAN_IFACE:=ahwlan}"
 : "${EM_AHWLAN_BRIDGE:=br-ahwlan}"
@@ -378,8 +371,6 @@ uci_set network."$ahwlan_device_section".type="bridge"
 uci -q delete network."$ahwlan_device_section".ports 2>/dev/null || true
 uci_add_list network."$ahwlan_device_section".ports="bat0"
 
-# eth0 is mesh-side client access unless this gateway explicitly uses it
-# as the WAN uplink. In that uplink case, keep it out of br-ahwlan.
 if [ "$ETH0_MESH_SIDE" -eq 1 ]; then
     uci_add_list network."$ahwlan_device_section".ports="eth0"
 fi
@@ -432,9 +423,6 @@ uci -q delete dhcp.meship 2>/dev/null || true
 uci -q delete dhcp.lan 2>/dev/null || true
 uci_set dhcp."$EM_AHWLAN_IFACE"=dhcp
 uci_set dhcp."$EM_AHWLAN_IFACE".interface="$EM_AHWLAN_IFACE"
-# br-ahwlan is one flat mesh LAN, so only the gate serves DHCP. Point
-# nodes bridge client traffic to the gate instead of racing it with the
-# same lease pool.
 if [ "$NODE_ROLE" = "gate" ]; then
     uci -q delete dhcp."$EM_AHWLAN_IFACE".ignore 2>/dev/null || true
     uci_set dhcp."$EM_AHWLAN_IFACE".start="$EM_AHWLAN_DHCP_START"

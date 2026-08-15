@@ -292,25 +292,6 @@ def _macos_partition_byte_offset(partition: dict) -> Optional[int]:
     return None
 
 
-def get_macos_partitions(device: str) -> List[str]:
-    try:
-        output = subprocess.check_output(
-            ["diskutil", "list", "-plist", device],
-            timeout=15,
-        ).decode()
-        data = plistlib.loads(output.encode())
-        partitions = []
-        for a in data.get("AllDisksAndPartitions", []):
-            for p in a.get("Partitions", []):
-                pid = p.get("DeviceIdentifier", "")
-                if pid:
-                    partitions.append(f"/dev/{pid}")
-        return partitions
-    except DISK_PARSE_ERRORS as exc:
-        debug_note(f"diskutil partition list failed for {device}: {exc}")
-        return []
-
-
 def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[int, int]]:
     try:
         output = subprocess.check_output(

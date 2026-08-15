@@ -1,5 +1,4 @@
 #!/bin/sh
-# EasyMANET network helpers shared by provisioning and late boot repair.
 
 EASYMANET_NETWORK_LOG="${EASYMANET_NETWORK_LOG:-/var/log/easymanet-network.log}"
 EASYMANET_PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
@@ -17,14 +16,6 @@ easymanet_log_network() {
     echo "[$(date)] $*" >> "$EASYMANET_NETWORK_LOG"
 }
 
-easymanet_json_path() {
-    json_path "$@"
-}
-
-easymanet_json_val() {
-    json_val "$@"
-}
-
 easymanet_find_network_device_section() {
     bridge_name="$1"
     uci show network | sed -n "s/^network\.\([^.=]*\)\.name='$bridge_name'$/\1/p" | head -n 1
@@ -39,8 +30,8 @@ easymanet_delete_network_device_by_name() {
 }
 
 easymanet_eth0_mesh_side() {
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
     wifi_uplink=0
     if json_bool node gateway wifi enabled; then
@@ -67,7 +58,7 @@ easymanet_ensure_ahwlan_bridge() {
 }
 
 easymanet_ensure_ahwlan_interface() {
-    node_ip="$(easymanet_json_val node ip 2>/dev/null || true)"
+    node_ip="$(json_val node ip 2>/dev/null || true)"
     uci set network."$EM_AHWLAN_IFACE"=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network."$EM_AHWLAN_IFACE".proto="static" >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network."$EM_AHWLAN_IFACE".device="$EM_AHWLAN_BRIDGE" >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -78,7 +69,7 @@ easymanet_ensure_ahwlan_interface() {
 }
 
 easymanet_restore_gateway_wan() {
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
     [ "$role" = "gate" ] || return 0
 
     uci set network.wan=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -93,7 +84,7 @@ easymanet_restore_gateway_wan() {
         return 0
     fi
 
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
     uci set network.wan.device="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network.wan.ifname="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -103,8 +94,8 @@ easymanet_repair_management_lan() {
     reason="${1:-manual}"
     mgmt_iface="eth0"
 
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
 
     easymanet_log_network "ensuring mesh-side access uses $EM_AHWLAN_BRIDGE reason=$reason role=$role uplink=$uplink"
@@ -112,8 +103,6 @@ easymanet_repair_management_lan() {
     uci -q delete network.lan 2>/dev/null || true
     easymanet_delete_network_device_by_name br-lan
 
-    # eth0 belongs to WAN only when this gateway selected it as the uplink.
-    # Otherwise stale WAN config on eth0 or a legacy bridge fights br-ahwlan.
     wan_device="$(uci -q get network.wan.device || true)"
     wan_ifname="$(uci -q get network.wan.ifname || true)"
     wan_uses_mesh_eth=0
@@ -133,8 +122,6 @@ easymanet_repair_management_lan() {
         uci -q delete network.wan6 2>/dev/null || true
     fi
 
-    # If stale mesh-side WAN was removed, rebuild gateway WAN from the
-    # provision payload for eth0, non-eth0, and Wi-Fi uplink gateways.
     easymanet_restore_gateway_wan
 
     easymanet_ensure_ahwlan_bridge

@@ -99,11 +99,8 @@ def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(mon
     assert _find_boot_mount("/dev/disk4") == "/Volumes/boot"
 
 
-def test_inject_dry_run_info_mentions_boot_partition(tmp_path):
-    path = _write_config(tmp_path, VALID_CONFIG)
-    manifest = load_manifest(path)
-
-    info = inject_dry_run_info(manifest, "node01")
+def test_inject_dry_run_info_mentions_boot_partition():
+    info = inject_dry_run_info()
 
     assert "/easymanet/provision.json" in info
     assert "first-boot hooks" in info

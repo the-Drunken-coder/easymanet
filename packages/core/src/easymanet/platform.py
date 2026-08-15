@@ -1,5 +1,3 @@
-"""Platform detection and OS-specific utilities."""
-
 import sys
 
 
@@ -9,14 +7,6 @@ def is_macos() -> bool:
 
 def is_linux() -> bool:
     return sys.platform.startswith("linux")
-
-
-def get_platform_name() -> str:
-    if is_macos():
-        return "macos"
-    if is_linux():
-        return "linux"
-    return sys.platform
 
 
 def check_platform() -> None:

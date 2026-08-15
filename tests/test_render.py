@@ -6,9 +6,15 @@ from pathlib import Path
 import tempfile
 
 import pytest
+import yaml
 
 from easymanet.manifest import ManifestError, load_manifest
-from easymanet.provision import ProvisionPayload, provision_json_bool, resolve_provision
+from easymanet.provision import (
+    ProvisionAttestation,
+    ProvisionPayload,
+    provision_json_bool,
+    resolve_provision,
+)
 from easymanet.render import render, render_dict
 
 
@@ -58,12 +64,10 @@ def _write_config(content: str) -> str:
     return path
 
 
-def test_provision_json_bool_normalizes_string_values():
-    true_values = [True, 1, "1", "true", "TRUE", "True", "True ", " yes ", "Yes"]
-    false_values = [False, 0, 2, "0", "false", "trueish", "", None]
-
-    assert [provision_json_bool(value) for value in true_values] == [True] * len(true_values)
-    assert [provision_json_bool(value) for value in false_values] == [False] * len(false_values)
+def test_provision_json_bool_does_not_coerce_non_booleans():
+    assert provision_json_bool(True) is True
+    for value in (False, 1, 0, "true", "false", "yes", None):
+        assert provision_json_bool(value) is False
 
 
 def test_render_valid_provision_json():
@@ -95,6 +99,55 @@ def test_render_valid_provision_json():
     assert len(data["management"]["ssh_authorized_keys"]) == 1
 
     os.unlink(path)
+
+
+def test_render_includes_hil_attestation_when_supplied():
+    path = _write_config(VALID_CONFIG)
+    manifest = load_manifest(path)
+    attestation = ProvisionAttestation(
+        hil_run_nonce="c" * 32,
+        image_sha256="d" * 64,
+        fleet_config_sha256="e" * 64,
+        source_git_sha="f" * 40,
+        hil_started_at="2026-06-30T12:00:00Z",
+    )
+
+    data = render_dict(manifest, "node02", attestation=attestation)
+
+    assert data["attestation"] == attestation.to_dict()
+    os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"hil_run_nonce": ""}, "attestation.hil_run_nonce"),
+        ({"image_sha256": "not-a-digest"}, "attestation.image_sha256"),
+        ({"fleet_config_sha256": "E" * 64}, "attestation.fleet_config_sha256"),
+        ({"source_git_sha": "f" * 39}, "attestation.source_git_sha"),
+        ({"hil_started_at": "2026-06-30T12:00:00"}, "must include a timezone"),
+    ],
+)
+def test_provision_attestation_rejects_incomplete_or_malformed_values(
+    changes,
+    message,
+):
+    values = {
+        "hil_run_nonce": "c" * 32,
+        "image_sha256": "d" * 64,
+        "fleet_config_sha256": "e" * 64,
+        "source_git_sha": "f" * 40,
+        "hil_started_at": "2026-06-30T12:00:00Z",
+        **changes,
+    }
+
+    with pytest.raises(ManifestError, match=message):
+        ProvisionAttestation.from_mapping(values)
+
+
+def test_provision_attestation_requires_every_field():
+    with pytest.raises(ManifestError, match="attestation.hil_run_nonce is required"):
+        ProvisionAttestation.from_mapping({})
 
 
 def test_render_includes_non_secret_fleet_inventory():
@@ -133,6 +186,16 @@ def test_render_gate_node():
     assert data["node"]["role"] == "gate"
     assert data["node"]["gateway"]["enabled"] is True
     assert data["node"]["gateway"]["uplink_interface"] == "eth0"
+    os.unlink(path)
+
+
+def test_render_rejects_unknown_node_role():
+    path = _write_config(VALID_CONFIG.replace("role: point", "role: gateway"))
+    manifest = load_manifest(path)
+
+    with pytest.raises(ManifestError, match="role must be one of"):
+        render_dict(manifest, "node02")
+
     os.unlink(path)
 
 
@@ -247,7 +310,7 @@ nodes:
     os.unlink(path)
 
 
-def test_render_does_not_inherit_gateway_wifi_defaults_for_disabled_gateways():
+def test_render_omits_disabled_gateway_wifi_defaults():
     config = """
 version: 1
 mesh:
@@ -260,7 +323,7 @@ defaults:
   target: rpi4-mm6108-spi
   gateway:
     wifi:
-      enabled: true
+      enabled: false
       ssid: operator-uplink
       password: operator-password
   management:
@@ -275,8 +338,6 @@ nodes:
     role: gate
     hostname: n2
     ip: 10.41.3.1
-    gateway:
-      enabled: false
 """
     path = _write_config(config)
     m = load_manifest(path)
@@ -284,7 +345,7 @@ nodes:
         payload = resolve_provision(m, node_name)
         data = render_dict(m, node_name)
 
-        assert payload.node.gateway.enabled is False
+        assert payload.node.gateway.enabled is (node_name == "n2")
         assert payload.node.gateway.wifi is None
         assert "wifi" not in data["node"]["gateway"]
     os.unlink(path)
@@ -300,7 +361,118 @@ def test_render_starter_gate_uses_wifi_uplink_shape():
     assert gate["node"]["gateway"]["wifi"]["enabled"] is True
     assert gate["node"]["gateway"]["wifi"]["ssid"]
     assert gate["node"]["gateway"]["wifi"]["password"]
+    assert gate["node"]["local_ap"]["enabled"] is False
     assert gate["management"]["ssh_enabled"] is True
+
+
+def test_render_preserves_safe_scalar_content_and_canonical_booleans(tmp_path):
+    data = yaml.safe_load(VALID_CONFIG)
+    scalar = "  ops 'east' / west \\\\ \"quoted\"  "
+    data["mesh"]["id"] = scalar
+    data["mesh"]["password"] = scalar
+    data["defaults"]["local_ap"]["password"] = scalar
+    data["defaults"]["management"]["root_password_hash"] = scalar
+    data["nodes"]["node01"]["local_ap"]["ssid"] = scalar
+    data["nodes"]["node01"]["local_ap"]["enabled"] = False
+    data["nodes"]["node01"]["gateway"] = {
+        "enabled": True,
+        "uplink_interface": "wifi",
+        "wifi": {
+            "enabled": True,
+            "ssid": scalar,
+            "password": scalar,
+        },
+    }
+    path = tmp_path / "safe-scalars.yml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    manifest = load_manifest(str(path))
+    result = render_dict(manifest, "node01")
+
+    assert result["mesh"]["id"] == scalar
+    assert result["mesh"]["password"] == scalar
+    assert result["node"]["local_ap"]["ssid"] == scalar
+    assert result["node"]["local_ap"]["password"] == scalar
+    assert result["node"]["gateway"]["wifi"]["ssid"] == scalar
+    assert result["node"]["gateway"]["wifi"]["password"] == scalar
+    assert result["management"]["root_password_hash"] == scalar
+    assert result["node"]["local_ap"]["enabled"] is False
+    assert type(result["node"]["gateway"]["enabled"]) is bool
+    assert type(result["node"]["gateway"]["wifi"]["enabled"]) is bool
+
+
+def test_render_rejects_local_ap_with_gateway_wifi():
+    config = VALID_CONFIG.replace(
+        "      uplink_interface: eth0",
+        """      uplink_interface: wifi
+      wifi:
+        enabled: true
+        ssid: operator-wifi
+        password: operator-password""",
+        1,
+    )
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    with pytest.raises(
+        ManifestError,
+        match=r"local_ap\.enabled and gateway\.wifi\.enabled cannot both be true",
+    ):
+        render_dict(manifest, "node01")
+    os.unlink(path)
+
+
+def test_render_derives_gateway_enabled_from_role():
+    config = VALID_CONFIG.replace("      enabled: true\n", "", 1)
+    path = _write_config(config)
+    manifest = load_manifest(path)
+
+    assert render_dict(manifest, "node01")["node"]["gateway"]["enabled"] is True
+    assert render_dict(manifest, "node02")["node"]["gateway"]["enabled"] is False
+    os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    ("node_name", "gateway", "expected"),
+    [
+        (
+            "node02",
+            {"enabled": True, "uplink_interface": "eth0"},
+            r"gateway.enabled must match role 'point' \(false\)",
+        ),
+        (
+            "node01",
+            {
+                "enabled": True,
+                "uplink_interface": "eth0",
+                "wifi": {
+                    "enabled": True,
+                    "ssid": "operator-uplink",
+                    "password": "operator-password",
+                },
+            },
+            "gateway.wifi.enabled requires gateway.uplink_interface: wifi",
+        ),
+        (
+            "node01",
+            {"enabled": True, "uplink_interface": "wifi"},
+            "gateway.uplink_interface: wifi requires gateway.wifi.enabled: true",
+        ),
+    ],
+)
+def test_render_rejects_gateway_contract_mismatches(
+    tmp_path,
+    node_name,
+    gateway,
+    expected,
+):
+    data = yaml.safe_load(VALID_CONFIG)
+    data["nodes"][node_name]["gateway"] = gateway
+    path = tmp_path / "fleet.yml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ManifestError, match=expected):
+        render_dict(load_manifest(str(path)), node_name)
 
 
 def test_render_omits_ssh_enabled_when_unspecified():
@@ -366,9 +538,8 @@ def test_render_rejects_malformed_management_defaults():
         "  management: not-a-mapping",
     )
     path = _write_config(config)
-    m = load_manifest(path)
     with pytest.raises(ManifestError, match="defaults.management must be a mapping"):
-        render(m, "node01")
+        load_manifest(path)
     os.unlink(path)
 
 

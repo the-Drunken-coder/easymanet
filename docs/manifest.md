@@ -2,6 +2,13 @@
 
 Complete reference for every field in `fleet.yml`.
 
+The manifest is a closed contract. Unknown fields, quoted booleans, numeric
+strings, non-string text fields, non-mapping nested sections, and control
+characters are rejected while loading the file. Write booleans as unquoted
+YAML `true` or `false` and integers as unquoted YAML integers. Ordinary
+single-line string content, including quotes, slashes, backslashes, and
+leading or trailing spaces, is preserved exactly in `provision.json`.
+
 ## Top-level Fields
 
 ### `version` (required, integer)
@@ -68,13 +75,14 @@ mesh:
 
 ---
 
-## `defaults` (required, object)
+## `defaults` (optional, object)
 
 Default values inherited by all nodes unless overridden.
 
-### `defaults.target` (required, string)
+### `defaults.target` (optional, string)
 
-Target hardware platform. Currently only `rpi4-mm6108-spi` is supported.
+Target hardware platform. Defaults to `rpi4-mm6108-spi`; currently that is the
+only supported value.
 
 ```yaml
 defaults:
@@ -87,7 +95,7 @@ Default local access point settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Whether to create a local WiFi AP |
+| `enabled` | bool | `false` | Whether to create a local WiFi AP |
 | `password` | string | — | AP password (min 8 chars when enabled) |
 | `ssid` | string | `{nodename}-local` | AP SSID (override per node) |
 
@@ -123,13 +131,22 @@ defaults:
 
 ### `defaults.gateway` (object)
 
-Default gateway settings for gate nodes.
+Default uplink settings shared by nodes.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enabled` | bool | Whether gateway mode is enabled |
+| `enabled` | bool | Optional consistency assertion. If present, it must be `true` for a `gate` and `false` for a `point`; rendered gateway mode is always derived from `role`. |
 | `uplink_interface` | string | Uplink network interface name. `eth0` is WAN when selected on a gate; otherwise Ethernet remains mesh-side access on `br-ahwlan`. |
-| `wifi` | object | Optional Wi-Fi uplink settings. Defaults can hold SSID/password while a gate node enables them with `gateway.wifi.enabled: true`. |
+| `wifi` | object | Optional Wi-Fi uplink settings. `wifi.enabled` independently selects the Wi-Fi station for a gate uplink or point management access. |
+
+#### `gateway.wifi` fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Whether to join the configured upstream Wi-Fi network. |
+| `ssid` | string | — | Upstream network name. Required when enabled. |
+| `password` | string | — | Upstream network password. Required when enabled. |
+| `encryption` | string | `psk2` | `psk2`, `sae`, `none`, `psk`, or `psk-mixed`. |
 
 ### `defaults.role` (string)
 
@@ -146,10 +163,10 @@ node name used with `--node` in CLI commands.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `role` | string | yes (or from defaults) | `point` | `gate` or `point` |
-| `hostname` | string | yes | node name | System hostname |
+| `role` | string | no | from defaults, then `point` | `gate` or `point` |
+| `hostname` | string | yes | — | System hostname |
 | `ip` | string | yes | — | Static node IP on the OpenMANET mesh bridge (`br-ahwlan`) |
-| `target` | string | no | from defaults | Hardware target |
+| `target` | string | no | from defaults, then `rpi4-mm6108-spi` | Hardware target |
 | `local_ap` | object | no | from defaults | Local AP override |
 | `gateway` | object | no | from defaults | Gateway settings override |
 
@@ -180,7 +197,6 @@ nodes:
   manet01:
     role: gate
     gateway:
-      enabled: true
       uplink_interface: wifi
       wifi:
         enabled: true
@@ -194,10 +210,22 @@ flash-time `--enable-wan-api` opt-in only on trusted upstream Wi-Fi LANs. With
 `uplink_interface: eth0`, EasyMANET runs WAN DHCP on `eth0` and keeps that port
 out of `br-ahwlan`.
 
+`local_ap.enabled` and `gateway.wifi.enabled` cannot both be true on one node.
+They use the same physical radio. Disable the local AP on a Wi-Fi-uplink node;
+the validator and first-boot provisioning both reject the conflicting shape.
+
+Gateway mode itself is derived from the node role: gates render
+`gateway.enabled: true`; points render `gateway.enabled: false`. An authored
+`gateway.enabled` value is optional and must agree with the role. When
+`gateway.wifi.enabled` is true, an omitted uplink resolves to `wifi`; an
+explicit uplink must also be `wifi`. Conversely, `uplink_interface: wifi`
+requires `gateway.wifi.enabled: true`. These same invariants are checked again
+on first boot before network configuration is changed.
+
 On point nodes, `gateway.wifi.enabled` is allowed as a management uplink for
 direct SSH or troubleshooting over an upstream Wi-Fi LAN. It does not make the
 point a mesh gateway, does not provide mesh-to-WAN forwarding, and uses the
-same local AP radio that would otherwise host `local_ap`.
+same radio that would otherwise host `local_ap`, which must be disabled.
 
 ---
 
@@ -205,6 +233,11 @@ same local AP radio that would otherwise host `local_ap`.
 
 The `easymanet render` command outputs the fully resolved config
 after merging mesh settings, defaults, and node overrides.
+
+Resolved `local_ap.enabled`, `gateway.enabled`, and
+`gateway.wifi.enabled` values are JSON booleans, never strings or integers.
+Only documented fields are rendered; arbitrary manifest fields are rejected
+rather than passed to the node.
 
 Priority (highest to lowest):
 1. Node-specific values
@@ -216,6 +249,8 @@ Priority (highest to lowest):
 | Rule | Error Level |
 |------|-------------|
 | version must be 1 | Error |
+| All fields must use their documented YAML type; booleans and integers are not coerced from strings | Error |
+| Unknown fields and control characters are rejected | Error |
 | mesh.id is required | Error |
 | mesh.password is required | Error |
 | mesh.channel is required | Error |
@@ -237,8 +272,11 @@ Priority (highest to lowest):
 | Gate Ethernet (`eth0`) is the WAN uplink | Warning |
 | mesh.country must be two-letter ISO code (e.g. US) | Error |
 | gateway.wifi.enabled requires ssid and password | Error |
+| local_ap.enabled and gateway.wifi.enabled cannot both be true on one node | Error |
+| gateway.enabled, when authored, must match the node role | Error |
+| gateway.wifi.enabled and uplink_interface: wifi must agree | Error |
 | gateway.wifi.encryption must be psk2, sae, none, psk, or psk-mixed | Error |
-| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior, local AP suppression, and SSH exposure if enabled | Warning |
+| gateway.wifi.enabled on point nodes is management-only and warns about mesh gateway behavior and SSH exposure if enabled | Warning |
 
 ## Security
 

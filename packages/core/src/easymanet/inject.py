@@ -3,14 +3,17 @@
 import os
 import plistlib
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from .disks import DeviceIdentity, assert_device_identity
 from .manifest import Manifest
 from .platform import is_linux, is_macos
+from .provision import ProvisionAttestation
 from .render import render
 
 ROOT_BLOCK_DEVICE_PATTERN = re.compile(r"root=(/dev/[^\s]+)")
@@ -55,8 +58,10 @@ def inject(
     node_name: str,
     dry_run: bool = False,
     *,
+    device_identity: DeviceIdentity,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
 ) -> List[Tuple[str, bool]]:
     if dry_run:
         render(
@@ -64,25 +69,65 @@ def inject(
             node_name,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
         return [
             ("/boot/easymanet/provision.json", True),
             ("Base image must already include EasyMANET first-boot hooks", True),
         ]
 
+    if device != device_identity.path:
+        raise InjectError(
+            f"Device path {device} does not match checked identity path "
+            f"{device_identity.path}."
+        )
+    _assert_device_identity(device_identity)
     mount_point, mounted_here = _mount_boot_partition(device)
+    results: List[Tuple[str, bool]] | None = None
+    stage_error: BaseException | None = None
     try:
-        return stage_boot_payload(
+        _assert_device_identity(device_identity)
+        results = stage_boot_payload(
             Path(mount_point),
             manifest,
             node_name,
             ssh_enabled=ssh_enabled,
             api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
         )
-    except OSError as e:
-        raise InjectError(f"Failed to write boot-partition provision.json: {e}") from e
-    finally:
+        _assert_device_identity(device_identity)
+    except OSError as exc:
+        stage_error = InjectError(
+            f"Failed to write boot-partition provision.json: {exc}"
+        )
+        stage_error.__cause__ = exc
+    except BaseException as exc:
+        stage_error = exc
+    try:
         _cleanup_mount(device, mount_point, mounted_here)
+    except InjectError as cleanup_error:
+        if stage_error is not None:
+            raise InjectError(
+                f"{stage_error}; boot-volume cleanup also failed: {cleanup_error}"
+            ) from cleanup_error
+        raise
+    try:
+        _assert_device_identity(device_identity)
+    except InjectError as identity_error:
+        if stage_error is not None:
+            raise identity_error from stage_error
+        raise
+    if stage_error is not None:
+        raise stage_error
+    assert results is not None
+    return results
+
+
+def _assert_device_identity(expected: DeviceIdentity) -> None:
+    try:
+        assert_device_identity(expected)
+    except (OSError, ValueError) as exc:
+        raise InjectError(str(exc)) from exc
 
 
 def stage_boot_payload(
@@ -92,17 +137,19 @@ def stage_boot_payload(
     *,
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
 ) -> List[Tuple[str, bool]]:
     provision_json = render(
         manifest,
         node_name,
         ssh_enabled=ssh_enabled,
         api_wan_enabled=api_wan_enabled,
+        attestation=attestation,
     )
     dest_dir = boot_root / "easymanet"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / "provision.json"
-    dest_path.write_text(provision_json)
+    _atomic_write_text(dest_path, provision_json, mode=0o600)
     try:
         dest_path.chmod(0o600)
     except OSError:
@@ -168,12 +215,39 @@ def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
 
     root_partuuid = f"PARTUUID={partuuid}{part_suffix}"
     backup_path = boot_root / "cmdline.txt.easymanet.bak"
+    cmdline_mode = stat.S_IMODE(cmdline_path.stat().st_mode)
     if not backup_path.exists():
-        backup_path.write_text(cmdline)
+        _atomic_write_text(backup_path, cmdline, mode=cmdline_mode)
 
     updated = cmdline.replace(f"root={root_device}", f"root={root_partuuid}", 1)
-    cmdline_path.write_text(updated)
+    _atomic_write_text(cmdline_path, updated, mode=cmdline_mode)
     return f"/boot/cmdline.txt root={root_partuuid}"
+
+
+def _atomic_write_text(path: Path, content: str, *, mode: int) -> None:
+    fd, raw_temp_path = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(raw_temp_path)
+    open_fd = fd
+    try:
+        try:
+            os.fchmod(fd, mode)
+        except OSError:
+            # FAT/exFAT boot media may not honor POSIX permissions.
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            open_fd = -1
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if open_fd >= 0:
+            os.close(open_fd)
+        temp_path.unlink(missing_ok=True)
 
 
 def _mount_boot_partition(device: str) -> Tuple[str, bool]:
@@ -226,35 +300,56 @@ def _mount_boot_partition_linux(partition: str) -> Tuple[str, bool]:
 
 
 def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
-    del device
     if not mounted_here:
         return
 
     if is_macos():
-        result = subprocess.run(
-            ["diskutil", "unmount", mount_point],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                ["diskutil", "unmount", mount_point],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise InjectError(
+                f"Failed to unmount owned boot volume {mount_point} on {device}: {exc}"
+            ) from exc
         if result.returncode != 0:
-            _debug_note(f"diskutil unmount failed for {mount_point}: {result.stderr.strip()}")
+            detail = (result.stderr or result.stdout or "").strip()
+            suffix = f": {detail}" if detail else ""
+            raise InjectError(
+                f"Failed to unmount owned boot volume {mount_point} on {device}{suffix}"
+            )
         return
 
     if is_linux():
-        result = subprocess.run(
-            ["umount", mount_point],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                ["umount", mount_point],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise InjectError(
+                f"Failed to unmount owned boot volume {mount_point} on {device}: {exc}"
+            ) from exc
         if result.returncode != 0:
-            _debug_note(f"umount failed for {mount_point}: {result.stderr.strip()}")
-            return
+            detail = (result.stderr or result.stdout or "").strip()
+            suffix = f": {detail}" if detail else ""
+            raise InjectError(
+                f"Failed to unmount owned boot volume {mount_point} on {device}{suffix}"
+            )
         try:
             os.rmdir(mount_point)
-        except OSError:
-            pass
+        except OSError as exc:
+            raise InjectError(
+                f"Failed to remove owned boot mount directory {mount_point}: {exc}"
+            ) from exc
+        return
+
+    raise InjectError(f"Unsupported platform while cleaning up {mount_point} on {device}")
 
 
 def _macos_partition_index(partition: dict) -> int:

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -128,12 +129,13 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_download_image(target, version, url, sha256, force=False, emit=None):
+    def fake_download_image(target, version, url, sha256, force=False, emit=None, *, trust):
         assert target == "rpi4-mm6108-spi"
         assert version == "images-v0.2.4"
         assert url == "https://example.test/openmanet.img.gz"
         assert sha256 == "a" * 64
         assert force is False
+        assert trust["source"] == "custom"
         image_path.write_bytes(b"firmware")
         if emit:
             emit({"type": "download_completed", "message": f"Saved: {image_path}", "path": str(image_path)})
@@ -156,6 +158,43 @@ def test_prepare_flash_workflow_downloads_missing_image(tmp_path, monkeypatch):
     assert result.plan["base_image"] == str(image_path)
     assert "download_completed" in [event.event_type for event in events]
     assert events[-1].event_type == "plan"
+
+
+def test_prepare_flash_workflow_rejects_legacy_downloader_without_trust(monkeypatch):
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
+    _guard_flash_execution_steps(monkeypatch)
+    monkeypatch.setattr(flash, "get_cached_image", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        flash,
+        "check_latest_version",
+        lambda _target: SimpleNamespace(
+            version="images-v0.2.4",
+            url="https://example.test/openmanet.img.gz",
+            sha256="a" * 64,
+        ),
+    )
+
+    def legacy_download_image(target, version, url, sha256, force=False, emit=None):
+        del target, version, url, sha256, force, emit
+        raise AssertionError("legacy downloader must not be called without trust")
+
+    monkeypatch.setattr(flash, "download_image", legacy_download_image)
+
+    result = flash.prepare_flash_workflow(
+        flash.FlashOptions(
+            config="examples/three-node-field-mesh.yml",
+            node="point01",
+            device="/dev/disk4",
+            yes=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.code is flash.FlashErrorCode.INTERNAL
+    assert "TypeError" in result.errors[0]
+    assert "unexpected keyword argument 'trust'" in result.errors[0]
 
 
 def test_prepare_flash_workflow_download_failure_is_classified(monkeypatch):
@@ -272,12 +311,12 @@ nodes:
     ip: 10.41.1.1
 """
     )
-    string_bool_wifi_gate = tmp_path / "string-bool-wifi-gate.yml"
-    string_bool_wifi_gate.write_text(
+    wifi_gate = tmp_path / "wifi-gate.yml"
+    wifi_gate.write_text(
         """\
 version: 1
 mesh:
-  id: string-bool
+  id: wifi-gate
   password: mesh-password
   channel: 42
   bandwidth_mhz: 2
@@ -287,10 +326,10 @@ defaults:
   local_ap:
     enabled: false
   gateway:
-    enabled: "true"
+    enabled: true
     uplink_interface: wifi
     wifi:
-      enabled: "true"
+      enabled: true
       ssid: uplink
       password: uplink-password
   management:
@@ -314,7 +353,7 @@ nodes:
         ("examples/three-node-field-mesh.yml", "gate01", {"enable_wan_api": True}, True, True),
         ("examples/three-node-field-mesh.yml", "point01", {"enable_wan_api": True}, False, False),
         (str(ethernet_gate), "gate01", {"enable_wan_api": True}, False, False),
-        (str(string_bool_wifi_gate), "gate01", {"enable_wan_api": True}, True, True),
+        (str(wifi_gate), "gate01", {"enable_wan_api": True}, True, True),
     ]
 
     for config, node, overrides, expected_enabled, expected_applicable in cases:
@@ -458,7 +497,8 @@ def test_flash_workflow_inject_failure_reports_partial_write(tmp_path, monkeypat
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(flash, "check_privileges", lambda _device: None)
-    monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: None)
+    device_identity = object()
+    monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(
         flash,
         "inject",
@@ -479,14 +519,21 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(flash, "check_privileges", lambda _device: None)
 
+    device_identity = object()
+    flash_calls = []
+
     def fake_flash_image(**kwargs):
+        flash_calls.append(kwargs)
         kwargs["emit"]({"type": "write_started", "message": "Writing image"})
         kwargs["emit"]({"type": "write_completed", "message": "Done writing."})
+        return device_identity
 
-    def fake_finish_flash(_device, eject=True, emit=None):
+    finish_calls = []
+
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+        finish_calls.append(device_identity)
         assert eject is True
         emit({"type": "safe_to_remove", "message": "Safe to remove."})
-        return True
 
     monkeypatch.setattr(flash, "flash_image", fake_flash_image)
     inject_calls = []
@@ -499,7 +546,16 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "finish_flash", fake_finish_flash)
     events = []
 
-    result = flash.run_flash_workflow(_options(tmp_path), emit=events.append)
+    attestation = {
+        "hil_run_nonce": "c" * 32,
+        "fleet_config_sha256": "e" * 64,
+        "source_git_sha": "f" * 40,
+        "hil_started_at": "2026-06-30T12:00:00Z",
+    }
+    result = flash.run_flash_workflow(
+        _options(tmp_path, attestation=attestation),
+        emit=events.append,
+    )
 
     assert result.ok is True
     assert result.code is flash.FlashErrorCode.OK
@@ -513,7 +569,16 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
         "complete",
     ]
     assert events[0].event_type == "warning"
+    expected_sha256 = hashlib.sha256(b"firmware").hexdigest()
+    assert result.image["sha256"] == expected_sha256
+    assert flash_calls[0]["expected_sha256"] == expected_sha256
+    assert inject_calls[0]["device_identity"] is device_identity
     assert inject_calls[0]["ssh_enabled"] is False
+    assert inject_calls[0]["attestation"].to_dict() == {
+        **attestation,
+        "image_sha256": result.image["sha256"],
+    }
+    assert finish_calls == [device_identity]
     assert result.inject_results == [{"path": "/easymanet/provision.json", "ok": True}]
 
 
@@ -522,13 +587,15 @@ def test_flash_workflow_finish_failure_is_structured(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "lookup_device", lambda _device: None)
     monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(flash, "check_privileges", lambda _device: None)
-    monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: None)
+    device_identity = object()
+    monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
 
-    def fake_finish_flash(_device, eject=True, emit=None):
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+        assert device_identity is not None
         assert eject is True
         emit({"type": "eject_failed", "message": "eject failed", "level": "warning"})
-        return False
+        raise flash.FlashError("Failed to eject /dev/disk4: busy")
 
     monkeypatch.setattr(flash, "finish_flash", fake_finish_flash)
 
@@ -537,6 +604,6 @@ def test_flash_workflow_finish_failure_is_structured(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.code is flash.FlashErrorCode.FINISH
     assert result.errors == [
-        "Eject failed; sync and eject the disk manually before removing it."
+        "Final disk cleanup failed: Failed to eject /dev/disk4: busy"
     ]
     assert result.inject_results == [{"path": "/easymanet/provision.json", "ok": True}]

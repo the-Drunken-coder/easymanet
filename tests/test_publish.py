@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -9,9 +10,9 @@ from easymanet_publish.export import EXPORT_RECORD, export_public_surfaces
 def test_export_public_surfaces_writes_local_outputs(tmp_path):
     output = tmp_path / "public"
 
-    record = export_public_surfaces(output, source_ref="abc123")
+    record = export_public_surfaces(output, source_ref="HEAD")
 
-    assert record["source_ref"] == "abc123"
+    assert record["source_ref"] == export_mod._git_ref(export_mod._repo_root())
     assert record["subrepos_configured"] is False
     for surface in ("images", "cli", "desktop"):
         assert (output / surface / "README.generated.md").exists()
@@ -25,10 +26,17 @@ def test_export_public_surfaces_writes_local_outputs(tmp_path):
     assert payload["surfaces"]["images"]["files"]
 
 
+def test_export_public_surfaces_rejects_unresolvable_default_ref(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_mod, "_git_ref", lambda _repo_root: "")
+
+    with pytest.raises(RuntimeError, match="pass --source-ref explicitly"):
+        export_public_surfaces(tmp_path / "public", repo_root=tmp_path)
+
+
 def test_export_surfaces_include_installable_python_roots(tmp_path):
     output = tmp_path / "public"
 
-    record = export_public_surfaces(output, source_ref="abc123")
+    record = export_public_surfaces(output, source_ref="HEAD")
 
     image_files = set(record["surfaces"]["images"]["files"])
     cli_files = set(record["surfaces"]["cli"]["files"])
@@ -50,7 +58,7 @@ def test_export_surfaces_include_installable_python_roots(tmp_path):
 def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
     output = tmp_path / "public"
 
-    export_public_surfaces(output, source_ref="abc123")
+    export_public_surfaces(output, source_ref="HEAD")
 
     image_pyproject = (output / "images" / "pyproject.toml").read_text()
     cli_pyproject = (output / "cli" / "pyproject.toml").read_text()
@@ -87,7 +95,7 @@ def test_export_surfaces_generate_surface_specific_pyprojects(tmp_path):
 def test_export_templates_dispatch_and_checkout_requested_refs(tmp_path):
     output = tmp_path / "public"
 
-    export_public_surfaces(output, source_ref="abc123")
+    export_public_surfaces(output, source_ref="HEAD")
 
     cli_bootstrap = (
         output / "cli" / ".github" / "workflows" / "bootstrap-release.yml"
@@ -116,21 +124,51 @@ def test_export_copy_paths_fails_on_missing_sources(tmp_path):
         export_mod._copy_paths(source_root, surface_dir, ["missing.yml"])
 
 
-def test_export_copy_paths_ignores_dependency_artifacts(tmp_path):
+def track_paths(repo_root, *paths):
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", *paths], cwd=repo_root, check=True)
+
+
+def test_export_copy_paths_selects_only_tracked_files(tmp_path):
     source_root = tmp_path / "source"
     surface_dir = tmp_path / "surface"
-    node_modules = source_root / "apps" / "desktop" / "electron" / "node_modules" / "pkg"
-    node_modules.mkdir(parents=True)
-    (node_modules / "index.js").write_text("module.exports = {};\n")
     app_file = source_root / "apps" / "desktop" / "electron" / "main.js"
     app_file.parent.mkdir(parents=True, exist_ok=True)
     app_file.write_text("console.log('ok');\n")
+    track_paths(source_root, "apps/desktop/electron/main.js")
+    untracked = source_root / "apps" / "desktop" / "electron" / "local-only.js"
+    untracked.write_text("console.log('local only');\n")
     surface_dir.mkdir()
 
     copied = export_mod._copy_paths(source_root, surface_dir, ["apps/desktop"])
 
     assert "apps/desktop/electron/main.js" in copied
-    assert not (surface_dir / "apps" / "desktop" / "electron" / "node_modules").exists()
+    assert (surface_dir / "apps" / "desktop" / "electron" / "main.js").exists()
+    assert not (surface_dir / "apps" / "desktop" / "electron" / "local-only.js").exists()
+
+
+def test_export_copy_paths_rejects_paths_outside_the_repository(tmp_path):
+    source_root = tmp_path / "source"
+    surface_dir = tmp_path / "surface"
+    source_root.mkdir()
+    surface_dir.mkdir()
+
+    with pytest.raises(ValueError, match="relative to the repository"):
+        export_mod._copy_paths(source_root, surface_dir, ["../outside"])
+
+
+def test_export_copy_paths_rejects_tracked_symbolic_links(tmp_path):
+    source_root = tmp_path / "source"
+    surface_dir = tmp_path / "surface"
+    source_dir = source_root / "apps" / "desktop"
+    source_dir.mkdir(parents=True)
+    (source_dir / "local-only.js").write_text("console.log('local only');\n")
+    (source_dir / "linked.js").symlink_to("local-only.js")
+    track_paths(source_root, "apps/desktop/linked.js")
+    surface_dir.mkdir()
+
+    with pytest.raises(ValueError, match="cannot be symbolic links"):
+        export_mod._copy_paths(source_root, surface_dir, ["apps/desktop"])
 
 
 def test_repo_root_fails_loudly_when_sentinels_are_missing(tmp_path, monkeypatch):

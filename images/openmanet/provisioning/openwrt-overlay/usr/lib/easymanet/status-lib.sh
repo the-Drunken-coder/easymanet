@@ -135,6 +135,8 @@ status_fleet_json_from_topology() {
                 state="MISSING"
                 printf '%s\n' missing >> "$missing_count_file"
                 ;;
+            # A capped topology probe is unobserved, not a missing node.
+            unknown) state="UNKNOWN" ;;
             *) state="UNKNOWN" ;;
         esac
         [ "$first" -eq 1 ] || printf ','

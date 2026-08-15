@@ -95,6 +95,14 @@ def test_redact_provision_for_display_hides_secret_values():
                     "enabled": True,
                     "ssid": "uplink",
                     "password": "wifi-secret",
+                    "client_secret": "unknown-secret",
+                    "oauth_token": "unknown-token",
+                    "private_key": "unknown-private-key",
+                    "api_key": "unknown-api-key",
+                    "access_key": "unknown-access-key",
+                    "credentials": "unknown-credentials",
+                    "api_tokens": ["unknown-token"],
+                    "secret_config": {"value": "unknown-secret"},
                 }
             },
         },
@@ -110,6 +118,14 @@ def test_redact_provision_for_display_hides_secret_values():
     assert redacted["mesh"]["password"] == REDACTED_VALUE
     assert redacted["node"]["local_ap"]["password"] == REDACTED_VALUE
     assert redacted["node"]["gateway"]["wifi"]["password"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["client_secret"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["oauth_token"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["private_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["api_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["access_key"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["credentials"] == REDACTED_VALUE
+    assert redacted["node"]["gateway"]["wifi"]["api_tokens"] == [REDACTED_VALUE]
+    assert redacted["node"]["gateway"]["wifi"]["secret_config"] == REDACTED_VALUE
     assert redacted["management"]["root_password_hash"] == REDACTED_VALUE
     assert redacted["management"]["ssh_authorized_keys"] == [
         REDACTED_VALUE,
@@ -117,6 +133,14 @@ def test_redact_provision_for_display_hides_secret_values():
     ]
     assert redacted["management"]["ssh_enabled"] is True
     assert provision["mesh"]["password"] == "mesh-secret"
+
+
+def test_redact_provision_hides_malformed_known_secret_fields():
+    provision = {"management": {"ssh_authorized_keys": "malformed-secret"}}
+
+    redacted = redact_provision_for_display(provision)
+
+    assert redacted["management"]["ssh_authorized_keys"] == REDACTED_VALUE
 
 
 def test_flash_ssh_flags_mutually_exclusive():
@@ -455,7 +479,7 @@ def test_cli_validate_resolves_fleet_name_from_workspace(tmp_path, monkeypatch):
     assert f"Validating: {fleet}" in result.output
 
 
-def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypatch):
+def test_flash_exits_when_finish_flash_raises_eject_failure(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
     from easymanet_cli.app import app
@@ -497,12 +521,13 @@ def test_flash_exits_when_finish_flash_reports_eject_failure(tmp_path, monkeypat
     monkeypatch.setattr(core_flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(core_flash, "inject_dry_run_info", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(core_flash, "check_privileges", lambda _device: None)
-    monkeypatch.setattr(core_flash, "flash_image", lambda **_kwargs: None)
+    device_identity = object()
+    monkeypatch.setattr(core_flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(core_flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
 
     def fake_finish_flash(device, eject=True, **_kwargs):
         finish_calls.append((device, eject))
-        return False
+        raise core_flash.FlashError("eject failed")
 
     monkeypatch.setattr(core_flash, "finish_flash", fake_finish_flash)
 
@@ -547,16 +572,31 @@ def test_image_build_chains_build_error(monkeypatch):
     assert "Build error: docker is missing" in result.output
 
 
-def test_image_cli_compatibility_shim_exposes_register_command():
-    import easymanet_image.cli as shim
-    from easymanet_image.cli import register_image_commands as shim_register
-    from easymanet_cli.image import register_image_commands
+def test_image_build_uses_one_canonical_output_path_for_image_and_manifest(monkeypatch):
+    from typer.testing import CliRunner
 
-    assert shim_register is register_image_commands
-    for name in (
-        "maybe_show_update_notice",
-        "get_image_config",
-        "get_cached_image",
-        "build_image",
-    ):
-        assert hasattr(shim, name)
+    from easymanet_cli.app import app
+
+    output_arg = "~/easymanet-cli-output"
+    expected_output = Path(output_arg).expanduser().resolve()
+    calls = {}
+
+    def fake_build_image(**kwargs):
+        calls["build_output"] = kwargs["output_dir"]
+        return expected_output / "openmanet-test.img.gz"
+
+    def fake_write_release_manifest(**kwargs):
+        calls["manifest_output"] = kwargs["output_dir"]
+        return expected_output / "easymanet-image-release.json"
+
+    monkeypatch.setattr(cli_image, "maybe_show_update_notice", lambda: None)
+    monkeypatch.setattr(cli_image, "build_image", fake_build_image)
+    monkeypatch.setattr(cli_image, "write_release_manifest", fake_write_release_manifest)
+
+    result = CliRunner().invoke(app, ["image", "build", "--output-dir", output_arg])
+
+    assert result.exit_code == 0
+    assert calls["build_output"] == expected_output
+    assert calls["manifest_output"] == expected_output
+    assert calls["build_output"] is calls["manifest_output"]
+    assert f"Output dir:   {expected_output}" in result.output

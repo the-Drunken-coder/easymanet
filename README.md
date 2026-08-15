@@ -100,9 +100,8 @@ nodes:
     hostname: gate01
     ip: 10.41.1.1
     local_ap:
-      ssid: gate01-local
+      enabled: false
     gateway:
-      enabled: true
       uplink_interface: wifi
       wifi:
         enabled: true
@@ -121,9 +120,10 @@ See [docs/sample-fleet.md](docs/sample-fleet.md) for the copy command and a
 smaller two-node example. EasyMANET does not create a fleet file automatically.
 
 For a gate, `uplink_interface: wifi` joins the configured operator LAN.
-`uplink_interface: eth0` keeps wired management on `br-lan`; EasyMANET does not
-run WAN DHCP on that management bridge. Mesh discovery uses the local topology
-API, so treat any WAN-reachable management/API service as trusted-LAN only.
+`uplink_interface: eth0` runs WAN DHCP directly on `eth0` and keeps that port
+out of the mesh bridge. Manage an Ethernet-uplink gate through the mesh, its
+local AP, or another node. Treat any WAN-reachable management/API service as
+trusted-LAN only.
 
 ### 3. List available disks
 
@@ -204,7 +204,9 @@ settle.
   fleet secrets in cleartext until successful first boot, when `provision.sh`
   removes the boot copy. The overlay copy at `/etc/easymanet/provision.json`
   (mode `0600`) remains. Treat flashed media as sensitive until the node has
-  provisioned. See [docs/flashing.md](docs/flashing.md#security).
+  provisioned. The marker means required activation commands accepted; it does
+  not prove Wi-Fi association, WAN reachability, or physical mesh connectivity.
+  See [docs/flashing.md](docs/flashing.md#security).
 
 Set `EASYMANET_SKIP_UPDATE_CHECK=1` to skip the optional GitHub release check
 on `flash` and `image build`.
@@ -299,7 +301,7 @@ See [docs/architecture.md](docs/architecture.md) for the full data flow.
 - [Public Product Repositories](docs/public-repos.md)
 - [OpenMANET Config Investigation](docs/openmanet-config-investigation.md)
 - [Design Decisions](docs/design-decisions/) — durable choices and trade-offs ([template](docs/design-decisions/_EXAMPLE_DESIGN_DECISION_.md))
-- [Problems](docs/problems/) — short-lived agent notes on active blockers ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
+- [Problems](docs/problems/) — active blocker notes and an archive of resolved findings ([template](docs/problems/_EXAMPLE_PROBLEM_.md))
 
 ## Development
 
@@ -327,8 +329,8 @@ Generated public product repositories are produced with
 ## Security Notes
 
 - An empty `root_password_hash` leaves the root password unchanged on the node.
-- `gateway.uplink_interface: eth0` is reserved for wired management on
-  `br-lan`; use a separate uplink or Wi-Fi uplink for WAN routing.
+- On a gate, `gateway.uplink_interface: eth0` is the WAN DHCP interface and is
+  not available for mesh-side management.
 - Wi-Fi uplink (`gateway.wifi.enabled`) can expose SSH on WAN when SSH is enabled.
 - Gate topology API exposure on WAN (port 10411) is default-off and must stay
   limited to trusted uplinks when `--enable-wan-api` is used.

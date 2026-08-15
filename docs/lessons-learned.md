@@ -127,7 +127,10 @@ repo code before treating a captured next step as still active.
   management LAN repair waits before running; wait at least 90-120 seconds
   before pulling the drive for diagnostics.
 
-## RPi4 Ethernet Management
+## Historical RPi4 Ethernet Management Experiment
+
+This section records an earlier direct-Ethernet experiment and is not the
+current provisioning policy.
 
 - The initial failure mode was:
   - SSH to `10.41.254.1` timed out.
@@ -135,7 +138,7 @@ repo code before treating a captured next step as still active.
   - `br-lan` had no interfaces attached.
   - `eth0` was configured as `wan`.
 
-- The working state is:
+- That experiment's working state was:
 
   ```text
   network.@device[0].name='br-lan'
@@ -153,20 +156,19 @@ repo code before treating a captured next step as still active.
   br-lan inet 10.41.254.1/16
   ```
 
-- The current fix is intentionally defensive:
-  - first-boot provisioning tries to keep `eth0` on `br-lan`
-  - a late boot repair service runs after startup and enforces the same state
-  - the repair removes stale `eth0` or `br-lan` `wan` / `wan6`, commits
-    network config, brings `lan` up, and calls `brctl addif br-lan eth0`
-  - gate nodes with `gateway.uplink_interface: eth0` keep that interface for
-    wired management; use Wi-Fi or a separate interface for WAN routing
+- The experimental fix defensively kept `eth0` on `br-lan`, including a late
+  boot repair after OpenMANET startup.
 
 - This was necessary because OpenMANET startup can leave `eth0` as `wan`, which
   makes direct Ethernet management unreachable even though Dropbear is running.
+- Current EasyMANET policy uses `br-ahwlan` as the mesh-side bridge. On a gate,
+  `gateway.uplink_interface: eth0` runs WAN DHCP and keeps `eth0` out of that
+  bridge. On a point, Ethernet remains mesh-side access on `br-ahwlan`.
 
 ## SSH and Login
 
-- Use the `root` user:
+- In the historical direct-Ethernet experiment above, the login used the
+  `root` user:
 
   ```sh
   ssh root@10.41.254.1
@@ -200,7 +202,9 @@ repo code before treating a captured next step as still active.
 - The local AP path may be unreliable on this Pi/HAT combo; do not use AP
   visibility as the only boot success signal.
 
-## Two-Node Mesh Test
+## Historical Two-Node Mesh Test
+
+This procedure used the superseded direct-Ethernet gate experiment above.
 
 - `examples/fleet.yml` already defines multiple nodes on the same mesh:
   - `manet01`: `10.41.1.1`, role `gate`
@@ -226,7 +230,11 @@ repo code before treating a captured next step as still active.
 - `manet02` is a point node and may not expose the same Ethernet management
   path unless the manifest explicitly configures it that way.
 
-## Troubleshooting Order
+## Historical Troubleshooting Order
+
+These steps also describe that superseded experiment. For current images,
+manage an Ethernet-uplink gate through the mesh, its local AP, or a point node;
+inspect `br-ahwlan` rather than expecting gate `eth0` on `br-lan`.
 
 When a flashed device does not respond:
 

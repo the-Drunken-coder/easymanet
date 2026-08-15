@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ nodes:
     ip: 10.41.1.1
 
     local_ap:
+      enabled: false
       ssid: gate01-local
 
     gateway:
@@ -63,6 +65,14 @@ nodes:
       uplink_interface: wifi
       wifi:
         enabled: true
+
+  point01:
+    role: point
+    hostname: point01
+    ip: 10.41.2.1
+
+    local_ap:
+      ssid: point01-local
 """
     )
 
@@ -143,7 +153,8 @@ def test_desktop_validate_payload_returns_nodes():
     assert "point01" in payload["nodes"]
     assert payload["node_roles"]["gate01"] == "gate"
     assert payload["node_roles"]["point01"] == "point"
-    assert payload["node_access"]["gate01"]["local_ap_ssid"] == "gate01-local"
+    assert payload["node_access"]["gate01"]["local_ap_enabled"] is False
+    assert payload["node_access"]["gate01"]["local_ap_ssid"] == ""
     assert payload["node_access"]["gate01"]["management_ip"] == "10.41.1.1"
     assert payload["node_access"]["gate01"]["mesh_ip"] == "10.41.1.1"
     assert payload["node_access"]["gate01"]["ethernet_mesh_access"] is True
@@ -189,8 +200,8 @@ nodes:
     assert access["gate01"]["ethernet_mesh_access"] is False
 
 
-def test_node_access_normalizes_wifi_uplink_gate_booleans(tmp_path):
-    config = tmp_path / "string-bool-wifi-gate.yml"
+def test_node_access_uses_canonical_wifi_uplink_gate_booleans(tmp_path):
+    config = tmp_path / "wifi-gate.yml"
     config.write_text(
         """version: 1
 
@@ -204,13 +215,13 @@ mesh:
 defaults:
   target: rpi4-mm6108-spi
   local_ap:
-    enabled: true
+    enabled: false
     password: local-ap-password
   gateway:
-    enabled: "true"
+    enabled: true
     uplink_interface: wifi
     wifi:
-      enabled: "true"
+      enabled: true
       ssid: uplink
       password: uplink-password
 
@@ -230,8 +241,8 @@ nodes:
     assert access["gate01"]["wifi_uplink_gate"] is True
 
 
-def test_node_access_matches_disabled_gate_flashed_eth0_wan_behavior(tmp_path):
-    config = tmp_path / "disabled-gateway.yml"
+def test_node_access_derives_gate_eth0_wan_behavior_from_role(tmp_path):
+    config = tmp_path / "gate.yml"
     config.write_text(
         """version: 1
 
@@ -256,7 +267,6 @@ nodes:
     local_ap:
       ssid: gate01-local
     gateway:
-      enabled: false
       uplink_interface: eth0
 """
     )
@@ -1387,6 +1397,110 @@ def test_desktop_server_bool_payload_parses_false_strings():
     assert server._bool_payload("No") is False
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.9"])
+def test_desktop_server_accepts_loopback_hosts(host):
+    assert server._loopback_host(host) == host
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::", "::1", "localhost"])
+def test_desktop_server_rejects_non_loopback_hosts(host):
+    with pytest.raises(server.typer.BadParameter, match="loopback"):
+        server._loopback_host(host)
+
+
+def test_desktop_server_limits_and_structures_invalid_request_bodies():
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": str(server.MAX_REQUEST_BODY_BYTES + 1)}
+    handler.rfile = io.BytesIO()
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [
+        (
+            {"ok": False, "errors": ["Request body exceeds the 1 MiB limit."]},
+            413,
+        )
+    ]
+
+
+def test_desktop_server_rejects_invalid_json_without_detail_leakage():
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": "1"}
+    handler.rfile = io.BytesIO(b"{")
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [({"ok": False, "errors": ["Request body must be valid JSON."]}, 400)]
+
+
+@pytest.mark.parametrize("length", ["not-a-number", "-1"])
+def test_desktop_server_rejects_invalid_content_length(length):
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": length}
+    handler.rfile = io.BytesIO()
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [
+        ({"ok": False, "errors": ["Content-Length must be a non-negative integer."]}, 400)
+    ]
+
+
+def test_desktop_server_hides_and_logs_unexpected_error(monkeypatch, capsys):
+    monkeypatch.setattr(
+        server,
+        "validate_payload",
+        lambda _payload: (_ for _ in ()).throw(RuntimeError("private detail")),
+    )
+    handler = object.__new__(server._DesktopHandler)
+    handler.path = "/api/validate"
+    handler.headers = {"Content-Length": "2"}
+    handler.rfile = io.BytesIO(b"{}")
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    handler.do_POST()
+
+    assert responses == [({"ok": False, "errors": ["Unexpected request error."]}, 500)]
+    assert "private detail" in capsys.readouterr().err
+
+
+def test_desktop_server_support_bundle_uses_only_default_diagnostics_output(monkeypatch):
+    captured_kwargs = {}
+
+    class FakeSupportBundleResult:
+        def to_dict(self):
+            return {"ok": True, "path": "/workspace/Diagnostics/support.zip"}
+
+    def fake_create_support_bundle(**kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeSupportBundleResult()
+
+    monkeypatch.setattr(server, "create_support_bundle", fake_create_support_bundle)
+
+    payload = server._fallback_support_bundle_payload(
+        {"config": "field", "node": "point01", "include_disks": "true"}
+    )
+
+    assert payload["ok"] is True
+    assert captured_kwargs == {
+        "config": "field",
+        "node": "point01",
+        "include_disks": True,
+    }
+    with pytest.raises(ValueError, match="local Diagnostics folder"):
+        server._fallback_support_bundle_payload({"output": "/tmp/support.zip"})
+
+
 def test_desktop_bridge_support_bundle_reports_errors(monkeypatch, capsys):
     def fail_create_support_bundle(**_kwargs):
         raise ValueError("support export failed")
@@ -1652,18 +1766,28 @@ def test_desktop_bridge_prepare_flash_payload_redacts_provision_secrets(tmp_path
         lambda **_kwargs: {},
     )
 
-    payload = bridge.prepare_flash_payload(
+    gate_payload = bridge.prepare_flash_payload(
         config=str(config),
         node="gate01",
         device="/dev/disk4",
         base_image=str(image),
     )
+    point_payload = bridge.prepare_flash_payload(
+        config=str(config),
+        node="point01",
+        device="/dev/disk4",
+        base_image=str(image),
+    )
 
-    encoded = json.dumps(payload)
-    assert payload["provision"]["mesh"]["password"] == "<redacted>"
-    assert payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
-    assert payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
-    assert payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
+    encoded = json.dumps([gate_payload, point_payload])
+    assert gate_payload["provision"]["mesh"]["password"] == "<redacted>"
+    assert gate_payload["provision"]["node"]["local_ap"]["enabled"] is False
+    assert gate_payload["provision"]["node"]["gateway"]["wifi"]["password"] == "<redacted>"
+    assert gate_payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
+    assert point_payload["provision"]["mesh"]["password"] == "<redacted>"
+    assert point_payload["provision"]["node"]["local_ap"]["password"] == "<redacted>"
+    assert "wifi" not in point_payload["provision"]["node"]["gateway"]
+    assert point_payload["provision"]["management"]["ssh_authorized_keys"] == ["<redacted>"]
     assert "<redacted>" in encoded
     for raw_value in raw_values.values():
         assert raw_value not in encoded
@@ -2004,7 +2128,8 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "updateCopyFlashLogVisibility" in text
     assert "flashPanel.hidden = true" in text
     assert "safeTone" in render_js.read_text()
-    assert "meshRadioCard" in render_js.read_text()
+    assert "meshNodeRow" in render_js.read_text()
+    assert "meshLinkRow" in render_js.read_text()
     assert "meshTopologyView" in render_js.read_text()
     assert "meshDiscoveryMarkup" in render_js.read_text()
     assert "untrusted official" in render_js.read_text()
@@ -2015,7 +2140,7 @@ def test_desktop_static_supports_electron_and_http_modes():
     assert "mesh-scanning" in styles.read_text()
     assert "mesh-grid" in styles.read_text()
     assert "topology-view" in styles.read_text()
-    assert "topology-link" in styles.read_text()
+    assert "data-table" in styles.read_text()
     assert "@media print" in styles.read_text()
 
 
@@ -2119,7 +2244,8 @@ def test_electron_shell_files_exist():
     assert "fullStdout" in electron_text
     assert "isDestroyed" in electron_text
     assert "runFlashWithAdministratorPrivileges" in electron_text
-    assert '"sudo"' in electron_text
+    assert '"/usr/bin/sudo"' in electron_text
+    assert '"/usr/bin/env"' in electron_text
     assert '"-S"' in electron_text
     assert "stageElevatedFlashInputs" in electron_text
     assert "fs.chmodSync(configPath, 0o600)" in electron_text
@@ -2131,11 +2257,14 @@ def test_electron_shell_files_exist():
     assert '"ensure-image"' not in bridge_text
     assert "ensureCachedImageForElevatedFlash" not in electron_text
     assert '"ensure-image"' not in electron_text
-    assert "cleanupElevatedStage(options.stage);\n      resolve({ ok: false" in electron_text
-    assert "const effectiveTimeoutMs = timeoutMs + 60000" in electron_text
+    assert "runTrackedProcess" in electron_text
+    assert "finalizeElevatedStage(options.stage, payload)" in electron_text
+    assert 'cleanupState))' in electron_text
+    assert '"cleanup-pending.json"' in electron_text
+    assert "const authenticationGraceMs = options.authenticationGraceMs ?? 60000" in electron_text
     assert "after ${effectiveTimeoutMs / 1000}s" in electron_text
     assert "EasyMANET Flash Helper.app" not in electron_text
-    assert 'spawn(sudo.command, sudo.args' in electron_text
+    assert "command: sudo.command" in electron_text
     assert "Mac administrator password is required for flashing" in electron_text
     assert "with administrator privileges" not in electron_text
     assert 'spawn("osascript"' not in electron_text
@@ -2160,6 +2289,60 @@ def test_electron_shell_files_exist():
     build_text = (electron / "scripts" / "build-bridge.py").read_text()
     assert '"easymanet_cli"' not in build_text
     assert 'ROOT / "apps" / "cli" / "src"' not in build_text
+
+
+def test_elevated_flash_staging_failure_removes_its_root():
+    root = Path(__file__).resolve().parents[1]
+    elevated_flash = root / "apps" / "desktop" / "electron" / "elevated-flash.js"
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("node is required for elevated flash staging test")
+
+    script = """
+const assert = require("node:assert/strict");
+const Module = require("node:module");
+const fs = require("node:fs");
+const originalLoad = Module._load;
+Module._load = function(request, parent, isMain) {
+  if (request === "electron") {
+    return { app: { isPackaged: false, getPath: () => "/tmp" } };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
+const originalMkdtempSync = fs.mkdtempSync;
+const originalCopyFileSync = fs.copyFileSync;
+let stageRoot = "";
+fs.mkdtempSync = (...args) => {
+  stageRoot = originalMkdtempSync(...args);
+  return stageRoot;
+};
+fs.copyFileSync = () => {
+  throw new Error("intentional staging copy failure");
+};
+try {
+  const { stageElevatedFlashInputs } = require(process.argv[1]);
+  assert.throws(
+    () => stageElevatedFlashInputs({ config: "/tmp/fleet.yml" }, {}),
+    /intentional staging copy failure/
+  );
+  assert.notEqual(stageRoot, "");
+  assert.equal(fs.existsSync(stageRoot), false);
+} finally {
+  fs.mkdtempSync = originalMkdtempSync;
+  fs.copyFileSync = originalCopyFileSync;
+  if (stageRoot && fs.existsSync(stageRoot)) {
+    fs.rmSync(stageRoot, { recursive: true, force: true });
+  }
+}
+"""
+
+    result = subprocess.run(
+        [node_bin, "-e", script, str(elevated_flash)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_electron_check_formats_empty_bridge_failure(tmp_path):

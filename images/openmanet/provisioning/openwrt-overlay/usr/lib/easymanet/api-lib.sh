@@ -222,9 +222,28 @@ interfaces_json_body() {
         "$(json_escape "$mesh_mac")"
 }
 
+attestation_json_body() {
+    provisioned_flag="${EASYMANET_PROVISIONED_FLAG:-/etc/easymanet/provisioned}"
+    provisioned_value() {
+        key="$1"
+        sed -n "s/^${key}: //p" "$provisioned_flag" 2>/dev/null | head -n 1
+    }
+    provisioned_at="$(provisioned_value provisioned_at)"
+    boot_id_file="${EASYMANET_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
+    boot_id="$(cat "$boot_id_file" 2>/dev/null | head -n 1 || true)"
+    printf '{"hil_run_nonce":%s,"image_sha256":%s,"fleet_config_sha256":%s,"source_git_sha":%s,"hil_started_at":%s,"provisioned_at":%s,"boot_id":%s}' \
+        "$(json_string "$(provisioned_value hil_run_nonce)")" \
+        "$(json_string "$(provisioned_value image_sha256)")" \
+        "$(json_string "$(provisioned_value fleet_config_sha256)")" \
+        "$(json_string "$(provisioned_value source_git_sha)")" \
+        "$(json_string "$(provisioned_value hil_started_at)")" \
+        "$(json_string "$provisioned_at")" \
+        "$(json_string "$boot_id")"
+}
+
 identity_json_body() {
     cat <<EOF
-{"ok":true,"generated_at":"$(generated_at)","node":$(node_json_body),"interfaces":$(interfaces_json_body),"api":{"version":1,"port":$API_PORT}}
+{"ok":true,"generated_at":"$(generated_at)","node":$(node_json_body),"interfaces":$(interfaces_json_body),"attestation":$(attestation_json_body),"api":{"version":1,"port":$API_PORT}}
 EOF
 }
 
@@ -554,7 +573,8 @@ topology_live_json_body() {
             neighbors="$(neighbors_json_body)"
         elif [ -n "$peer_ip" ]; then
             if [ "$peer_probes" -ge "$MAX_TOPOLOGY_PEER_PROBES" ]; then
-                status="offline"
+                # This peer was not probed, so it must not be reported missing.
+                status="unknown"
                 echo "$peer_name skipped after topology probe limit ($MAX_TOPOLOGY_PEER_PROBES)" >> "$warnings_file"
             else
                 peer_probes=$((peer_probes + 1))

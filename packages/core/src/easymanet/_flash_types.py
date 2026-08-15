@@ -44,6 +44,7 @@ class FlashOptions:
     enable_wan_api: bool = False
     disable_wan_api: bool = False
     show_secrets: bool = False
+    attestation: Optional[dict[str, str]] = None
 
 
 @dataclass(frozen=True)

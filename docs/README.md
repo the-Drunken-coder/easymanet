@@ -20,7 +20,7 @@ blockers that another agent or developer may need to pick up.
 | [`docs/openmanet-config-investigation.md`](openmanet-config-investigation.md) | Notes on OpenMANET wizard behavior and config files. | "What does OpenMANET expect on the device?" |
 | [`docs/lessons-learned.md`](lessons-learned.md) | Recurring hardware, build, and debugging gotchas from real node work. | "What should a future session know before touching this?" |
 | [`docs/design-decisions/`](design-decisions/) | Durable architectural and implementation choices. | "What did we decide, and why?" |
-| [`docs/problems/`](problems/) | Short-lived agent-to-agent notes on active blockers. | "What is broken right now on this branch?" |
+| [`docs/problems/`](problems/) | Short-lived notes on active blockers, with resolved findings under `archive/`. | "What is broken right now on this branch?" |
 
 Start templates:
 [`design-decisions/_EXAMPLE_DESIGN_DECISION_.md`](design-decisions/_EXAMPLE_DESIGN_DECISION_.md),
@@ -30,6 +30,8 @@ Start templates:
 
 - Log branch-specific blockers in `docs/problems/` when the next session needs
   concrete context to continue.
+- Move resolved findings to `docs/problems/archive/`; archival means the source
+  fix landed, not that physical HIL acceptance was performed.
 - Promote policy, architecture, or hardware-behavior choices to
   `docs/design-decisions/` once the problem turns into a durable decision.
 - Move recurring operational gotchas to `docs/lessons-learned.md` after the

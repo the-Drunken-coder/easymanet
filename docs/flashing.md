@@ -11,6 +11,9 @@ FAT boot partition at `/easymanet/provision.json`.
 - `.img` — raw disk image
 - `.img.gz` — gzip-compressed raw disk image
 
+Linux flashing requires kernel 5.14 or newer so EasyMANET can bind safety
+checks to the kernel's stable block-device sequence number.
+
 ## Build the Base Image
 
 ```bash
@@ -57,14 +60,20 @@ easymanet flash \
 Steps:
 1. Validate config.
 2. Render `provision.json` for the selected node.
-3. Enforce disk safety checks (or require `--force`).
-4. Unmount all partitions of the target device.
-5. Stream (decompress if `.gz`) the image to the raw device via `dd`.
-6. Wipe stale overlay data on partition 2 (when layout is detected; see
+3. Open the selected image once, verify its expected SHA-256 when supplied, and
+   validate every gzip member with the same decompression semantics used to write.
+4. Enforce disk safety checks (or require `--force`) and retain the checked
+   device-instance identity.
+5. Unmount all partitions of the target device.
+6. Revalidate the same device instance, open it once, and stream (decompress if
+   `.gz`) the already-verified image handle through that bound device handle.
+7. Wipe stale overlay data on partition 2 (when layout is detected; see
    [Security](#security) and [Stale overlay wipe](#stale-overlay-wipe)).
-7. Mount the FAT boot partition.
-8. Write `/easymanet/provision.json`.
-9. Unmount and eject.
+8. Revalidate the same device instance and mount the FAT boot partition.
+9. Atomically write and sync `/easymanet/provision.json` and any boot-command
+   update before replacing the previous file.
+10. Revalidate the device again, then unmount and eject. An identity or owned
+    boot-volume cleanup failure makes the flash fail.
 
 ### Fleet roster changes
 
@@ -95,6 +104,10 @@ easymanet flash --config fleet.yml --node manet02 --device /dev/disk4 \
 Local `--base-image` files are allowed without a checksum, but EasyMANET
 prints a warning. Pass `--image-sha256 <sha256>` to verify a local image
 before flashing.
+
+Official EasyMANET image downloads also require the GitHub CLI. Install `gh`
+and authenticate it before flashing so EasyMANET can run `gh attestation
+verify` against the pinned image repository and signer workflow.
 
 ### SSH at flash time
 
@@ -143,11 +156,15 @@ Wi-Fi.
 - `--yes` is required. Use `--dry-run` to preview.
 - `--force` overrides all blocking disk warnings (system disk, large
   fixed disk, device not in the default list).
+- `--force` does not override a device-instance change. If the selected path is
+  replaced or reused anywhere in the flash, injection, or finish workflow,
+  EasyMANET refuses to continue.
 
 ### Post-flash
 
-After successful flash and boot-payload staging, the drive is ejected. Remove it
-and insert into the Raspberry Pi.
+After successful flash and boot-payload staging, the drive is ejected. With
+`--no-eject`, EasyMANET still unmounts the whole device and reports success only
+after that unmount succeeds. Remove it and insert it into the Raspberry Pi.
 
 ### Ethernet access by role
 
@@ -186,6 +203,8 @@ Same command as macOS. Streams the image with `gzip | dd` or `dd`.
   drive before retrying.
 - `--yes` is required.
 - `--force` overrides all blocking warnings.
+- `--force` never bypasses device-instance revalidation immediately before the
+  bound write.
 
 ### Permissions
 
@@ -218,7 +237,7 @@ After the base image is written, EasyMANET zeros partition 2 (the
 OpenWrt rootfs/overlay region) so an old `provisioned` flag and f2fs
 overlay from a previous flash cannot survive. The wipe uses the partition
 layout from `diskutil` or `lsblk`, seeks to partition 2, and zeros up to
-the partition size (capped at 4608 MiB). See step 6 in the flash flow
+the partition size (capped at 4608 MiB). See step 7 in the flash flow
 above.
 
 ## Security
@@ -230,6 +249,10 @@ while you flash. Anyone with physical access to the card can read that
 file until successful first boot. After provisioning, a copy lives under
 `/etc/easymanet/provision.json` with mode `0600`, and `provision.sh`
 removes the boot-partition copy on success.
+
+Provisioning success means the required activation commands accepted and the
+provisioned marker was written. It does not prove radio association, WAN
+reachability, or physical mesh connectivity; those require attributed HIL.
 
 Treat flashed SD cards and USB drives as sensitive until the node has
 completed first-boot provisioning. Re-flash or securely wipe media when
@@ -247,10 +270,11 @@ decommissioning nodes.
 | `gzip` reports `trailing garbage ignored` for an OpenWrt/OpenMANET sysupgrade image | This is expected. OpenWrt appends sysupgrade metadata after the gzip payload. EasyMANET validates the gzip payload but allows the metadata trailer. |
 | EasyMANET payload is present on the boot partition but the node still launches the normal wizard | The base image does not yet include the EasyMANET first-boot hooks. Rebuild the firmware image with `easymanet image build`, or copy `images/openmanet/provisioning/openwrt-overlay/` into the OpenMANET `files/` tree before building manually. |
 
-EasyMANET validates `.img.gz` payloads before flashing. A corrupt cached
-download is skipped during automatic image resolution and deleted before
-re-download when `--download` is used. OpenWrt/OpenMANET sysupgrade
-metadata appended after the gzip payload is not treated as corruption.
+EasyMANET validates every `.img.gz` member before flashing and writes from the
+same opened artifact it verified. A corrupt cached download is skipped during
+automatic image resolution and deleted before re-download when `--download` is
+used. OpenWrt/OpenMANET sysupgrade metadata appended after the complete gzip
+payload is allowed only when gzip identifies it as the expected trailing data.
 
 EasyMANET no longer attempts to edit the root filesystem offline. That
 approach is invalid for standard OpenWrt/OpenMANET SquashFS images.

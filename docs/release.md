@@ -11,9 +11,8 @@ tooling as one coordinated product.
   `apps/desktop/electron/package.json` must stay on the same release version.
 - The old Python module paths are intentionally not supported:
   `easymanet.cli`, `easymanet.cli_image`, `easymanet.build`,
-  `easymanet.cli_flash`, and `easymanet.cli_common` must remain removed.
-- Patch releases fix packaging, docs, desktop shell, and provisioning bugs
-  without changing accepted fleet config shape.
+  `easymanet.cli_flash`, `easymanet.cli_common`, and `easymanet_image.cli`
+  must remain removed.
 - Minor releases can add new hardware targets, fleet config fields, desktop
   workflows, or image-discovery behavior.
 
@@ -64,19 +63,43 @@ not a per-PR requirement:
 ```
 
 To reuse already-flashed nodes, omit `--gate-device` and `--point-device`; pass
-`--gate-ip` or `--point-ip` only when the fleet IPs are not the active probe
-addresses. Flashing never auto-selects disks and will not write media unless a
-device, `--allow-flash`, and `--yes` are all present. The runner waits 90-120
-seconds after the operator confirms that flashed media is inserted and the nodes
-are booting, probes the node API, checks SSH where enabled, verifies mesh
-visibility and support codes, checks boot-report availability, optionally runs
-iperf3 throughput smoke, and writes both JSON evidence and a redacted support
-bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt` only for
-lab fixtures where flashed media is automatically booted before probing.
+the exact local `--base-image` and its `--image-sha256` as well. Any run that
+reuses even one node verifies that local artifact before flashing or probing and
+fails closed for missing or mismatched identity. A mixed flash/reuse run also
+requires the flashed and reused artifact digests to match. Reuse currently
+records checksum-only provenance for the local artifact: its canonical path,
+SHA-256, and `local_digest_verified: true`. It records
+`node_image_identity: not-attested`, so it cannot establish what is running on
+either node. Reuse-only and mixed flash/reuse runs are physical observation
+evidence, never product physical acceptance.
 
-Flashed media is sensitive until first boot completes: `provision.json` is
-written in cleartext on the boot volume until provisioning succeeds, and the
-overlay copy at `/etc/easymanet/provision.json` remains mode `0600`.
+Pass `--gate-ip` or `--point-ip` only when the fleet IPs are not the active
+probe addresses. Flashing never auto-selects disks and will not write media
+unless a device, `--allow-flash`, and `--yes` are all present. The runner waits
+90-120 seconds after the operator confirms that flashed media is inserted and
+the nodes are booting, probes the node API, checks SSH where enabled, verifies
+mesh visibility and support codes, checks boot-report availability, optionally
+runs iperf3 throughput smoke, and writes both JSON evidence and a redacted
+support bundle to the shared `Diagnostics/` workspace. Use `--skip-boot-prompt`
+only for lab fixtures where flashed media is automatically booted before probing.
+
+HIL schema v2 records the exact runner/source Git SHA, clean-worktree status,
+fleet-config SHA-256, and image identity and trust metadata. A dry run is
+synthetic evidence only: it is neither calibration nor physical acceptance.
+Product physical acceptance requires both named nodes to be flashed with the
+same verified artifact in that run, a clean full source commit, and a stable
+fleet-config digest. Each running node must also return the one-time HIL nonce,
+image digest, fleet-config digest, source commit, provisioning timestamp, and
+current boot ID injected by that run. Missing or stale runtime attestation
+keeps the result at physical observation evidence. It does not establish
+simulation parity, calibration results, fleet-wide acceptance, or a general
+radio-range claim.
+
+Flashed media is sensitive until first-boot provisioning accepts its required
+activation commands: `provision.json` is written in cleartext on the boot
+volume until then, and the overlay copy at `/etc/easymanet/provision.json`
+remains mode `0600`. The provisioned marker does not prove radio association,
+WAN reachability, or physical mesh connectivity.
 
 Point nodes normally have SSH disabled. For a release HIL run that keeps point
 SSH disabled, pass `--point-boot-report /path/to/boot` or a
@@ -89,7 +112,7 @@ rm -rf dist/release
 mkdir -p dist/release/wheels
 
 .codex-venv/bin/python -m pip wheel \
-  --no-deps --no-build-isolation \
+  --no-deps \
   --wheel-dir dist/release/wheels .
 
 npm --prefix apps/desktop/electron ci
@@ -124,6 +147,26 @@ Official EasyMANET image auto-downloads require a verified schema-v2
 and Sigstore/cosign signature bundle. Custom local images and custom URLs are
 still allowed with an explicit SHA-256, but they are treated as
 checksum-only/user-supplied rather than official.
+
+Operators downloading official images must have an authenticated GitHub CLI
+available. EasyMANET runs `gh attestation verify` and pins both the public image
+repository and release-workflow identity before marking the cached image as
+official.
+
+Official manifest acceptance is fail closed. The manifest must explicitly use
+schema version 2 and status `current`; its release tag and `stable` or
+`candidate` channel must match the GitHub release. Missing, unknown, unsafe,
+superseded, and revoked dispositions are rejected.
+
+The downloader fetches the fixed
+`easymanet-image-release.json.sigstore.json` asset and verifies its signature
+over the exact manifest bytes before parsing any manifest metadata. The
+certificate must come from GitHub Actions for
+`the-Drunken-coder/easymanet-images/.github/workflows/image-release.yml` on
+`main`, running on a GitHub-hosted runner from a `workflow_dispatch` event.
+After that succeeds, the image artifact's separate GitHub provenance
+attestation must match the same repository and signer workflow. Neither check
+can override a rejected manifest disposition.
 
 The image release workflow generates release notes with OpenCode Go when the
 public image repository has an `OPENCODE_GO_API_KEY` secret. `OPENCODE_API_KEY`

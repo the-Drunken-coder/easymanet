@@ -3,6 +3,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { repoRoot } = require("./constants");
 
+const privilegedPath = "/usr/bin:/bin:/usr/sbin:/sbin";
+const isolatedStageBridge = [
+  "import runpy, sys",
+  "source_root = sys.argv.pop(1)",
+  "sys.path.insert(0, source_root)",
+  "runpy.run_module('easymanet_desktop.bridge', run_name='__main__')",
+].join("; ");
+
 function elevatedBridgeCommand(args, stage) {
   const bundledBridge = packagedBridgeBinary();
   if (bundledBridge) {
@@ -16,30 +24,37 @@ function elevatedBridgeCommand(args, stage) {
   if (stage) {
     return {
       command: elevatedPythonPath(),
-      args: ["-m", "easymanet_desktop.bridge", ...args],
+      args: ["-I", "-c", isolatedStageBridge, stage.sourceRoots[0], ...args],
       cwd: stage.root,
       env: {
-        PYTHONPATH: stage.sourceRoots.join(path.delimiter),
         EASYMANET_WORKSPACE: stage.workspaceDir,
       },
     };
   }
-  return bridgeCommand(args);
+  return {
+    command: elevatedPythonPath(),
+    args: ["-I", "-m", "easymanet_desktop.bridge", ...args],
+    cwd: elevatedTempRoot(),
+    env: {},
+  };
 }
 
 function sudoBridgeCommand(bridge) {
+  if (!path.isAbsolute(bridge.command)) {
+    throw new Error(`Elevated bridge command must be an absolute path: ${bridge.command}`);
+  }
   const envParts = Object.entries(elevatedBridgeEnv(bridge.env || {}))
     .filter(([, value]) => value)
     .map(([key, value]) => `${key}=${value}`);
   return {
-    command: "sudo",
+    command: "/usr/bin/sudo",
     args: [
       "-S",
       "-p",
       "",
       "--",
-    "env",
-    ...envParts,
+      "/usr/bin/env",
+      ...envParts,
       bridge.command,
       ...bridge.args,
     ],
@@ -47,70 +62,45 @@ function sudoBridgeCommand(bridge) {
 }
 
 function elevatedBridgeEnv(extraEnv = {}) {
-  const env = bridgeEnv();
   const result = {
     HOME: app.getPath("home"),
-    PATH: env.PATH || process.env.PATH || "/usr/bin:/bin:/usr/sbin:/sbin",
-    EASYMANET_SKIP_UPDATE_CHECK: env.EASYMANET_SKIP_UPDATE_CHECK || "1",
+    PATH: privilegedPath,
+    EASYMANET_SKIP_UPDATE_CHECK: "1",
     PYTHONDONTWRITEBYTECODE: "1",
-    ...extraEnv,
+    PYTHONNOUSERSITE: "1",
   };
-  for (const key of [
-    "EASYMANET_WORKSPACE",
-    "EASYMANET_PYTHON",
-    "VIRTUAL_ENV",
-    "EASYMANET_BRIDGE_BIN",
-    "EASYMANET_ELECTRON_ALLOW_BRIDGE_OVERRIDE",
-    "EASYMANET_ELECTRON_NO_SOURCE_PATHS",
-  ]) {
-    if (env[key] && !(key in result)) {
-      result[key] = env[key];
-    }
+  if (extraEnv.EASYMANET_WORKSPACE) {
+    result.EASYMANET_WORKSPACE = extraEnv.EASYMANET_WORKSPACE;
   }
   return result;
 }
 
 function elevatedPythonPath() {
-  const configured = configuredPythonPath();
-  if (configured && usablePythonCandidate(configured)) {
-    return configured;
-  }
+  const projectPython = venvPython(path.join(repoRoot, ".codex-venv"));
   for (const candidate of [
+    projectPython,
     "/opt/homebrew/opt/python@3.14/bin/python3.14",
     "/opt/homebrew/bin/python3.14",
     "/opt/homebrew/bin/python3",
     "/usr/local/bin/python3.14",
     "/usr/local/bin/python3",
+    "/usr/bin/python3",
   ]) {
-    if (fs.existsSync(candidate)) {
+    if (path.isAbsolute(candidate) && isExecutableFile(candidate)) {
       return candidate;
     }
   }
-  const current = pythonPath();
-  if (!isInsideDocuments(current)) {
-    return current;
-  }
-  return process.platform === "win32" ? "python" : "python3";
+  throw new Error("No fixed Python interpreter is available for elevated flashing");
 }
 
-function configuredPythonPath() {
-  if (process.env.EASYMANET_PYTHON) {
-    return process.env.EASYMANET_PYTHON;
+function isExecutableFile(candidate) {
+  try {
+    const stat = fs.statSync(candidate);
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return stat.isFile();
+  } catch (_error) {
+    return false;
   }
-  if (process.env.VIRTUAL_ENV) {
-    return venvPython(process.env.VIRTUAL_ENV);
-  }
-  return "";
-}
-
-function usablePythonCandidate(candidate) {
-  return path.isAbsolute(candidate) ? fs.existsSync(candidate) : true;
-}
-
-function isInsideDocuments(value) {
-  const documents = path.resolve(app.getPath("home"), "Documents");
-  const candidate = path.resolve(value);
-  return candidate === documents || candidate.startsWith(documents + path.sep);
 }
 
 function elevatedTempRoot() {

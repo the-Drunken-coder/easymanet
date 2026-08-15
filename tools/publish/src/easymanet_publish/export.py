@@ -3,23 +3,23 @@
 import json
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .surfaces import SURFACES, SurfaceSpec, project_version, render_surface_pyproject
+from .surfaces import (
+    SURFACES,
+    SurfaceSpec,
+    materialize_commit,
+    project_version,
+    render_surface_pyproject,
+    tracked_files,
+)
 
 EXPORT_RECORD = "easymanet-public-surfaces.json"
-EXPORT_IGNORE = shutil.ignore_patterns(
-    "__pycache__",
-    "*.pyc",
-    "*.egg-info",
-    ".pytest_cache",
-    "build",
-    "dist",
-    "node_modules",
-    "out",
-)
+
+
 def export_public_surfaces(
     output_dir: Path,
     *,
@@ -33,28 +33,39 @@ def export_public_surfaces(
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    record: dict[str, Any] = {
-        "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_ref": source_ref or _git_ref(repo_root),
-        "subrepos_configured": False,
-        "surfaces": {},
-    }
-
-    for surface in SURFACES.values():
-        surface_dir = output_dir / surface.local_name
-        if surface_dir.exists():
-            shutil.rmtree(surface_dir)
-        surface_dir.mkdir(parents=True)
-        copied = _copy_paths(repo_root, surface_dir, surface.source_paths)
-        copied.extend(_copy_templates(repo_root, surface_dir, surface))
-        copied.append(_write_surface_pyproject(repo_root, surface_dir, surface))
-        copied = sorted(set(copied))
-        _write_surface_readme(surface_dir, surface.key, copied)
-        record["surfaces"][surface.key] = {
-            "path": str(surface_dir),
-            "files": copied,
+    requested_ref = source_ref or _git_ref(repo_root)
+    if not requested_ref:
+        raise RuntimeError(
+            f"Could not resolve a Git commit in {repo_root}; pass --source-ref explicitly."
+        )
+    with tempfile.TemporaryDirectory(prefix="easymanet-export-source-") as temp_dir:
+        source_root, source_sha = materialize_commit(
+            repo_root,
+            requested_ref,
+            Path(temp_dir),
+        )
+        record: dict[str, Any] = {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "source_ref": source_sha,
+            "subrepos_configured": False,
+            "surfaces": {},
         }
+
+        for surface in SURFACES.values():
+            surface_dir = output_dir / surface.local_name
+            if surface_dir.exists():
+                shutil.rmtree(surface_dir)
+            surface_dir.mkdir(parents=True)
+            copied = _copy_paths(source_root, surface_dir, surface.source_paths, tracked=False)
+            copied.extend(_copy_templates(source_root, surface_dir, surface, tracked=False))
+            copied.append(_write_surface_pyproject(source_root, surface_dir, surface))
+            copied = sorted(set(copied))
+            _write_surface_readme(surface_dir, surface.key, copied)
+            record["surfaces"][surface.key] = {
+                "path": str(surface_dir),
+                "files": copied,
+            }
 
     record_path = output_dir / EXPORT_RECORD
     record_path.write_text(json.dumps(record, indent=2) + "\n")
@@ -62,36 +73,44 @@ def export_public_surfaces(
     return record
 
 
-def _copy_paths(repo_root: Path, surface_dir: Path, paths: Iterable[str]) -> list[str]:
+def _copy_paths(
+    repo_root: Path,
+    surface_dir: Path,
+    paths: Iterable[str],
+    *,
+    tracked: bool = True,
+) -> list[str]:
     copied: list[str] = []
-    missing: list[str] = []
     for rel in paths:
-        source = repo_root / rel
-        if not source.exists():
-            missing.append(rel)
-            continue
-        dest = surface_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, dest, ignore=EXPORT_IGNORE)
-            copied.extend(_relative_files(dest, surface_dir))
-        else:
+        source_paths = tracked_files(repo_root, rel) if tracked else _snapshot_files(repo_root, rel)
+        for tracked_path in source_paths:
+            source = repo_root / tracked_path
+            dest = surface_dir / tracked_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
-            copied.append(rel)
-    if missing:
-        missing_text = ", ".join(sorted(missing))
-        raise FileNotFoundError(f"Export source path(s) missing: {missing_text}")
+            copied.append(tracked_path)
     return sorted(set(copied))
 
 
-def _copy_templates(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) -> list[str]:
+def _copy_templates(
+    repo_root: Path,
+    surface_dir: Path,
+    surface: SurfaceSpec,
+    *,
+    tracked: bool = True,
+) -> list[str]:
     template_root = surface.template_dir(repo_root)
     if not template_root.exists():
         return []
     copied: list[str] = []
-    for source in template_root.rglob("*"):
-        if not source.is_file():
-            continue
+    template_path = template_root.relative_to(repo_root).as_posix()
+    source_paths = (
+        tracked_files(repo_root, template_path)
+        if tracked
+        else _snapshot_files(repo_root, template_path)
+    )
+    for tracked_path in source_paths:
+        source = repo_root / tracked_path
         rel = source.relative_to(template_root)
         dest = surface_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -100,18 +119,26 @@ def _copy_templates(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) ->
     return copied
 
 
+def _snapshot_files(repo_root: Path, rel_path: str) -> tuple[str, ...]:
+    source = repo_root / rel_path
+    if source.is_file():
+        return (rel_path,)
+    if not source.is_dir():
+        raise FileNotFoundError(f"Source path does not exist: {rel_path}")
+    files = tuple(
+        path.relative_to(repo_root).as_posix()
+        for path in sorted(source.rglob("*"))
+        if path.is_file()
+    )
+    if not files:
+        raise FileNotFoundError(f"Source path has no files: {rel_path}")
+    return files
+
+
 def _write_surface_pyproject(repo_root: Path, surface_dir: Path, surface: SurfaceSpec) -> str:
     version = project_version(repo_root / "pyproject.toml")
     (surface_dir / "pyproject.toml").write_text(render_surface_pyproject(surface, version))
     return "pyproject.toml"
-
-
-def _relative_files(path: Path, root: Path) -> list[str]:
-    return [
-        item.relative_to(root).as_posix()
-        for item in path.rglob("*")
-        if item.is_file()
-    ]
 
 
 def _write_surface_readme(surface_dir: Path, surface: str, copied: list[str]) -> None:

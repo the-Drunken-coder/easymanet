@@ -11,7 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from easymanet import download
-from easymanet.release_trust import OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS
+from easymanet.release_trust import (
+    OFFICIAL_IMAGE_REPO,
+    OFFICIAL_IMAGE_SIGNER_WORKFLOW,
+    OFFICIAL_TRUST_STATUS,
+    PENDING_TRUST_STATUS,
+)
 
 
 def _write_gzip(path, payload=b"image-bytes", corrupt=False, trailing=b""):
@@ -26,6 +31,16 @@ def _write_gzip(path, payload=b"image-bytes", corrupt=False, trailing=b""):
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _official_trust(expected_sha256: str) -> dict:
+    return {
+        "status": PENDING_TRUST_STATUS,
+        "source": "official",
+        "manifest_signature_verified": True,
+        "expected_repo": OFFICIAL_IMAGE_REPO,
+        "attestation_subject_digest": f"sha256:{expected_sha256}",
+    }
 
 
 @pytest.fixture
@@ -108,6 +123,48 @@ def test_get_cached_image_allows_openwrt_trailing_metadata(image_cache):
     }))
 
     assert download.get_cached_image("rpi4-mm6108-spi") == image
+
+
+def test_get_cached_image_rejects_corrupt_later_gzip_member(image_cache):
+    image = image_cache.cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+    corrupt_member = bytearray(gzip.compress(b"second"))
+    corrupt_member[-1] ^= 0xFF
+    image.write_bytes(gzip.compress(b"first") + corrupt_member)
+    image_cache.manifest.write_text(json.dumps({
+        "rpi4-mm6108-spi": {
+            "url": f"https://example.invalid/{image.name}",
+            "sha256": _sha256(image),
+        }
+    }))
+
+    assert download.get_cached_image("rpi4-mm6108-spi") is None
+
+
+def test_download_image_reuses_concatenated_gzip_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "images"
+    cache.mkdir()
+    image = cache / "openmanet-test-rpi4-mm6108-spi.img.gz"
+    image.write_bytes(gzip.compress(b"first") + gzip.compress(b"second"))
+    expected = _sha256(image)
+
+    monkeypatch.setattr(download, "cache_dir", lambda: cache)
+    monkeypatch.setattr(download, "version_file_path", lambda: tmp_path / "version.json")
+    monkeypatch.setattr(
+        download.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("valid cache should avoid image download")
+        ),
+    )
+
+    result = download.download_image(
+        "rpi4-mm6108-spi",
+        "test",
+        f"https://example.invalid/{image.name}",
+        expected,
+    )
+
+    assert result == image
 
 
 def test_get_cached_image_ignores_file_removed_during_sort(image_cache, monkeypatch):
@@ -285,19 +342,20 @@ def test_download_image_verifies_official_attestation_before_caching(tmp_path, m
         "images-v0.2.0",
         "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
         expected,
-        trust={
-            "status": PENDING_TRUST_STATUS,
-            "source": "official",
-            "expected_repo": "owner/repo",
-            "attestation_subject_digest": f"sha256:{expected}",
-        },
+        trust=_official_trust(expected),
     )
 
     assert path.exists()
     assert calls[0][0][:3] == ["gh", "attestation", "verify"]
     assert calls[0][0][3].startswith(str(path.parent / f".{path.name}."))
     assert calls[0][0][3].endswith(".part")
-    assert calls[0][0][-2:] == ["--repo", "owner/repo"]
+    assert calls[0][0][4:] == [
+        "--repo",
+        OFFICIAL_IMAGE_REPO,
+        "--signer-workflow",
+        OFFICIAL_IMAGE_SIGNER_WORKFLOW,
+        "--deny-self-hosted-runners",
+    ]
     version_data = json.loads((tmp_path / "version.json").read_text())
     assert version_data["rpi4-mm6108-spi"]["trust_status"] == OFFICIAL_TRUST_STATUS
 
@@ -326,17 +384,51 @@ def test_download_image_removes_partial_file_when_official_attestation_fails(tmp
             "images-v0.2.0",
             "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
             expected,
-            trust={
-                "status": PENDING_TRUST_STATUS,
-                "source": "official",
-                "expected_repo": "owner/repo",
-                "attestation_subject_digest": f"sha256:{expected}",
-            },
+            trust=_official_trust(expected),
         )
 
     cached = tmp_path / "images" / "openmanet-test-rpi4-mm6108-spi.img.gz"
     assert not cached.exists()
     assert not list((tmp_path / "images").glob("*.part"))
+
+
+@pytest.mark.parametrize("status", [OFFICIAL_TRUST_STATUS, "untrusted"])
+def test_artifact_attestation_cannot_override_manifest_trust_status(
+    tmp_path,
+    monkeypatch,
+    status,
+):
+    image = tmp_path / "image.img.gz"
+    _write_gzip(image)
+    trust = _official_trust(_sha256(image))
+    trust["status"] = status
+    monkeypatch.setattr(
+        download.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rejected manifest trust must not reach attestation")
+        ),
+    )
+
+    with pytest.raises(OSError, match="not verification-ready"):
+        download._verify_official_image_trust(image, trust)
+
+
+def test_artifact_attestation_requires_verified_manifest_signature(tmp_path, monkeypatch):
+    image = tmp_path / "image.img.gz"
+    _write_gzip(image)
+    trust = _official_trust(_sha256(image))
+    trust["manifest_signature_verified"] = False
+    monkeypatch.setattr(
+        download.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unsigned manifest must not reach attestation")
+        ),
+    )
+
+    with pytest.raises(OSError, match="manifest signature was not verified"):
+        download._verify_official_image_trust(image, trust)
 
 
 def test_download_image_records_metadata_when_reusing_existing_cache(tmp_path, monkeypatch):
@@ -394,16 +486,21 @@ def test_download_image_verifies_official_attestation_before_reusing_cache(tmp_p
         "test-cache",
         "https://example.invalid/openmanet-test-rpi4-mm6108-spi.img.gz",
         expected,
-        trust={
-            "status": PENDING_TRUST_STATUS,
-            "source": "official",
-            "expected_repo": "owner/repo",
-            "attestation_subject_digest": f"sha256:{expected}",
-        },
+        trust=_official_trust(expected),
     )
 
     assert path == image
-    assert calls[0][0] == ["gh", "attestation", "verify", str(image), "--repo", "owner/repo"]
+    assert calls[0][0] == [
+        "gh",
+        "attestation",
+        "verify",
+        str(image),
+        "--repo",
+        OFFICIAL_IMAGE_REPO,
+        "--signer-workflow",
+        OFFICIAL_IMAGE_SIGNER_WORKFLOW,
+        "--deny-self-hosted-runners",
+    ]
 
 
 def test_prune_verified_cache_treats_target_as_literal_glob(tmp_path, monkeypatch):

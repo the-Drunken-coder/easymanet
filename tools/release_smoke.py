@@ -11,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 import venv
-import warnings
 from pathlib import Path
 
 
@@ -21,6 +20,7 @@ REMOVED_IMPORTS = (
     "easymanet.build",
     "easymanet.cli_flash",
     "easymanet.cli_common",
+    "easymanet_image.cli",
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
 ELECTRON_SMOKE_TIMEOUT_SECONDS = 60
@@ -107,22 +107,12 @@ def run_smoke(repo_root: Path, temp_root: Path, args: argparse.Namespace) -> int
 
 
 def build_wheel(repo_root: Path, temp_root: Path) -> Path:
-    clean_build_metadata(repo_root)
     wheelhouse = temp_root / "wheelhouse"
     wheelhouse.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            "--no-deps",
-            "--no-build-isolation",
-            "--wheel-dir",
-            str(wheelhouse),
-            str(repo_root),
-        ]
-    )
+    with tempfile.TemporaryDirectory(prefix="build-source-", dir=temp_root) as source_tmp:
+        build_source = Path(source_tmp)
+        copy_tracked_source(repo_root, build_source)
+        run(build_wheel_command(sys.executable, wheelhouse, build_source))
     wheels = built_wheels(wheelhouse, repo_root)
     if len(wheels) != 1:
         pattern = wheel_glob_pattern(repo_root)
@@ -130,6 +120,45 @@ def build_wheel(repo_root: Path, temp_root: Path) -> Path:
             f"Expected one wheel matching {pattern} in {wheelhouse}, found {len(wheels)}"
         )
     return wheels[0]
+
+
+def copy_tracked_source(repo_root: Path, destination: Path) -> None:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tracked_files = [path for path in result.stdout.split("\0") if path]
+    if not tracked_files:
+        raise SystemExit(f"No tracked source files found in {repo_root}")
+
+    for tracked_file in tracked_files:
+        relative = Path(tracked_file)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise SystemExit(f"Git returned an unsafe tracked path: {tracked_file}")
+        source = repo_root / relative
+        if not source.is_file() or source.is_symlink():
+            raise SystemExit(f"Tracked source must be a regular file: {tracked_file}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def build_wheel_command(
+    python: str, wheelhouse: Path, repo_root: Path
+) -> list[str]:
+    return [
+        python,
+        "-m",
+        "pip",
+        "wheel",
+        "--no-deps",
+        "--wheel-dir",
+        str(wheelhouse),
+        str(repo_root),
+    ]
 
 
 def built_wheels(wheelhouse: Path, repo_root: Path) -> list[Path]:
@@ -148,23 +177,6 @@ def project_name(repo_root: Path) -> str:
     if not match:
         raise SystemExit(f"Could not find project name in {pyproject}")
     return match.group(1)
-
-
-def clean_build_metadata(repo_root: Path) -> None:
-    paths = [repo_root / "build", *repo_root.glob("*.egg-info")]
-    found = [path for path in paths if path.exists()]
-    if found:
-        found_text = ", ".join(str(path.relative_to(repo_root)) for path in found)
-        warnings.warn(
-            f"clean_build_metadata removing stale build metadata: {found_text}",
-            stacklevel=2,
-        )
-    for path in found:
-        try:
-            shutil.rmtree(path)
-        except OSError as exc:
-            warnings.warn(f"clean_build_metadata could not remove {path}: {exc}", stacklevel=2)
-            raise
 
 
 def create_venv(venv_dir: Path, *, system_site_packages: bool) -> None:

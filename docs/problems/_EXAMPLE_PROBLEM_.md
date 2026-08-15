@@ -17,7 +17,7 @@ two. Use this template to keep the format consistent:
 ## What belongs here
 
 - Problems hit while building, testing, flashing, or debugging — logged so the next agent session can pick up context quickly.
-- Resolved or abandoned problems can stay in place as reference; no status tracking needed.
+- Move resolved or abandoned notes to `docs/problems/archive/`.
 
 ### What does not belong here
 
@@ -57,8 +57,9 @@ two. Use this template to keep the format consistent:
 
 | Area | Paths |
 | --- | --- |
-| CLI / Python | `easymanet/` (`cli.py`, `validate.py`, `render.py`, `build.py`, `image.py`, `inject.py`, …) |
-| First-boot (host staging) | `firstboot/` |
+| Shared Python core | `packages/core/src/easymanet/` |
+| CLI / image / desktop Python | `apps/cli/src/easymanet_cli/`, `packages/image/src/easymanet_image/`, `apps/desktop/src/easymanet_desktop/` |
+| Host boot-payload staging | `packages/core/src/easymanet/inject.py` |
 | OpenWrt overlay | `images/openmanet/provisioning/openwrt-overlay/` (`etc/uci-defaults/`, `usr/lib/easymanet/`) |
 | Tests | `tests/` |
 | CI | `.github/workflows/` |

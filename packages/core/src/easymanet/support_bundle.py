@@ -61,6 +61,7 @@ def default_support_bundle_path() -> Path:
 def create_support_bundle(
     *,
     config: str = "",
+    config_display: str = "",
     node: str = "",
     boot_report: str = "",
     output: str = "",
@@ -90,7 +91,7 @@ def create_support_bundle(
                 "schema_version": 1,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "easymanet_version": __version__,
-                "config": config,
+                "config": config_display or config,
                 "node": node,
                 "redacted": True,
             },

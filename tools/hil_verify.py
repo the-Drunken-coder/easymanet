@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
+import secrets
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,26 +40,30 @@ from easymanet.diagnostics import (  # noqa: E402
     fetch_node_api,
 )
 from easymanet.flash import FlashOptions, run_flash_workflow  # noqa: E402
+from easymanet.download import normalize_sha256, verify_image_sha256  # noqa: E402
 from easymanet.manifest import Manifest, ManifestError, load_manifest  # noqa: E402
 from easymanet.provision import ResolvedNode, resolve_node_model  # noqa: E402
+from easymanet.release_trust import custom_trust, image_trust_payload  # noqa: E402
 from easymanet.support_bundle import create_support_bundle  # noqa: E402
 from easymanet.validate import validate, validate_ip  # noqa: E402
 from easymanet.workspace import diagnostics_dir, ensure_workspace, resolve_fleet_config  # noqa: E402
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_WAIT_SECONDS = 120
 MIN_WAIT_SECONDS = 90
 MAX_WAIT_SECONDS = 120
 DEFAULT_SSH_TIMEOUT_SECONDS = 8
 DEFAULT_IPERF_SECONDS = 8
 MAX_CAPTURE_CHARS = 4000
+MAX_NODE_CLOCK_SKEW = timedelta(minutes=5)
 
 
 CommandRunner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
 SleepFn = Callable[[int], None]
 NowFn = Callable[[], datetime]
 InputFn = Callable[[str], str]
+NonceFn = Callable[[], str]
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,7 @@ def run_hil(
     sleep_fn: SleepFn = time.sleep,
     input_fn: InputFn = input,
     now_fn: NowFn | None = None,
+    nonce_fn: NonceFn | None = None,
 ) -> dict[str, Any]:
     now = (now_fn or _utc_now)()
     ensure_workspace()
@@ -193,88 +202,478 @@ def run_hil(
     nodes: dict[str, Any] = {}
     topology: dict[str, Any] = {"ok": False, "skipped": True}
     throughput: dict[str, Any] = {"ok": None, "skipped": True}
+    provenance = _git_provenance()
+    image = _empty_image_evidence()
     config_path = resolve_fleet_config(args.config)
-
-    manifest = _load_manifest_for_result(config_path, checks, errors)
+    config_evidence = _empty_config_evidence(config_path)
     gate = None
     point = None
-    if manifest is not None:
-        gate = _node_spec(
-            manifest,
-            args.gate_node,
-            "gate",
-            args.gate_ip,
-            args.gate_device,
-            args.gate_ssh_enabled,
-            args.gate_boot_report,
+    reuse_image = _empty_image_evidence()
+    attestation: dict[str, str] = {}
+    expected_attestation: dict[str, str] = {}
+
+    with tempfile.TemporaryDirectory(prefix="easymanet-hil-config-") as temp_dir:
+        config_snapshot = Path(temp_dir) / "fleet.yml"
+        manifest, config_evidence = _load_manifest_for_result(
+            config_path,
+            config_snapshot,
             checks,
             errors,
         )
-        point = _node_spec(
-            manifest,
-            args.point_node,
-            "point",
-            args.point_ip,
-            args.point_device,
-            args.point_ssh_enabled,
-            args.point_boot_report,
-            checks,
-            errors,
-        )
+        if manifest is not None:
+            gate = _node_spec(
+                manifest,
+                args.gate_node,
+                "gate",
+                args.gate_ip,
+                args.gate_device,
+                args.gate_ssh_enabled,
+                args.gate_boot_report,
+                checks,
+                errors,
+            )
+            point = _node_spec(
+                manifest,
+                args.point_node,
+                "point",
+                args.point_ip,
+                args.point_device,
+                args.point_ssh_enabled,
+                args.point_boot_report,
+                checks,
+                errors,
+            )
+            if _has_device(args) and not args.dry_run:
+                attestation = _hil_attestation(
+                    nonce=(nonce_fn or _new_hil_nonce)(),
+                    started_at=now,
+                    provenance=provenance,
+                    config=config_evidence,
+                )
 
-    if gate is not None and point is not None:
-        for spec in (gate, point):
-            if spec.device:
-                result = _flash_node(args, spec)
-                flash_results[spec.name] = result.to_dict(include_events=True)
-                _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
-                if not result.ok:
-                    errors.extend(result.errors)
-            else:
-                flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
-                _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
+        if gate is not None and point is not None:
+            reuse_requested = any(not spec.device for spec in (gate, point))
+            if not args.dry_run and reuse_requested:
+                reuse_image = _validate_reuse_image(args, checks, errors)
+                image = reuse_image
+            if not errors:
+                for spec in (gate, point):
+                    if spec.device:
+                        result = _flash_node(
+                            args,
+                            spec,
+                            config_snapshot,
+                            attestation,
+                        )
+                        flash_results[spec.name] = result.to_dict(include_events=True)
+                        _add_check(checks, f"{spec.name} flash workflow", result.ok, _flash_detail(result.to_dict()))
+                        if not result.ok:
+                            errors.extend(result.errors)
+                    else:
+                        flash_results[spec.name] = {"ok": True, "mode": "reuse", "device": ""}
+                        _add_check(checks, f"{spec.name} reuse requested", True, f"probing existing node at {spec.host}")
 
-    flash_failed = any(not result.get("ok") for result in flash_results.values())
-    if args.dry_run:
-        warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
-    elif not flash_failed and gate is not None and point is not None:
-        ready_to_probe = True
-        if _has_device(args):
-            ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
-        if ready_to_probe:
-            sleep_fn(args.wait_seconds)
-            for spec in (gate, point):
-                nodes[spec.name] = _probe_node(args, spec, command_runner, checks)
-            topology = _probe_topology(gate, point, checks)
-            if args.throughput_smoke:
-                throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
+        if args.dry_run and args.base_image and args.image_sha256:
+            image = _validate_declared_image(args, checks, errors, check_name="declared image identity")
+        elif _has_device(args) and flash_results:
+            flashed_image = _flash_image_evidence(flash_results, checks, errors)
+            image = _mixed_image_evidence(reuse_image, flashed_image, checks, errors)
+            if attestation and image.get("sha256"):
+                expected_attestation = {
+                    **attestation,
+                    "image_sha256": str(image["sha256"]),
+                }
 
-    mode = "dry-run" if args.dry_run else ("flash" if _has_device(args) else "reuse")
-    ok = not errors and all(check.get("ok") is not False for check in checks)
-    payload = {
-        "ok": ok,
-        "schema_version": SCHEMA_VERSION,
-        "mode": mode,
-        "generated_at": _iso(now),
-        "easymanet_version": EASYMANET_VERSION,
-        "config_path": str(config_path),
-        "gate_node": args.gate_node,
-        "point_node": args.point_node,
-        "wait_seconds": 0 if args.dry_run else args.wait_seconds,
-        "flash": flash_results,
-        "nodes": nodes,
-        "topology": topology,
-        "throughput": throughput,
-        "checks": checks,
-        "warnings": warnings,
-        "errors": errors,
+        flash_failed = any(not result.get("ok") for result in flash_results.values())
+        if args.dry_run:
+            warnings.append("Dry run skipped hardware wait, node API probes, SSH checks, and throughput smoke.")
+        elif not errors and not flash_failed and gate is not None and point is not None:
+            ready_to_probe = True
+            if _has_device(args):
+                ready_to_probe = _confirm_post_flash_boot(args, gate, point, input_fn, checks, errors)
+            if ready_to_probe:
+                sleep_fn(args.wait_seconds)
+                probe_attestation = (
+                    expected_attestation
+                    if gate.device and point.device
+                    else None
+                )
+                for spec in (gate, point):
+                    nodes[spec.name] = _probe_node(
+                        args,
+                        spec,
+                        command_runner,
+                        checks,
+                        expected_attestation=probe_attestation,
+                    )
+                topology = _probe_topology(gate, point, checks)
+                if args.throughput_smoke:
+                    throughput = _run_throughput_smoke(args, gate, point, command_runner, sleep_fn, checks)
+
+        mode = "dry-run" if args.dry_run else ("flash" if _has_device(args) else "reuse")
+        ok = not errors and all(check.get("ok") is not False for check in checks)
+        payload = {
+            "ok": ok,
+            "schema_version": SCHEMA_VERSION,
+            "mode": mode,
+            "generated_at": _iso(now),
+            "easymanet_version": EASYMANET_VERSION,
+            "config_path": str(config_path),
+            "config": config_evidence,
+            "gate_node": args.gate_node,
+            "point_node": args.point_node,
+            "wait_seconds": 0 if args.dry_run else args.wait_seconds,
+            "provenance": provenance,
+            "image": image,
+            "attestation": expected_attestation,
+            "evidence_scope": _evidence_scope(
+                mode,
+                ok,
+                flash_results,
+                image,
+                provenance,
+                config_evidence,
+                nodes,
+            ),
+            "flash": flash_results,
+            "nodes": nodes,
+            "topology": topology,
+            "throughput": throughput,
+            "checks": checks,
+            "warnings": warnings,
+            "errors": errors,
+        }
+        result_path = diagnostics_dir() / f"easymanet-hil-{_stamp(now)}.json"
+        payload["result_path"] = str(result_path)
+        bundle_path = _write_support_bundle(payload, args, topology, config_snapshot)
+        payload["support_bundle_path"] = bundle_path
+        _write_json(result_path, payload)
+        return payload
+
+
+def _git_provenance() -> dict[str, Any]:
+    try:
+        git_sha = _git_output(["rev-parse", "HEAD"])
+        status = _git_output(["status", "--porcelain=v1", "--untracked-files=all"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = f"Git provenance unavailable: {exc}"
+        return {
+            "runner": {
+                "git_sha": "",
+                "dirty": None,
+                "valid": False,
+                "detail": detail,
+            },
+            "source": {
+                "git_sha": "",
+                "dirty": None,
+                "valid": False,
+                "detail": detail,
+            },
+        }
+
+    git_sha = git_sha.lower()
+    dirty = bool(status)
+    valid = re.fullmatch(r"[0-9a-f]{40}", git_sha) is not None
+    detail = "" if valid else "Git HEAD is not a full 40-character commit SHA."
+    return {
+        "runner": {
+            "git_sha": git_sha,
+            "dirty": dirty,
+            "valid": valid,
+            "path": str(Path(__file__).resolve()),
+            "detail": detail,
+        },
+        "source": {
+            "git_sha": git_sha,
+            "dirty": dirty,
+            "valid": valid,
+            "path": str(REPO_ROOT),
+            "detail": detail,
+        },
     }
-    result_path = diagnostics_dir() / f"easymanet-hil-{_stamp(now)}.json"
-    payload["result_path"] = str(result_path)
-    bundle_path = _write_support_bundle(payload, args, topology)
-    payload["support_bundle_path"] = bundle_path
-    _write_json(result_path, payload)
-    return payload
+
+
+def _new_hil_nonce() -> str:
+    return secrets.token_hex(16)
+
+
+def _hil_attestation(
+    *,
+    nonce: str,
+    started_at: datetime,
+    provenance: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, str]:
+    return {
+        "hil_run_nonce": nonce,
+        "fleet_config_sha256": str(config.get("sha256", "")),
+        "source_git_sha": str(provenance.get("source", {}).get("git_sha", "")),
+        "hil_started_at": _iso(started_at),
+    }
+
+
+def _git_output(args: list[str]) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout.strip()
+
+
+def _empty_image_evidence() -> dict[str, Any]:
+    return {
+        "artifact_path": "",
+        "artifact_id": "",
+        "sha256": "",
+        "local_digest_verified": False,
+        "node_image_identity": "not-attested",
+        "trust": {},
+    }
+
+
+def _empty_config_evidence(config_path: Path) -> dict[str, Any]:
+    return {
+        "path": str(config_path.resolve()),
+        "sha256": "",
+        "size_bytes": 0,
+        "stable": False,
+    }
+
+
+def _validate_reuse_image(
+    args: argparse.Namespace,
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    if not args.base_image or not args.image_sha256:
+        message = "Reuse requires --base-image and --image-sha256 before probes can run."
+        errors.append(message)
+        _add_check(checks, "reuse image identity", False, message)
+        return _empty_image_evidence()
+
+    return _validate_declared_image(args, checks, errors, check_name="reuse image identity")
+
+
+def _validate_declared_image(
+    args: argparse.Namespace,
+    checks: list[dict[str, Any]],
+    errors: list[str],
+    *,
+    check_name: str,
+) -> dict[str, Any]:
+    evidence = _empty_image_evidence()
+    evidence["trust"] = image_trust_payload(custom_trust())
+
+    artifact = Path(args.base_image).expanduser().resolve()
+    try:
+        sha256 = normalize_sha256(args.image_sha256)
+        if not artifact.is_file():
+            raise FileNotFoundError(f"Image artifact not found: {artifact}")
+        verify_image_sha256(artifact, sha256)
+    except (OSError, ValueError) as exc:
+        message = f"{check_name} failed: {exc}"
+        errors.append(message)
+        _add_check(checks, check_name, False, message)
+        return evidence
+
+    evidence.update(
+        {
+            "artifact_path": str(artifact),
+            "artifact_id": f"sha256:{sha256}",
+            "sha256": sha256,
+            "local_digest_verified": True,
+        }
+    )
+    _add_check(checks, check_name, True, f"{artifact}; sha256={sha256}")
+    return evidence
+
+
+def _flash_image_evidence(
+    flash_results: dict[str, Any],
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    images = [
+        result.get("image")
+        for result in flash_results.values()
+        if result.get("ok") and result.get("mode") != "reuse"
+    ]
+    if not images or not all(isinstance(image, dict) for image in images):
+        message = "Flash image identity was not available from the flash workflow."
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    image = images[0]
+    path = str(image.get("path", ""))
+    sha256 = str(image.get("sha256", ""))
+    if not path or not sha256:
+        message = "Flash image identity is missing its local artifact path or SHA-256."
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    try:
+        artifact = Path(path).expanduser().resolve()
+        normalized_sha256 = normalize_sha256(sha256)
+        verify_image_sha256(artifact, normalized_sha256)
+    except (OSError, ValueError) as exc:
+        message = f"Flash image identity failed: {exc}"
+        errors.append(message)
+        _add_check(checks, "flash image identity", False, message)
+        return _empty_image_evidence()
+
+    identity = (str(artifact), normalized_sha256)
+    for other in images[1:]:
+        other_path = Path(str(other.get("path", ""))).expanduser().resolve()
+        try:
+            other_sha256 = normalize_sha256(str(other.get("sha256", "")))
+        except ValueError:
+            other_sha256 = ""
+        if (str(other_path), other_sha256) != identity:
+            message = "Flash nodes did not use the same image identity."
+            errors.append(message)
+            _add_check(checks, "flash image identity", False, message)
+            return _empty_image_evidence()
+
+    trust = image_trust_payload(image.get("trust"))
+    if not trust:
+        trust = {
+            "status": str(image.get("trust_status", "")),
+            "source": str(image.get("source", "")),
+            "channel": str(image.get("channel", "")),
+            "release_tag": str(image.get("release_tag", "")),
+            "image_status": str(image.get("image_status", "")),
+            "manifest_url": str(image.get("manifest_url", "")),
+            "manifest_signature_verified": bool(
+                image.get("manifest_signature_verified", False)
+            ),
+        }
+    _add_check(checks, "flash image identity", True, f"{artifact}; sha256={normalized_sha256}")
+    return {
+        "artifact_path": str(artifact),
+        "artifact_id": f"sha256:{normalized_sha256}",
+        "sha256": normalized_sha256,
+        "local_digest_verified": True,
+        "node_image_identity": "flashed",
+        "trust": trust,
+    }
+
+
+def _mixed_image_evidence(
+    reuse_image: dict[str, Any],
+    flashed_image: dict[str, Any],
+    checks: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    if not reuse_image["local_digest_verified"]:
+        return flashed_image
+    if reuse_image["sha256"] != flashed_image["sha256"]:
+        message = "Reused node image does not match the flashed image identity."
+        errors.append(message)
+        _add_check(checks, "mixed image identity", False, message)
+        return _empty_image_evidence()
+
+    evidence = dict(reuse_image)
+    evidence["node_image_identity"] = "mixed"
+    _add_check(checks, "mixed image identity", True, f"sha256={reuse_image['sha256']}")
+    return evidence
+
+
+def _evidence_scope(
+    mode: str,
+    ok: bool,
+    flash_results: dict[str, dict[str, Any]],
+    image: dict[str, Any],
+    provenance: dict[str, Any],
+    config: dict[str, Any],
+    nodes: dict[str, Any],
+) -> dict[str, Any]:
+    if mode == "dry-run":
+        return {
+            "kind": "synthetic-dry-run",
+            "simulation": False,
+            "calibration": False,
+            "physical_acceptance": False,
+            "detail": "Dry-run evidence does not probe hardware or establish physical acceptance.",
+        }
+
+    full_flash_evidence = (
+        len(flash_results) == 2
+        and all(
+            result.get("ok") is True and result.get("mode") != "reuse"
+            for result in flash_results.values()
+        )
+        and image.get("node_image_identity") == "flashed"
+        and image.get("local_digest_verified") is True
+    )
+    attribution_complete = _acceptance_attribution_complete(provenance, config)
+    runtime_attested = (
+        len(nodes) == 2
+        and all(
+            node.get("attestation", {}).get("ok") is True
+            for node in nodes.values()
+        )
+    )
+    if (
+        mode == "flash"
+        and ok
+        and full_flash_evidence
+        and attribution_complete
+        and runtime_attested
+    ):
+        return {
+            "kind": "physical-hil",
+            "simulation": False,
+            "calibration": False,
+            "physical_acceptance": True,
+            "detail": "Physical acceptance is limited to nodes flashed and identity-verified in this run.",
+        }
+    detail = "This record is physical observation evidence, not product physical acceptance."
+    if mode == "flash" and full_flash_evidence and not runtime_attested:
+        detail = (
+            "The running nodes did not attest the "
+            "nonce and artifact identity injected during this run."
+        )
+    elif mode == "flash" and ok and full_flash_evidence and not attribution_complete:
+        detail = (
+            "Behavioral HIL passed, but physical acceptance requires a clean full "
+            "source commit and a stable fleet-config digest."
+        )
+    return {
+        "kind": "physical-observation",
+        "simulation": False,
+        "calibration": False,
+        "physical_acceptance": False,
+        "detail": detail,
+    }
+
+
+def _acceptance_attribution_complete(
+    provenance: dict[str, Any],
+    config: dict[str, Any],
+) -> bool:
+    runner = provenance.get("runner", {})
+    source = provenance.get("source", {})
+    runner_sha = str(runner.get("git_sha", ""))
+    source_sha = str(source.get("git_sha", ""))
+    clean_source = (
+        runner.get("valid") is True
+        and source.get("valid") is True
+        and runner.get("dirty") is False
+        and source.get("dirty") is False
+        and runner_sha == source_sha
+    )
+    config_sha = str(config.get("sha256", ""))
+    stable_config = (
+        config.get("stable") is True
+        and re.fullmatch(r"[0-9a-f]{64}", config_sha) is not None
+    )
+    return clean_source and stable_config
 
 
 def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -306,23 +705,49 @@ def _validate_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace
 
 def _load_manifest_for_result(
     config_path: Path,
+    snapshot_path: Path,
     checks: list[dict[str, Any]],
     errors: list[str],
-) -> Manifest | None:
+) -> tuple[Manifest | None, dict[str, Any]]:
+    evidence = _empty_config_evidence(config_path)
     try:
-        manifest = load_manifest(str(config_path))
+        config_bytes = config_path.read_bytes()
+        snapshot_path.write_bytes(config_bytes)
+        snapshot_path.chmod(0o400)
+    except OSError as exc:
+        message = f"Could not snapshot fleet config bytes: {exc}"
+        errors.append(message)
+        _add_check(checks, "fleet config identity", False, message)
+        return None, evidence
+
+    evidence.update(
+        {
+            "sha256": hashlib.sha256(config_bytes).hexdigest(),
+            "size_bytes": len(config_bytes),
+        }
+    )
+    try:
+        manifest = load_manifest(str(snapshot_path))
     except ManifestError as exc:
         errors.append(str(exc))
         _add_check(checks, "fleet config loads", False, str(exc))
-        return None
+        return None, evidence
+
+    evidence["stable"] = True
+    _add_check(
+        checks,
+        "fleet config identity",
+        True,
+        f"sha256={evidence['sha256']}",
+    )
 
     validation = validate(manifest)
     detail = "ok" if validation.valid else "; ".join(validation.errors)
     _add_check(checks, "fleet config validates", validation.valid, detail)
     if not validation.valid:
         errors.extend(validation.errors)
-        return None
-    return manifest
+        return None, evidence
+    return manifest, evidence
 
 
 def _node_spec(
@@ -373,11 +798,16 @@ def _node_spec(
     )
 
 
-def _flash_node(args: argparse.Namespace, spec: NodeSpec):
+def _flash_node(
+    args: argparse.Namespace,
+    spec: NodeSpec,
+    config_snapshot: Path,
+    attestation: dict[str, str],
+):
     enable_ssh, disable_ssh = _ssh_flash_overrides(spec)
     return run_flash_workflow(
         FlashOptions(
-            config=args.config,
+            config=str(config_snapshot),
             node=spec.name,
             device=spec.device,
             base_image=args.base_image or None,
@@ -391,6 +821,7 @@ def _flash_node(args: argparse.Namespace, spec: NodeSpec):
             no_eject=args.no_eject,
             enable_ssh=enable_ssh,
             disable_ssh=disable_ssh,
+            attestation=attestation,
         )
     )
 
@@ -400,6 +831,8 @@ def _probe_node(
     spec: NodeSpec,
     command_runner: CommandRunner,
     checks: list[dict[str, Any]],
+    *,
+    expected_attestation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     identity = fetch_node_api(spec.host, "identity", timeout=HTTP_TIMEOUT_SECONDS)
     status = fetch_node_api(spec.host, "status", timeout=STATUS_TIMEOUT_SECONDS)
@@ -407,6 +840,12 @@ def _probe_node(
 
     _add_check(checks, f"{spec.name} /v1/identity", identity.ok, _api_detail(identity))
     _check_identity(spec, identity, checks)
+    attestation = _check_runtime_attestation(
+        spec,
+        identity,
+        expected_attestation,
+        checks,
+    )
     _add_check(checks, f"{spec.name} /v1/status", status.ok, _api_detail(status))
     _check_status(spec, status, checks)
     _add_check(checks, f"{spec.name} /v1/neighbors", neighbors.ok, _api_detail(neighbors))
@@ -435,7 +874,67 @@ def _probe_node(
         "neighbors": neighbors.to_dict(),
         "ssh": ssh,
         "boot_report": boot_report,
+        "attestation": attestation,
     }
+
+
+def _check_runtime_attestation(
+    spec: NodeSpec,
+    identity: ApiResult,
+    expected: dict[str, str] | None,
+    checks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if expected is None:
+        return {"ok": None, "required": False, "reported": {}}
+
+    reported = (
+        identity.payload.get("attestation")
+        if isinstance(identity.payload.get("attestation"), dict)
+        else {}
+    )
+    mismatches = [
+        key
+        for key in (
+            "hil_run_nonce",
+            "image_sha256",
+            "fleet_config_sha256",
+            "source_git_sha",
+            "hil_started_at",
+        )
+        if str(reported.get(key, "")) != expected.get(key, "")
+    ]
+    provisioned_at = str(reported.get("provisioned_at", ""))
+    boot_id = str(reported.get("boot_id", ""))
+    if not _provisioned_during_run(provisioned_at, expected["hil_started_at"]):
+        mismatches.append("provisioned_at")
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        boot_id.lower(),
+    ) is None:
+        mismatches.append("boot_id")
+
+    ok = identity.ok and not mismatches
+    detail = "exact run and artifact identity reported"
+    if mismatches:
+        detail = "missing or mismatched: " + ", ".join(mismatches)
+    _add_check(checks, f"{spec.name} runtime attestation", ok, detail)
+    return {
+        "ok": ok,
+        "required": True,
+        "expected": expected,
+        "reported": reported,
+        "mismatches": mismatches,
+    }
+
+
+def _provisioned_during_run(provisioned_at: str, started_at: str) -> bool:
+    try:
+        provisioned = datetime.fromisoformat(provisioned_at.replace("Z", "+00:00"))
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        observed = _utc_now()
+        return started <= provisioned <= observed + MAX_NODE_CLOCK_SKEW
+    except (TypeError, ValueError):
+        return False
 
 
 def _probe_topology(gate: NodeSpec, point: NodeSpec, checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -667,10 +1166,16 @@ def _run_command(command: list[str], timeout: int) -> subprocess.CompletedProces
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
 
 
-def _write_support_bundle(payload: dict[str, Any], args: argparse.Namespace, topology: dict[str, Any]) -> str:
+def _write_support_bundle(
+    payload: dict[str, Any],
+    args: argparse.Namespace,
+    topology: dict[str, Any],
+    config_snapshot: Path,
+) -> str:
     boot_report = args.gate_boot_report or args.point_boot_report
     result = create_support_bundle(
-        config=args.config,
+        config=str(config_snapshot),
+        config_display=str(payload["config"]["path"]),
         node="",
         boot_report=boot_report,
         include_mesh=not topology.get("skipped", False),

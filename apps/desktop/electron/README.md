@@ -7,9 +7,10 @@ website or a localhost web server.
 
 The native shell can preview and execute the shared EasyMANET flash workflow.
 On macOS, Flash authenticates with an administrator password and runs the
-narrow bridge flash command through `sudo` before writing the selected disk.
-If elevation is not available, the bridge still returns a copyable sudo
-fallback command.
+narrow bridge flash command through the system `sudo` and `env` executables,
+an isolated Python runtime, and a fixed privileged environment before writing
+the selected disk. If elevation is not available, the bridge still returns a
+copyable sudo fallback command.
 
 ## Run
 
@@ -35,18 +36,15 @@ npm --prefix apps/desktop/electron run check
 
 ## Package
 
-Build the bundled bridge and native desktop artifacts from the repository root:
+Packaged Electron desktop artifacts are currently macOS-only. The Python/CLI
+runtime separately supports macOS and Linux.
+
+Build the bundled bridge and macOS desktop artifacts from the repository root:
 
 ```bash
 python -m pip install -e ".[dev]" pyinstaller
 npm --prefix apps/desktop/electron ci
 npm --prefix apps/desktop/electron run dist -- --mac dmg zip
-```
-
-On Windows, swap the final command for:
-
-```bash
-npm --prefix apps/desktop/electron run dist -- --win nsis zip
 ```
 
 The packaged app bundles the Python bridge with PyInstaller and copies the

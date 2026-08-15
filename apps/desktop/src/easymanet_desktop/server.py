@@ -3,9 +3,11 @@
 import json
 import mimetypes
 import threading
+import traceback
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,13 @@ from .payloads import (
     validate_payload,
 )
 
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
+
+
+class _RequestBodyTooLarge(ValueError):
+    """Raised when a fallback-console JSON request exceeds its local limit."""
+
+
 app = typer.Typer(
     name="easymanet-desktop",
     help="Run the local EasyMANET operator console",
@@ -39,7 +48,11 @@ def desktop_root() -> None:
 
 @app.command(name="serve")
 def serve_cmd(
-    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="IPv4 loopback bind address",
+    ),
     port: int = typer.Option(8765, "--port", "-p", help="Bind port"),
     open_browser: bool = typer.Option(
         True,
@@ -48,8 +61,10 @@ def serve_cmd(
     ),
 ) -> None:
     """Serve the local operator console."""
+    host = _loopback_host(host)
     server = ThreadingHTTPServer((host, port), _DesktopHandler)
-    url = f"http://{host}:{server.server_port}/"
+    url_host = f"[{host}]" if ":" in host else host
+    url = f"http://{url_host}:{server.server_port}/"
     typer.secho(f"EasyMANET desktop console: {url}", fg=typer.colors.GREEN)
     if open_browser:
         threading.Timer(0.3, lambda: webbrowser.open(url)).start()
@@ -108,15 +123,7 @@ class _DesktopHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/mesh/discover":
                 self._send_json(mesh_discover_payload(payload))
             elif parsed.path == "/api/support/bundle":
-                self._send_json(
-                    create_support_bundle(
-                        config=str(payload.get("config") or ""),
-                        node=str(payload.get("node") or ""),
-                        boot_report=str(payload.get("boot_report") or ""),
-                        output=str(payload.get("output") or ""),
-                        include_disks=_bool_payload(payload.get("include_disks", False)),
-                    ).to_dict()
-                )
+                self._send_json(_fallback_support_bundle_payload(payload))
             elif parsed.path == "/api/diagnostics/run":
                 self._send_json(run_diagnostics(config=str(payload.get("config", "") or "")))
             elif parsed.path == "/api/diagnostics/bundle":
@@ -129,17 +136,33 @@ class _DesktopHandler(BaseHTTPRequestHandler):
                 )
             else:
                 self._send_json(validate_payload(payload))
+        except _RequestBodyTooLarge as exc:
+            self._send_json(
+                {"ok": False, "errors": [str(exc)]},
+                status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
         except ValueError as exc:
             self._send_json({"ok": False, "errors": [str(exc)]}, status=400)
-        except Exception as exc:  # noqa: BLE001 - converted into desktop JSON.
-            self._send_json({"ok": False, "errors": [str(exc)]}, status=500)
+        except Exception:  # noqa: BLE001 - converted into desktop JSON.
+            traceback.print_exc()
+            self._send_json({"ok": False, "errors": ["Unexpected request error."]}, status=500)
 
     def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or "0")
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError as exc:
+            raise ValueError("Content-Length must be a non-negative integer.") from exc
+        if length < 0:
+            raise ValueError("Content-Length must be a non-negative integer.")
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise _RequestBodyTooLarge("Request body exceeds the 1 MiB limit.")
         body = self.rfile.read(length)
         if not body:
             return {}
-        data = json.loads(body.decode())
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Request body must be valid JSON.") from exc
         if not isinstance(data, dict):
             raise ValueError("Request body must be a JSON object")
         return data
@@ -174,6 +197,26 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _loopback_host(host: str) -> str:
+    try:
+        address = ip_address(host.strip())
+    except ValueError as exc:
+        raise typer.BadParameter("Use a loopback IPv4 address for --host.") from exc
+    if address.version != 4 or not address.is_loopback:
+        raise typer.BadParameter("Use a loopback IPv4 address for --host.")
+    return str(address)
+
+
+def _fallback_support_bundle_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("output") or payload.get("boot_report"):
+        raise ValueError("Fallback support bundles always use the local Diagnostics folder.")
+    return create_support_bundle(
+        config=str(payload.get("config") or ""),
+        node=str(payload.get("node") or ""),
+        include_disks=_bool_payload(payload.get("include_disks", False)),
+    ).to_dict()
 
 
 def _bool_payload(value: Any) -> bool:

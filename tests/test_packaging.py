@@ -79,23 +79,8 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
     env = os.environ.copy()
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
 
-    _run_packaging_command(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            "--no-deps",
-            "--no-build-isolation",
-            "--wheel-dir",
-            str(wheel_dir),
-            str(ROOT),
-        ],
-        env=env,
-    )
     release_smoke = _load_release_smoke_module()
-    wheels = release_smoke.built_wheels(wheel_dir, ROOT)
-    assert len(wheels) == 1
+    wheel = release_smoke.build_wheel(ROOT, wheel_dir)
 
     _run_packaging_command(
         [
@@ -106,7 +91,7 @@ def test_installed_wheel_preserves_overlay_executable_modes(tmp_path):
             "--no-deps",
             "--target",
             str(install_dir),
-            str(wheels[0]),
+            str(wheel),
         ],
         env=env,
     )
@@ -137,6 +122,105 @@ def test_release_smoke_installs_wheel_in_temp_venv(tmp_path):
     )
 
     assert "Release smoke passed." in result.stdout
+
+
+def test_release_smoke_build_command_uses_isolated_build_defaults(tmp_path):
+    release_smoke = _load_release_smoke_module()
+    wheelhouse = tmp_path / "wheelhouse"
+
+    command = release_smoke.build_wheel_command(
+        "/usr/bin/python3", wheelhouse, ROOT
+    )
+
+    assert command == [
+        "/usr/bin/python3",
+        "-m",
+        "pip",
+        "wheel",
+        "--no-deps",
+        "--wheel-dir",
+        str(wheelhouse),
+        str(ROOT),
+    ]
+    assert "--no-build-isolation" not in command
+
+
+def test_release_smoke_surfaces_packaging_command_failure(monkeypatch):
+    release_smoke = _load_release_smoke_module()
+
+    def fake_subprocess_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=23,
+            stdout="",
+            stderr="build backend unavailable",
+        )
+
+    monkeypatch.setattr(release_smoke.subprocess, "run", fake_subprocess_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        release_smoke.run(["python", "-m", "pip", "wheel"])
+
+    assert exc_info.value.code == 23
+
+
+def test_release_smoke_builds_from_temporary_tracked_source(tmp_path, monkeypatch):
+    release_smoke = _load_release_smoke_module()
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "easymanet"\nversion = "0.2.4"\n'
+    )
+    (repo_root / "untracked.txt").write_text("must not be packaged\n")
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
+    wheelhouse = tmp_path / "wheelhouse"
+    wheel = wheelhouse / "easymanet-0.2.4-py3-none-any.whl"
+    source_paths = []
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        source_paths.append(Path(command[-1]))
+        assert source_paths[-1] != repo_root
+        assert (source_paths[-1] / "pyproject.toml").is_file()
+        assert not (source_paths[-1] / "untracked.txt").exists()
+        wheelhouse.mkdir(parents=True, exist_ok=True)
+        wheel.touch()
+
+    monkeypatch.setattr(release_smoke, "run", fake_run)
+
+    assert release_smoke.build_wheel(repo_root, tmp_path) == wheel
+    assert not source_paths[0].exists()
+
+
+def test_release_smoke_preserves_existing_source_build_content(tmp_path, monkeypatch):
+    release_smoke = _load_release_smoke_module()
+    repo_root = tmp_path / "repo"
+    build_dir = repo_root / "build"
+    build_dir.mkdir(parents=True)
+    keep = build_dir / "keep.txt"
+    keep.write_text("operator content\n")
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "easymanet"\nversion = "0.2.4"\n'
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=repo_root, check=True)
+
+    source_paths = []
+
+    def fake_run(command, **_kwargs):
+        source_paths.append(Path(command[-1]))
+        raise SystemExit(23)
+
+    monkeypatch.setattr(release_smoke, "run", fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        release_smoke.build_wheel(repo_root, tmp_path)
+
+    assert exc_info.value.code == 23
+    assert keep.read_text() == "operator content\n"
+    assert len(source_paths) == 1
+    assert not source_paths[0].exists()
 
 
 def test_release_smoke_run_passes_timeout_to_subprocess(monkeypatch):

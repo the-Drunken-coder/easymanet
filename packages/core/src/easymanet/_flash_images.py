@@ -6,7 +6,6 @@ flash plan. It does not write block devices or stage boot-partition payloads.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -19,7 +18,12 @@ from .download import (
     set_image_config,
     verify_image_sha256,
 )
-from .release_trust import OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS
+from .release_trust import (
+    OFFICIAL_TRUST_STATUS,
+    PENDING_TRUST_STATUS,
+    custom_trust,
+    image_trust_payload,
+)
 from .manifest import load_manifest
 from .provision import resolve_provision
 from .validate import validate
@@ -81,6 +85,7 @@ def resolve_base_image(
             sha256=normalized_sha256,
             trust_status="checksum-only",
             source="custom",
+            trust=image_trust_payload(custom_trust()),
         )
         return str(base_image_path), payload, warnings
 
@@ -147,6 +152,9 @@ def resolve_base_image(
     latest_release_tag = str(getattr(latest, "release_tag", ""))
     latest_image_status = str(getattr(latest, "image_status", "current"))
     latest_manifest_url = str(getattr(latest, "manifest_url", ""))
+    latest_manifest_signature_verified = bool(
+        getattr(latest, "manifest_signature_verified", False)
+    )
     latest_warnings = tuple(str(warning) for warning in getattr(latest, "warnings", ()))
     latest_payload = {
         "version": latest.version,
@@ -158,16 +166,24 @@ def resolve_base_image(
         "release_tag": latest_release_tag,
         "image_status": latest_image_status,
         "manifest_url": latest_manifest_url,
+        "manifest_signature_verified": latest_manifest_signature_verified,
     }
-    latest_trust = getattr(latest, "trust", {
-        "status": latest_trust_status,
-        "source": latest_source,
-        "channel": latest_channel,
-        "release_tag": latest_release_tag,
-        "image_status": latest_image_status,
-        "manifest_url": latest_manifest_url,
-        "warnings": list(latest_warnings),
-    })
+    latest_trust = image_trust_payload(
+        getattr(
+            latest,
+            "trust",
+            {
+                "status": latest_trust_status,
+                "source": latest_source,
+                "channel": latest_channel,
+                "release_tag": latest_release_tag,
+                "image_status": latest_image_status,
+                "manifest_url": latest_manifest_url,
+                "manifest_signature_verified": latest_manifest_signature_verified,
+                "warnings": list(latest_warnings),
+            },
+        )
+    )
 
     if latest_source == "official" and latest_trust_status not in {OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS}:
         detail = "; ".join(latest_warnings) if latest_warnings else "official verification failed"
@@ -183,32 +199,28 @@ def resolve_base_image(
         if cached:
             return (
                 str(cached),
-                image_payload(path=str(cached), cached_path=str(cached), **latest_payload),
+                image_payload(
+                    path=str(cached),
+                    cached_path=str(cached),
+                    trust=latest_trust,
+                    **latest_payload,
+                ),
                 warnings,
             )
 
     try:
-        if _accepts_keyword(download_image_fn, "trust"):
-            path = download_image_fn(
-                target,
-                latest.version,
-                latest.url,
-                latest.sha256,
-                force=download,
-                emit=emit,
-                trust=latest_trust,
-            )
-        else:
-            path = download_image_fn(
-                target,
-                latest.version,
-                latest.url,
-                latest.sha256,
-                force=download,
-                emit=emit,
-            )
+        path = download_image_fn(
+            target,
+            latest.version,
+            latest.url,
+            latest.sha256,
+            force=download,
+            emit=emit,
+            trust=latest_trust,
+        )
         if pending_official:
             latest_payload["trust_status"] = OFFICIAL_TRUST_STATUS
+            latest_trust["status"] = OFFICIAL_TRUST_STATUS
     except OSError as exc:
         raise FlashWorkflowError(
             FlashErrorCode.IMAGE,
@@ -216,26 +228,14 @@ def resolve_base_image(
         ) from exc
     return (
         str(path),
-        image_payload(path=str(path), cached_path=str(path), **latest_payload),
+        image_payload(
+            path=str(path),
+            cached_path=str(path),
+            trust=latest_trust,
+            **latest_payload,
+        ),
         warnings,
     )
-
-
-def _accepts_keyword(fn: Callable[..., Any], keyword: str) -> bool:
-    """Return whether a callable accepts a keyword argument.
-
-    If introspection fails, return True so security-relevant trust metadata is
-    attempted and any incompatibility is surfaced by the callable itself.
-    """
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return True
-    return keyword in signature.parameters or any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in signature.parameters.values()
-    )
-
 
 def flash_image_details(*, config: str, node: str) -> dict[str, Any]:
     config_path = resolve_fleet_config(config)
@@ -268,6 +268,10 @@ def flash_image_details(*, config: str, node: str) -> dict[str, Any]:
                 "release_tag": getattr(latest, "release_tag", ""),
                 "image_status": getattr(latest, "image_status", "current"),
                 "manifest_url": getattr(latest, "manifest_url", ""),
+                "manifest_signature_verified": getattr(
+                    latest, "manifest_signature_verified", False
+                ),
+                "trust": image_trust_payload(getattr(latest, "trust", {})),
                 "warnings": list(getattr(latest, "warnings", ())),
             }
         )
@@ -290,6 +294,8 @@ def image_payload(
     release_tag: str = "",
     image_status: str = "",
     manifest_url: str = "",
+    manifest_signature_verified: bool = False,
+    trust: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "path": path,
@@ -303,4 +309,6 @@ def image_payload(
         "release_tag": release_tag,
         "image_status": image_status,
         "manifest_url": manifest_url,
+        "manifest_signature_verified": manifest_signature_verified,
+        "trust": dict(trust or {}),
     }

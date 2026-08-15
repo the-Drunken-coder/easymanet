@@ -1,66 +1,51 @@
+import json
+
+import pytest
+
 from easymanet import _download_release, download
-from easymanet.release_trust import PENDING_TRUST_STATUS
+from easymanet.release_trust import (
+    GITHUB_ACTIONS_ISSUER,
+    IMAGE_RELEASE_BUNDLE_ASSET,
+    OFFICIAL_IMAGE_REPO,
+    OFFICIAL_IMAGE_REPOSITORY_URI,
+    OFFICIAL_IMAGE_WORKFLOW_IDENTITY,
+    PENDING_TRUST_STATUS,
+    UNTRUSTED_STATUS,
+    trust_from_manifest,
+    verify_release_manifest_bundle,
+)
+
+TARGET = "rpi4-mm6108-spi"
+IMAGE_NAME = "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
+STABLE_TAG = "images-v0.3.0"
 
 
-def test_github_release_prefers_image_release_manifest(monkeypatch):
-    image_name = "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
-    release = {
-        "tag_name": "v1",
-        "assets": [
-            {
-                "name": "easymanet-image-release.json",
-                "browser_download_url": "https://example.invalid/easymanet-image-release.json",
-            },
-            {
-                "name": image_name,
-                "browser_download_url": f"https://example.invalid/{image_name}",
-            },
-            {
-                "name": f"{image_name}.sha256",
-                "browser_download_url": f"https://example.invalid/{image_name}.sha256",
-            },
-            {
-                "name": "easymanet-image-release.json.sigstore.json",
-                "browser_download_url": "https://example.invalid/easymanet-image-release.json.sigstore.json",
-            },
-        ],
-    }
-    manifest = {
+def _manifest(*, channel: str = "stable", release_tag: str = STABLE_TAG) -> dict:
+    return {
         "schema_version": 2,
         "product": "easymanet-openmanet-image",
-        "channel": "stable",
-        "release_tag": "v1",
-        "target": "rpi4-mm6108-spi",
+        "channel": channel,
+        "release_tag": release_tag,
+        "status": "current",
+        "target": TARGET,
         "openmanet_version": "1.6.5",
         "artifact": {
-            "filename": image_name,
+            "target": TARGET,
+            "filename": IMAGE_NAME,
             "sha256": "a" * 64,
         },
         "trust": {
-            "expected_github_repo": "owner/repo",
+            "expected_github_repo": OFFICIAL_IMAGE_REPO,
             "attestation_subject_digest": f"sha256:{'a' * 64}",
-            "signature_assets": [f"{image_name}.sha256", "easymanet-image-release.json.sigstore.json"],
+            "signature_assets": [f"{IMAGE_NAME}.sha256", IMAGE_RELEASE_BUNDLE_ASSET],
         },
     }
 
-    monkeypatch.setattr(_download_release, "_fetch_github_release", lambda _repo: release)
-    monkeypatch.setattr(_download_release, "_fetch_release_manifest", lambda _url: manifest)
 
-    ref = download._check_github_release("owner/repo", "rpi4-mm6108-spi")
-
-    assert ref is not None
-    assert ref.version == "v1"
-    assert ref.url == f"https://example.invalid/{image_name}"
-    assert ref.sha256 == "a" * 64
-    assert ref.trust_status == PENDING_TRUST_STATUS
-    assert ref.trust["expected_repo"] == "owner/repo"
-
-
-def test_candidate_channel_discovers_prerelease_manifest(monkeypatch):
-    image_name = "openmanet-1.6.5-rpi4-mm6108-spi-squashfs-sysupgrade.img.gz"
-    release = {
-        "tag_name": "images-v0.3.0-candidate.1",
-        "prerelease": True,
+def _release(*, tag: str = STABLE_TAG, channel: str = "stable") -> dict:
+    return {
+        "tag_name": tag,
+        "prerelease": channel == "candidate",
         "draft": False,
         "assets": [
             {
@@ -68,138 +53,268 @@ def test_candidate_channel_discovers_prerelease_manifest(monkeypatch):
                 "browser_download_url": "https://example.invalid/easymanet-image-release.json",
             },
             {
-                "name": image_name,
-                "browser_download_url": f"https://example.invalid/{image_name}",
+                "name": IMAGE_RELEASE_BUNDLE_ASSET,
+                "browser_download_url": f"https://example.invalid/{IMAGE_RELEASE_BUNDLE_ASSET}",
             },
-            {"name": f"{image_name}.sha256"},
-            {"name": "easymanet-image-release.json.sigstore.json"},
+            {
+                "name": IMAGE_NAME,
+                "browser_download_url": f"https://example.invalid/{IMAGE_NAME}",
+            },
+            {
+                "name": f"{IMAGE_NAME}.sha256",
+                "browser_download_url": f"https://example.invalid/{IMAGE_NAME}.sha256",
+            },
         ],
     }
-    manifest = {
-        "schema_version": 2,
-        "product": "easymanet-openmanet-image",
-        "channel": "candidate",
-        "target": "rpi4-mm6108-spi",
-        "artifact": {"filename": image_name, "sha256": "a" * 64},
-        "trust": {
-            "expected_github_repo": "owner/repo",
-            "attestation_subject_digest": f"sha256:{'a' * 64}",
-            "signature_assets": [f"{image_name}.sha256", "easymanet-image-release.json.sigstore.json"],
-        },
-    }
 
+
+def _trust(manifest: dict, *, channel: str = "stable", tag: str = STABLE_TAG):
+    return trust_from_manifest(
+        manifest,
+        assets=_release(tag=tag, channel=channel)["assets"],
+        expected_repo=OFFICIAL_IMAGE_REPO,
+        expected_channel=channel,
+        target=TARGET,
+        release_tag=tag,
+        manifest_url="https://example.invalid/easymanet-image-release.json",
+        manifest_signature_verified=True,
+    )
+
+
+def test_official_release_verifies_fixed_bundle_before_accepting_manifest(monkeypatch):
+    release = _release()
+    manifest = _manifest()
+    fetch_calls = []
+
+    monkeypatch.setattr(_download_release, "_fetch_github_release", lambda _repo: release)
+
+    def fake_fetch(manifest_url, bundle_url):
+        fetch_calls.append((manifest_url, bundle_url))
+        return manifest
+
+    monkeypatch.setattr(_download_release, "_fetch_release_manifest", fake_fetch)
+
+    ref = download._check_github_release(OFFICIAL_IMAGE_REPO, TARGET)
+
+    assert ref is not None
+    assert ref.version == STABLE_TAG
+    assert ref.sha256 == "a" * 64
+    assert ref.trust_status == PENDING_TRUST_STATUS
+    assert ref.manifest_signature_verified is True
+    assert fetch_calls == [
+        (
+            "https://example.invalid/easymanet-image-release.json",
+            f"https://example.invalid/{IMAGE_RELEASE_BUNDLE_ASSET}",
+        )
+    ]
+
+
+def test_candidate_release_requires_matching_manifest_channel_and_tag(monkeypatch):
+    tag = "images-v0.3.0-candidate.1"
+    release = _release(tag=tag, channel="candidate")
     monkeypatch.setattr(_download_release, "_fetch_github_releases", lambda _repo: [release])
-    monkeypatch.setattr(_download_release, "_fetch_release_manifest", lambda _url: manifest)
+    monkeypatch.setattr(
+        _download_release,
+        "_fetch_release_manifest",
+        lambda _manifest_url, _bundle_url: _manifest(channel="candidate", release_tag=tag),
+    )
 
-    ref = download._check_github_release("owner/repo", "rpi4-mm6108-spi", channel="candidate")
+    ref = download._check_github_release(OFFICIAL_IMAGE_REPO, TARGET, channel="candidate")
 
     assert ref is not None
     assert ref.channel == "candidate"
-    assert ref.release_tag == "images-v0.3.0-candidate.1"
+    assert ref.release_tag == tag
 
 
-def test_release_manifest_missing_signature_assets_is_untrusted():
-    image_name = "image.img.gz"
-    ref = download._image_ref_from_release_manifest(
-        {
-            "schema_version": 2,
-            "product": "easymanet-openmanet-image",
-            "channel": "stable",
-            "target": "rpi4-mm6108-spi",
-            "artifact": {"filename": image_name, "sha256": "a" * 64},
-            "trust": {
-                "expected_github_repo": "owner/repo",
-                "attestation_subject_digest": f"sha256:{'a' * 64}",
-                "signature_assets": ["missing.sigstore.json"],
-            },
-        },
-        [{"name": image_name, "browser_download_url": "https://example.invalid/image.img.gz"}],
-        "rpi4-mm6108-spi",
-        expected_repo="owner/repo",
-        manifest_url="https://example.invalid/easymanet-image-release.json",
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError, Exception])
+def test_manifest_verification_exceptions_are_fail_closed(monkeypatch, error_type):
+    payloads = {
+        "https://example.invalid/manifest": json.dumps(_manifest()).encode(),
+        "https://example.invalid/bundle": b"bundle",
+    }
+    monkeypatch.setattr(_download_release, "_fetch_release_asset", payloads.get)
+    monkeypatch.setattr(
+        _download_release,
+        "verify_release_manifest_bundle",
+        lambda *_args: (_ for _ in ()).throw(error_type("verification failed")),
     )
+
+    assert _download_release._fetch_release_manifest(
+        "https://example.invalid/manifest",
+        "https://example.invalid/bundle",
+    ) is None
+
+
+def test_release_trust_asset_read_is_bounded(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, limit):
+            assert limit == _download_release._MAX_RELEASE_TRUST_ASSET_BYTES + 1
+            return b"x" * limit
+
+    monkeypatch.setattr(_download_release, "_validate_download_url", lambda _url: None)
+    monkeypatch.setattr(
+        _download_release,
+        "_urlopen_with_retries",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+    assert _download_release._fetch_release_asset("https://example.invalid/asset") is None
+
+
+def test_manifest_is_verified_over_exact_raw_bytes_before_json_parsing(monkeypatch):
+    manifest_bytes = json.dumps(_manifest(), separators=(",", ":")).encode() + b"\n"
+    bundle_bytes = b"fixed-bundle-bytes"
+    payloads = {
+        "https://example.invalid/manifest": manifest_bytes,
+        "https://example.invalid/bundle": bundle_bytes,
+    }
+    verified = []
+    monkeypatch.setattr(_download_release, "_fetch_release_asset", payloads.get)
+    monkeypatch.setattr(
+        _download_release,
+        "verify_release_manifest_bundle",
+        lambda manifest, bundle: verified.append((manifest, bundle)),
+    )
+
+    result = _download_release._fetch_release_manifest(
+        "https://example.invalid/manifest",
+        "https://example.invalid/bundle",
+    )
+
+    assert result == _manifest()
+    assert verified == [(manifest_bytes, bundle_bytes)]
+
+
+def test_sigstore_verifier_pins_github_workflow_identity(monkeypatch):
+    constructed = []
+
+    class ValuePolicy:
+        def __init__(self, value):
+            self.value = value
+            constructed.append((type(self).__name__, value))
+
+    class Identity(ValuePolicy):
+        def __init__(self, *, identity):
+            super().__init__(identity)
+
+    class AllOf:
+        def __init__(self, children):
+            self.children = children
+
+    class Bundle:
+        @staticmethod
+        def from_json(raw):
+            assert raw == b"bundle"
+            return "parsed-bundle"
+
+    class Verifier:
+        @staticmethod
+        def production():
+            return Verifier()
+
+        def verify_artifact(self, **kwargs):
+            assert kwargs["input_"] == b"manifest"
+            assert kwargs["bundle"] == "parsed-bundle"
+            assert isinstance(kwargs["policy"], AllOf)
+
+    policy_types = tuple(type(name, (ValuePolicy,), {}) for name in (
+        "OIDCBuildSignerURI",
+        "OIDCBuildTrigger",
+        "OIDCIssuerV2",
+        "OIDCRunnerEnvironment",
+        "OIDCSourceRepositoryRef",
+        "OIDCSourceRepositoryURI",
+    ))
+    monkeypatch.setattr(
+        "easymanet.release_trust._sigstore_components",
+        lambda: (Bundle, Verifier, AllOf, Identity, *policy_types),
+    )
+
+    verify_release_manifest_bundle(b"manifest", b"bundle")
+
+    assert ("Identity", OFFICIAL_IMAGE_WORKFLOW_IDENTITY) in constructed
+    assert ("OIDCIssuerV2", GITHUB_ACTIONS_ISSUER) in constructed
+    assert ("OIDCSourceRepositoryURI", OFFICIAL_IMAGE_REPOSITORY_URI) in constructed
+    assert ("OIDCSourceRepositoryRef", "refs/heads/main") in constructed
+    assert ("OIDCRunnerEnvironment", "github-hosted") in constructed
+    assert ("OIDCBuildTrigger", "workflow_dispatch") in constructed
+
+
+@pytest.mark.parametrize("status", [None, "unsafe", "superseded", "revoked", "unknown"])
+def test_manifest_requires_explicit_current_disposition(status):
+    manifest = _manifest()
+    if status is None:
+        manifest.pop("status")
+    else:
+        manifest["status"] = status
+
+    assert _trust(manifest).status == UNTRUSTED_STATUS
+
+
+@pytest.mark.parametrize("schema_version", [1, 3, "2", True])
+def test_manifest_requires_exact_current_schema(schema_version):
+    manifest = _manifest()
+    manifest["schema_version"] = schema_version
+
+    assert _trust(manifest).status == UNTRUSTED_STATUS
+
+
+def test_manifest_rejects_release_tag_and_channel_mismatches():
+    assert _trust(_manifest(release_tag="images-v9.9.9")).status == UNTRUSTED_STATUS
+    assert _trust(_manifest(channel="candidate")).status == UNTRUSTED_STATUS
+
+
+def test_manifest_requires_fixed_bundle_and_checksum_assets():
+    manifest = _manifest()
+    manifest["trust"]["signature_assets"] = ["other.sigstore.json"]
+
+    trust = _trust(manifest)
+
+    assert trust.status == UNTRUSTED_STATUS
+    assert "required trust assets" in trust.warnings[0]
+
+
+def test_unverified_manifest_signature_is_untrusted():
+    trust = trust_from_manifest(
+        _manifest(),
+        assets=_release()["assets"],
+        expected_repo=OFFICIAL_IMAGE_REPO,
+        expected_channel="stable",
+        target=TARGET,
+        release_tag=STABLE_TAG,
+        manifest_url="https://example.invalid/easymanet-image-release.json",
+        manifest_signature_verified=False,
+    )
+
+    assert trust.status == UNTRUSTED_STATUS
+    assert trust.manifest_signature_verified is False
+
+
+def test_attestation_digest_must_match_artifact_sha256():
+    manifest = _manifest()
+    manifest["trust"]["attestation_subject_digest"] = f"sha256:{'b' * 64}"
+
+    assert _trust(manifest).status == UNTRUSTED_STATUS
+
+
+def test_nonofficial_github_repo_is_checksum_only(monkeypatch):
+    release = _release()
+    release["assets"][2]["digest"] = f"sha256:{'a' * 64}"
+    monkeypatch.setattr(_download_release, "_fetch_github_release", lambda _repo: release)
+    monkeypatch.setattr(
+        _download_release,
+        "_fetch_release_manifest",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("custom repo manifest must not establish official trust")),
+    )
+
+    ref = download._check_github_release("owner/repo", TARGET)
 
     assert ref is not None
-    assert ref.trust_status == "untrusted"
-
-
-def test_release_manifest_malformed_signature_assets_is_untrusted():
-    image_name = "image.img.gz"
-    ref = download._image_ref_from_release_manifest(
-        {
-            "schema_version": 2,
-            "product": "easymanet-openmanet-image",
-            "channel": "stable",
-            "target": "rpi4-mm6108-spi",
-            "artifact": {"filename": image_name, "sha256": "a" * 64},
-            "trust": {
-                "expected_github_repo": "owner/repo",
-                "attestation_subject_digest": f"sha256:{'a' * 64}",
-                "signature_assets": [f"{image_name}.sha256", {"name": "bad"}],
-            },
-        },
-        [{"name": image_name, "browser_download_url": "https://example.invalid/image.img.gz"}, {"name": f"{image_name}.sha256"}],
-        "rpi4-mm6108-spi",
-        expected_repo="owner/repo",
-        manifest_url="https://example.invalid/easymanet-image-release.json",
-    )
-
-    assert ref is not None
-    assert ref.trust_status == "untrusted"
-    assert "malformed" in ref.warnings[0]
-
-
-def test_release_manifest_missing_required_trust_fields_is_untrusted():
-    image_name = "image.img.gz"
-    ref = download._image_ref_from_release_manifest(
-        {
-            "schema_version": 2,
-            "product": "easymanet-openmanet-image",
-            "channel": "stable",
-            "target": "rpi4-mm6108-spi",
-            "artifact": {"filename": image_name, "sha256": "a" * 64},
-            "trust": {
-                "signature_assets": [f"{image_name}.sha256"],
-            },
-        },
-        [{"name": image_name, "browser_download_url": "https://example.invalid/image.img.gz"}, {"name": f"{image_name}.sha256"}],
-        "rpi4-mm6108-spi",
-        expected_repo="owner/repo",
-        manifest_url="https://example.invalid/easymanet-image-release.json",
-    )
-
-    assert ref is not None
-    assert ref.trust_status == "untrusted"
-
-
-def test_release_manifest_invalid_schema_version_is_untrusted():
-    image_name = "image.img.gz"
-    ref = download._image_ref_from_release_manifest(
-        {
-            "schema_version": "v2",
-            "product": "easymanet-openmanet-image",
-            "channel": "stable",
-            "target": "rpi4-mm6108-spi",
-            "artifact": {"filename": image_name, "sha256": "a" * 64},
-        },
-        [{"name": image_name, "browser_download_url": "https://example.invalid/image.img.gz"}],
-        "rpi4-mm6108-spi",
-        expected_repo="owner/repo",
-        manifest_url="https://example.invalid/easymanet-image-release.json",
-    )
-
-    assert ref is not None
-    assert ref.trust_status == "untrusted"
-
-
-def test_release_manifest_ignores_wrong_target():
-    ref = download._image_ref_from_release_manifest(
-        {
-            "target": "other-target",
-            "artifact": {"filename": "image.img.gz", "sha256": "a" * 64},
-        },
-        [{"name": "image.img.gz", "browser_download_url": "https://example.invalid/image.img.gz"}],
-        "rpi4-mm6108-spi",
-    )
-
-    assert ref is None
+    assert ref.source == "custom"
+    assert ref.trust_status == "checksum-only"

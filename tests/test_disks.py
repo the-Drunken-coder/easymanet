@@ -1,4 +1,6 @@
+import os
 import plistlib
+from dataclasses import replace
 
 import pytest
 
@@ -178,6 +180,70 @@ def test_assert_flash_allowed_blocks_without_force(monkeypatch):
         disks.assert_flash_allowed("/dev/sda", force=False)
 
     assert disks.assert_flash_allowed("/dev/sda", force=True) is disk
+
+
+def test_device_identity_rejects_path_replacement(tmp_path):
+    selected = tmp_path / "selected-device"
+    replacement = tmp_path / "replacement-device"
+    selected.write_bytes(b"selected")
+    replacement.write_bytes(b"replacement")
+    identity = disks.capture_device_identity(str(selected))
+
+    os.replace(replacement, selected)
+
+    with pytest.raises(ValueError, match="identity changed"):
+        disks.assert_device_identity(identity)
+
+
+def test_device_identity_allows_ctime_only_change(monkeypatch, tmp_path):
+    selected = tmp_path / "selected-device"
+    selected.write_bytes(b"selected")
+    identity = disks.capture_device_identity(str(selected))
+    changed = replace(identity, changed_ns=identity.changed_ns + 1)
+    monkeypatch.setattr(
+        "easymanet.disks.core.capture_device_identity",
+        lambda _path: changed,
+    )
+
+    disks.assert_device_identity(identity)
+
+
+def test_open_device_for_write_rejects_replacement_during_open(monkeypatch, tmp_path):
+    selected = tmp_path / "selected-device"
+    replacement = tmp_path / "replacement-device"
+    selected.write_bytes(b"selected")
+    replacement.write_bytes(b"replacement")
+    identity = disks.capture_device_identity(str(selected))
+    real_open = os.open
+
+    def swap_after_open(path, flags):
+        fd = real_open(path, flags)
+        os.replace(replacement, selected)
+        return fd
+
+    monkeypatch.setattr("easymanet.disks.core.os.open", swap_after_open)
+
+    with pytest.raises(ValueError, match="does not match"):
+        disks.open_device_for_write(identity)
+
+
+def test_opened_device_fd_stays_bound_after_path_replacement(tmp_path):
+    selected = tmp_path / "selected-device"
+    original_link = tmp_path / "original-device"
+    replacement = tmp_path / "replacement-device"
+    selected.write_bytes(b"original")
+    os.link(selected, original_link)
+    replacement.write_bytes(b"replacement")
+    identity = disks.capture_device_identity(str(selected))
+    fd = disks.open_device_for_write(identity)
+    try:
+        os.replace(replacement, selected)
+        os.write(fd, b"bound")
+    finally:
+        os.close(fd)
+
+    assert original_link.read_bytes() == b"boundnal"
+    assert selected.read_bytes() == b"replacement"
 
 
 def test_linux_should_list_default_rm_or_tran():

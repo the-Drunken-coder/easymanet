@@ -58,12 +58,18 @@ from ._download_release import (
 from . import __version__
 from .format import human_size
 from .workspace import images_dir
-from .release_trust import CUSTOM_TRUST_STATUS, OFFICIAL_TRUST_STATUS, PENDING_TRUST_STATUS
+from .release_trust import (
+    CUSTOM_TRUST_STATUS,
+    OFFICIAL_IMAGE_REPO,
+    OFFICIAL_IMAGE_SIGNER_WORKFLOW,
+    OFFICIAL_TRUST_STATUS,
+    PENDING_TRUST_STATUS,
+)
 
 DownloadEventCallback = Callable[[dict[str, Any]], None]
 
 DEFAULT_EASYMANET_GITHUB_REPO = "the-Drunken-coder/easymanet"
-DEFAULT_IMAGE_GITHUB_REPO = "the-Drunken-coder/easymanet-images"
+DEFAULT_IMAGE_GITHUB_REPO = OFFICIAL_IMAGE_REPO
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
@@ -264,16 +270,26 @@ def _verify_official_image_trust(path: Path, trust: dict[str, Any] | None = None
     if not trust or trust.get("source") != "official":
         return trust
     status = trust.get("status")
-    if status == OFFICIAL_TRUST_STATUS:
-        return trust
     if status != PENDING_TRUST_STATUS:
         raise OSError("Official image trust metadata is not verification-ready.")
+    if trust.get("manifest_signature_verified") is not True:
+        raise OSError("Official image manifest signature was not verified.")
     repo = str(trust.get("expected_repo") or "")
-    if not repo:
-        raise OSError("Official image trust metadata is missing the expected GitHub repo.")
+    if repo != OFFICIAL_IMAGE_REPO:
+        raise OSError("Official image trust metadata does not match the pinned image repo.")
     if shutil.which("gh") is None:
         raise OSError("GitHub CLI is required to verify official EasyMANET image attestations.")
-    command = ["gh", "attestation", "verify", str(path), "--repo", repo]
+    command = [
+        "gh",
+        "attestation",
+        "verify",
+        str(path),
+        "--repo",
+        repo,
+        "--signer-workflow",
+        OFFICIAL_IMAGE_SIGNER_WORKFLOW,
+        "--deny-self-hosted-runners",
+    ]
     try:
         subprocess.run(command, check=True, text=True, capture_output=True, timeout=120)
     except FileNotFoundError as exc:
@@ -369,6 +385,8 @@ def _save_version(
         warnings = trust.get("warnings")
         if isinstance(warnings, list):
             entry["warnings"] = [str(item) for item in warnings]
+        if trust.get("manifest_signature_verified") is True:
+            entry["manifest_signature_verified"] = True
     data[target] = entry
     path.write_text(json.dumps(data, indent=2))
 

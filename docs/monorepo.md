@@ -18,9 +18,7 @@ publish/export tooling.
 
 Import from the explicit surface that owns the behavior: `easymanet_cli`,
 `easymanet_image`, `easymanet_desktop`, `easymanet_publish`, or shared core
-modules under `easymanet`. Compatibility imports may remain when public tests
-or downstream users already rely on them, but new ownership should follow the
-surface boundaries above.
+modules under `easymanet`.
 
 ## Product Surfaces
 
@@ -51,9 +49,9 @@ workspace fleet name such as `--config field`, which resolves to
 The Electron desktop app loads `index.html` from the local checkout, exposes
 only a narrow `window.easymanet` preload API, and calls the Python desktop
 bridge for state, disk discovery, and fleet validation. The browser-served
-console remains available for development and smoke testing. Neither mode
-introduces a separate app database; both desktop modes read fleet and image
-state from the shared workspace.
+console remains available for development and smoke testing, but accepts only
+IPv4 loopback bind addresses. Neither mode introduces a separate app database;
+both desktop modes read fleet and image state from the shared workspace.
 
 ## Image Release Metadata
 

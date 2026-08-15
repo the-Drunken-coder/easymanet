@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from easymanet_publish import export as export_mod
 from easymanet_publish import surfaces as surface_registry
 
 try:
@@ -29,6 +31,36 @@ def load_publish_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def track_paths(repo_root: Path, *paths: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    if paths:
+        subprocess.run(["git", "add", *paths], cwd=repo_root, check=True)
+
+
+def commit_index(repo_root: Path) -> str:
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "snapshot",
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def missing_local_markdown_links(root: Path) -> list[str]:
@@ -112,11 +144,9 @@ def test_tracked_files_rejects_untracked_file_source(monkeypatch, tmp_path):
     rel_path = "tmp-untracked-source.txt"
     source = tmp_path / rel_path
     source.write_text("do not publish\n", encoding="utf-8")
-    spec = SimpleNamespace(source_paths=(rel_path,))
+    track_paths(tmp_path)
 
     monkeypatch.setattr(publish, "ROOT", tmp_path)
-    monkeypatch.setattr(publish, "REPO_SPECS", {"test": spec})
-    monkeypatch.setattr(publish, "git_output", lambda _args: "")
 
     with pytest.raises(FileNotFoundError, match="no tracked files"):
         publish.tracked_files_for(rel_path)
@@ -160,6 +190,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
             assert (repo / "tools" / "release_smoke.py").exists()
 
     assert (generated["images"] / "tests" / "test_image_workflows.py").exists()
+    assert (generated["images"] / "tests" / "test_download_manifest.py").exists()
+    assert (generated["cli"] / "tests" / "test_download_manifest.py").exists()
     assert (generated["images"] / "tools" / "packaging" / "cleanup_image_releases.py").exists()
     assert (generated["images"] / "tools" / "packaging" / "generate_image_release_notes.py").exists()
     assert not (generated["cli"] / "tests" / "test_image_workflows.py").exists()
@@ -190,6 +222,7 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     image_pyproject = tomllib.loads((generated["images"] / "pyproject.toml").read_text(encoding="utf-8"))
     assert image_pyproject["project"]["name"] == "easymanet-images"
     assert image_pyproject["project"]["scripts"] == {"easymanet": "easymanet_cli.app:main"}
+    assert "sigstore>=4.5,<5" in image_pyproject["project"]["dependencies"]
     assert (image_workflows / "image-release.yml").exists()
     assert not (image_workflows / "build-openmanet-image.yml").exists()
     assert not (image_workflows / "prove-overlay-weekly.yml").exists()
@@ -198,6 +231,8 @@ def test_generated_product_repos_exclude_authoring_only_files(tmp_path):
     assert "images/openmanet/provisioning/openwrt-overlay/**" in image_release
     assert 'raise SystemExit("No firmware artifacts (*.img.gz) were produced")' in image_release
     assert "actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45" in image_release
+    assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in image_release
+    assert "cosign-release: v3.0.6" in image_release
     assert "cosign sign-blob" in image_release
     assert "generate_image_release_notes.py" in image_release
     assert "OPENCODE_GO_API_KEY" in image_release
@@ -240,6 +275,34 @@ def test_generated_desktop_repo_contains_packaging_sources_and_surface_pyproject
     assert pyproject["tool"]["setuptools"]["package-data"]["easymanet_desktop"] == ["static/*"]
 
 
+def test_generated_desktop_release_is_macos_only(tmp_path):
+    publish = load_publish_module()
+    repo = publish.generate_repo(
+        publish.REPO_SPECS["desktop"],
+        tmp_path,
+        "review-branch",
+        "source-sha",
+    )
+
+    workflow = (repo / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
+    builder = (repo / "apps" / "desktop" / "electron" / "electron-builder.yml").read_text(encoding="utf-8")
+    electron_readme = (repo / "apps" / "desktop" / "electron" / "README.md").read_text(encoding="utf-8")
+    desktop_readme = (repo / "README.md").read_text(encoding="utf-8")
+    public_repos = (ROOT / "docs" / "public-repos.md").read_text(encoding="utf-8")
+
+    assert "runs-on: macos-14" in workflow
+    assert "--mac dmg zip" in workflow
+    assert "windows-2022" not in workflow
+    assert "--win" not in workflow
+    assert ".exe" not in workflow
+    assert "win:" not in builder
+    assert "nsis:" not in builder
+    for text in (electron_readme, desktop_readme, public_repos):
+        normalized = " ".join(text.split())
+        assert "macOS-only" in normalized
+        assert "Python/CLI runtime separately supports macOS and Linux" in normalized
+
+
 def test_surface_pyproject_uses_shared_spec_package_roots():
     publish = load_publish_module()
 
@@ -265,6 +328,20 @@ def test_cli_surface_pyproject_uses_surface_package_name():
     assert pyproject["project"]["version"] == "9.8.7"
 
 
+def test_root_image_data_files_match_the_generated_image_surface():
+    root_pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    generated_pyproject = tomllib.loads(
+        surface_registry.render_surface_pyproject(surface_registry.SURFACES["images"], "9.8.7")
+    )
+    expected_data_files = {
+        target: list(source_paths)
+        for target, source_paths in surface_registry.IMAGE_DATA_FILES
+    }
+
+    assert root_pyproject["tool"]["setuptools"]["data-files"] == expected_data_files
+    assert generated_pyproject["tool"]["setuptools"]["data-files"] == expected_data_files
+
+
 def test_generation_metadata_is_deterministic():
     publish = load_publish_module()
 
@@ -275,15 +352,188 @@ def test_generation_metadata_is_deterministic():
     assert "Generated at:" not in first
 
 
-def test_tracked_files_for_rejects_existing_untracked_source(monkeypatch, tmp_path):
+def test_tracked_files_for_rejects_paths_outside_the_repository(monkeypatch, tmp_path):
     publish = load_publish_module()
-    (tmp_path / "local-only.txt").write_text("secret-ish local content\n")
 
     monkeypatch.setattr(publish, "ROOT", tmp_path)
-    monkeypatch.setattr(publish, "git_output", lambda _args: "")
 
-    with pytest.raises(FileNotFoundError, match="has no tracked files"):
-        publish.tracked_files_for("local-only.txt")
+    with pytest.raises(ValueError, match="relative to the repository"):
+        publish.tracked_files_for("../local-only.txt")
+
+
+def test_preview_and_remote_generation_share_tracked_inputs(monkeypatch, tmp_path):
+    source_root = tmp_path / "authoring"
+    template_dir = source_root / "product_repos" / "templates" / "test"
+    tracked_source = source_root / "src" / "nested" / "tracked.py"
+    tracked_template = template_dir / ".github" / "workflows" / "release.yml"
+    tracked_source.parent.mkdir(parents=True)
+    tracked_template.parent.mkdir(parents=True)
+    tracked_source.write_text("tracked = True\n", encoding="utf-8")
+    tracked_template.write_text("name: release\n", encoding="utf-8")
+    (source_root / "pyproject.toml").write_text('version = "1.2.3"\n', encoding="utf-8")
+    track_paths(
+        source_root,
+        "pyproject.toml",
+        "src/nested/tracked.py",
+        "product_repos/templates/test/.github/workflows/release.yml",
+    )
+    source_sha = commit_index(source_root)
+    untracked_source = source_root / "src" / "nested" / "local-only.py"
+    untracked_template = template_dir / ".github" / "workflows" / "local-only.yml"
+    untracked_source.write_text("local = True\n", encoding="utf-8")
+    untracked_template.write_text("name: local only\n", encoding="utf-8")
+    surface = surface_registry.SurfaceSpec(
+        key="test",
+        local_name="test",
+        repo_name="test-repo",
+        description="Test surface.",
+        source_paths=("src",),
+        package_roots=(),
+        package_includes=(),
+        scripts=(),
+        dispatch_event="test-release",
+        release_workflow="release.yml",
+    )
+
+    monkeypatch.setattr(export_mod, "SURFACES", {"test": surface})
+    preview = export_mod.export_public_surfaces(
+        tmp_path / "preview",
+        repo_root=source_root,
+        source_ref=source_sha,
+    )
+    publish = load_publish_module()
+    monkeypatch.setattr(publish, "ROOT", source_root)
+    remote = publish.generate_repo(surface, tmp_path / "remote", "branch", source_sha)
+
+    preview_root = Path(preview["surfaces"]["test"]["path"])
+    for path in ("src/nested/tracked.py", ".github/workflows/release.yml"):
+        assert (preview_root / path).exists()
+        assert (remote / path).exists()
+    for path in ("src/nested/local-only.py", ".github/workflows/local-only.yml"):
+        assert not (preview_root / path).exists()
+        assert not (remote / path).exists()
+
+
+def test_local_export_reads_exact_commit_not_dirty_tracked_bytes(monkeypatch, tmp_path):
+    source_root = tmp_path / "authoring"
+    template = source_root / "product_repos" / "templates" / "test" / "README.md"
+    source = source_root / "src" / "value.py"
+    template.parent.mkdir(parents=True)
+    source.parent.mkdir(parents=True)
+    template.write_text("template\n")
+    source.write_text("value = 'committed'\n")
+    (source_root / "pyproject.toml").write_text('version = "1.2.3"\n')
+    track_paths(
+        source_root,
+        "pyproject.toml",
+        "src/value.py",
+        "product_repos/templates/test/README.md",
+    )
+    source_sha = commit_index(source_root)
+    source.write_text("value = 'dirty'\n")
+    surface = surface_registry.SurfaceSpec(
+        key="test",
+        local_name="test",
+        repo_name="test-repo",
+        description="Test surface.",
+        source_paths=("src",),
+        package_roots=(),
+        package_includes=(),
+        scripts=(),
+        dispatch_event="test-release",
+        release_workflow="release.yml",
+    )
+    monkeypatch.setattr(export_mod, "SURFACES", {"test": surface})
+
+    record = export_mod.export_public_surfaces(
+        tmp_path / "preview",
+        repo_root=source_root,
+        source_ref=source_sha,
+    )
+
+    exported = Path(record["surfaces"]["test"]["path"]) / "src" / "value.py"
+    assert record["source_ref"] == source_sha
+    assert exported.read_text() == "value = 'committed'\n"
+
+
+def test_publish_rejects_tracked_changes_not_in_source_commit(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    readme = repo / "README.md"
+    readme.write_text("committed\n")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    source_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    readme.write_text("dirty\n")
+    monkeypatch.setattr(publish, "ROOT", repo)
+
+    with pytest.raises(SystemExit, match="must be committed"):
+        publish.validate_source_commit(source_sha)
+
+
+def test_publish_materializes_exact_commit_bytes(monkeypatch, tmp_path):
+    publish = load_publish_module()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = repo / "script.sh"
+    script.write_text("committed\n")
+    script.chmod(0o755)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "script.sh"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    source_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    script.write_text("dirty\n")
+    monkeypatch.setattr(publish, "ROOT", repo)
+
+    snapshot, materialized_sha = surface_registry.materialize_commit(
+        repo,
+        source_sha,
+        tmp_path / "snapshot",
+    )
+
+    assert materialized_sha == source_sha
+    assert (snapshot / "script.sh").read_text() == "committed\n"
+    assert os.access(snapshot / "script.sh", os.X_OK)
 
 
 def test_remote_url_never_embeds_publish_token(monkeypatch):
@@ -509,6 +759,12 @@ def test_main_dispatches_after_published_commit(monkeypatch, tmp_path):
     dispatches = []
 
     monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
+    monkeypatch.setattr(
+        publish,
+        "materialize_commit",
+        lambda _repo_root, source_sha, _destination: (ROOT, source_sha),
+    )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
     monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: "published-sha")
@@ -527,6 +783,12 @@ def test_main_dispatches_when_push_has_no_changes(monkeypatch, tmp_path):
     dispatches = []
 
     monkeypatch.setattr(publish, "parse_args", lambda: args)
+    monkeypatch.setattr(publish, "validate_source_commit", lambda source_sha: source_sha)
+    monkeypatch.setattr(
+        publish,
+        "materialize_commit",
+        lambda _repo_root, source_sha, _destination: (ROOT, source_sha),
+    )
     monkeypatch.setattr(publish, "selected_specs", lambda _product: [publish.REPO_SPECS["cli"]])
     monkeypatch.setattr(publish, "generate_repo", lambda *_args: generated_dir)
     monkeypatch.setattr(publish, "sync_to_remote", lambda *_args: None)

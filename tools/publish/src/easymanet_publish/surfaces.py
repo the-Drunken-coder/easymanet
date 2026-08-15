@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +26,11 @@ class SurfaceSpec:
     package_name: str | None = None
     package_data: tuple[tuple[str, tuple[str, ...]], ...] = ()
     include_image_data: bool = False
-    dependencies: tuple[str, ...] = ("typer>=0.9", "pyyaml>=6")
+    dependencies: tuple[str, ...] = (
+        "sigstore>=4.5,<5",
+        "typer>=0.9",
+        "pyyaml>=6",
+    )
     dev_dependencies: tuple[str, ...] = (
         "pytest>=7",
         "pytest-cov",
@@ -44,6 +51,95 @@ class SurfaceSpec:
         return repo_root / "product_repos" / "templates" / self.key
 
 
+def tracked_files(repo_root: Path, rel_path: str) -> tuple[str, ...]:
+    """Return the tracked files contained by one declared surface input."""
+    source_path = Path(rel_path)
+    if source_path.is_absolute() or ".." in source_path.parts:
+        raise ValueError(f"Source path must be relative to the repository: {rel_path}")
+
+    root = repo_root.resolve()
+    source = root / source_path
+    if not source.exists():
+        raise FileNotFoundError(f"Source path does not exist: {rel_path}")
+
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", source_path.as_posix()],
+        cwd=root,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    files = tuple(sorted(path for path in result.stdout.split("\0") if path))
+    if not files:
+        raise FileNotFoundError(f"Source path has no tracked files: {rel_path}")
+
+    for tracked_path in files:
+        tracked = Path(tracked_path)
+        if tracked.is_absolute() or ".." in tracked.parts:
+            raise ValueError(f"Git returned an unsafe tracked path: {tracked_path}")
+        candidate = root / tracked
+        if candidate.is_symlink():
+            raise ValueError(f"Tracked surface files cannot be symbolic links: {tracked_path}")
+        if source.is_dir():
+            try:
+                candidate.relative_to(source)
+            except ValueError as error:
+                raise ValueError(
+                    f"Git returned a path outside source path {rel_path}: {tracked_path}"
+                ) from error
+        elif candidate != source:
+            raise ValueError(
+                f"Git returned a path outside source path {rel_path}: {tracked_path}"
+            )
+
+    return files
+
+
+def materialize_commit(
+    repo_root: Path,
+    source_ref: str,
+    destination: Path,
+) -> tuple[Path, str]:
+    """Extract one exact Git commit into a temporary source tree."""
+    result = subprocess.run(
+        ["git", "rev-parse", f"{source_ref}^{{commit}}"],
+        cwd=repo_root,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    source_sha = result.stdout.strip()
+    archive_path = destination / "source.tar"
+    source_root = destination / "source"
+    source_root.mkdir(parents=True)
+    subprocess.run(
+        ["git", "archive", "--format=tar", "--output", str(archive_path), source_sha],
+        cwd=repo_root,
+        check=True,
+    )
+
+    with tarfile.open(archive_path, "r") as archive:
+        for member in archive.getmembers():
+            relative = Path(member.name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Git archive contained an unsafe path: {member.name}")
+            target = source_root / relative
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise ValueError(f"Git archive contained a non-file entry: {member.name}")
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError(f"Git archive file could not be read: {member.name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            target.chmod(member.mode & 0o777)
+    archive_path.unlink()
+    return source_root, source_sha
+
+
 PRODUCT_DOC_PATHS = (
     "docs/architecture.md",
     "docs/flashing.md",
@@ -60,6 +156,7 @@ PRODUCT_TEST_PATHS = (
     "tests/test_cli_common.py",
     "tests/test_disks.py",
     "tests/test_download.py",
+    "tests/test_download_manifest.py",
     "tests/test_extra_packages.py",
     "tests/test_firstboot.py",
     "tests/test_image.py",

@@ -165,7 +165,7 @@ def stage_boot_payload(
     return results
 
 
-def inject_dry_run_info(_manifest: Manifest, _node_name: str) -> str:
+def inject_dry_run_info() -> str:
     lines = ["Files to place on the boot FAT partition:"]
     lines.append("  /easymanet/provision.json")
     lines.append("       (generated from fleet.yml for this node)")

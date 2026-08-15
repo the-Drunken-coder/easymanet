@@ -1,5 +1,9 @@
 # EasyMANET Verification System Plan
 
+Historical snapshot: the profiles described here are implemented by
+`python tools/verify.py`. Use the root README and [`docs/release.md`](release.md)
+for current commands. Do not add a second verification wrapper.
+
 ## Summary
 
 Build a layered verification system that makes bench testing the exception, not

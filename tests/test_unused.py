@@ -1,9 +1,23 @@
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "images" / "openmanet" / "provisioning" / "openwrt-overlay"
 DESKTOP_INDEX = ROOT / "apps" / "desktop" / "src" / "easymanet_desktop" / "static" / "index.html"
+
+
+class _DisabledTabParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "button":
+            return
+        attributes = dict(attrs)
+        if attributes.get("role") == "tab" and "disabled" in attributes:
+            self.tags.append(self.get_starttag_text())
 
 
 def _overlay_texts() -> dict[Path, str]:
@@ -34,5 +48,6 @@ def test_overlay_shell_functions_have_callers():
 
 
 def test_desktop_nav_has_no_disabled_placeholder_tabs():
-    html = DESKTOP_INDEX.read_text()
-    assert 'role="tab" aria-selected="false" disabled>' not in html
+    parser = _DisabledTabParser()
+    parser.feed(DESKTOP_INDEX.read_text())
+    assert parser.tags == []

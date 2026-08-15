@@ -16,10 +16,6 @@ easymanet_log_network() {
     echo "[$(date)] $*" >> "$EASYMANET_NETWORK_LOG"
 }
 
-easymanet_json_val() {
-    json_val "$@"
-}
-
 easymanet_find_network_device_section() {
     bridge_name="$1"
     uci show network | sed -n "s/^network\.\([^.=]*\)\.name='$bridge_name'$/\1/p" | head -n 1
@@ -34,8 +30,8 @@ easymanet_delete_network_device_by_name() {
 }
 
 easymanet_eth0_mesh_side() {
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
     wifi_uplink=0
     if json_bool node gateway wifi enabled; then
@@ -62,7 +58,7 @@ easymanet_ensure_ahwlan_bridge() {
 }
 
 easymanet_ensure_ahwlan_interface() {
-    node_ip="$(easymanet_json_val node ip 2>/dev/null || true)"
+    node_ip="$(json_val node ip 2>/dev/null || true)"
     uci set network."$EM_AHWLAN_IFACE"=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network."$EM_AHWLAN_IFACE".proto="static" >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network."$EM_AHWLAN_IFACE".device="$EM_AHWLAN_BRIDGE" >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -73,7 +69,7 @@ easymanet_ensure_ahwlan_interface() {
 }
 
 easymanet_restore_gateway_wan() {
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
     [ "$role" = "gate" ] || return 0
 
     uci set network.wan=interface >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -88,7 +84,7 @@ easymanet_restore_gateway_wan() {
         return 0
     fi
 
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
     uci set network.wan.device="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
     uci set network.wan.ifname="$uplink" >> "$EASYMANET_NETWORK_LOG" 2>&1
@@ -98,8 +94,8 @@ easymanet_repair_management_lan() {
     reason="${1:-manual}"
     mgmt_iface="eth0"
 
-    role="$(easymanet_json_val node role 2>/dev/null || true)"
-    uplink="$(easymanet_json_val node gateway uplink_interface 2>/dev/null || true)"
+    role="$(json_val node role 2>/dev/null || true)"
+    uplink="$(json_val node gateway uplink_interface 2>/dev/null || true)"
     [ -n "$uplink" ] || uplink="eth0"
 
     easymanet_log_network "ensuring mesh-side access uses $EM_AHWLAN_BRIDGE reason=$reason role=$role uplink=$uplink"

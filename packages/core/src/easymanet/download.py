@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ._download_integrity import (
-    SHA256_PATTERN,
     image_sha256,
     normalize_sha256,
     valid_image_payload as _valid_image_payload,

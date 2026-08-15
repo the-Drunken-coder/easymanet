@@ -169,14 +169,6 @@ def lookup_device(
     return disk
 
 
-def find_disk(device: str) -> Optional[DiskInfo]:
-    disks = list_disks()
-    for disk in disks:
-        if disk.device == device:
-            return disk
-    return lookup_device(device, default_disks=disks)
-
-
 def assert_flash_allowed(device: str, force: bool = False) -> DiskInfo:
     if not _disks_module()._is_block_device(device):
         raise ValueError(

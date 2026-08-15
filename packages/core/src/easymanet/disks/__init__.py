@@ -21,7 +21,6 @@ from .core import (
     assert_device_identity,
     capture_device_identity,
     eject_disk,
-    find_disk,
     get_partition2_wipe_range,
     list_disks,
     lookup_device,
@@ -45,7 +44,6 @@ from .linux import (
 )
 from .macos import (
     _macos_partition2_wipe_range,
-    get_macos_partitions,
     list_disks_macos,
     lookup_device_macos,
     unmount_disk_macos,
@@ -66,8 +64,6 @@ __all__ = [
     "capture_device_identity",
     "debug_note",
     "eject_disk",
-    "find_disk",
-    "get_macos_partitions",
     "get_partition2_wipe_range",
     "glob",
     "is_linux",

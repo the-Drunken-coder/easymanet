@@ -1,9 +1,3 @@
-"""Config validation.
-
-Validates fleet.yml configuration against all required rules.
-Returns a list of errors and warnings.
-"""
-
 import ipaddress
 import re
 from typing import Optional
@@ -471,7 +465,3 @@ def _validate_gateway_semantics(
             f"Node '{node_label}': gateway.uplink_interface: wifi requires "
             "gateway.wifi.enabled: true"
         )
-
-
-def resolve_node(manifest: Manifest, node_name: str) -> dict:
-    return resolve_node_model(manifest, node_name).to_dict()

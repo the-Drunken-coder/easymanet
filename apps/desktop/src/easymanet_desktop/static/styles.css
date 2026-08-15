@@ -1,5 +1,3 @@
-/* EasyMANET operator console - dark theme design system. */
-
 :root {
   color-scheme: dark;
   --bg: #0b1014;
@@ -104,8 +102,6 @@ code {
   background: rgba(52, 211, 153, 0.3);
 }
 
-/* ---------- App bar ---------- */
-
 .appbar {
   position: sticky;
   top: 0;
@@ -169,8 +165,6 @@ body.flash-busy .appbar {
   display: none;
 }
 
-/* ---------- Shell navigation ---------- */
-
 .app-shell {
   display: grid;
   grid-template-columns: 228px minmax(0, 1fr);
@@ -225,7 +219,7 @@ body.flash-busy .appbar {
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.nav-item:hover:not(:disabled) {
+.nav-item:hover {
   background: var(--bg-raised);
   color: var(--ink);
 }
@@ -234,12 +228,6 @@ body.flash-busy .appbar {
   background: var(--accent-dim);
   border-color: rgba(52, 211, 153, 0.32);
   color: var(--accent);
-}
-
-.nav-item:disabled {
-  color: var(--faint);
-  cursor: not-allowed;
-  opacity: 0.62;
 }
 
 .nav-icon {
@@ -267,8 +255,6 @@ body.flash-busy .appbar {
 .tab-panel {
   min-width: 0;
 }
-
-/* ---------- Layout ---------- */
 
 .layout {
   display: grid;
@@ -356,8 +342,6 @@ body.flash-busy .appbar {
 .side-panel .status-text {
   font-size: 10.5px;
 }
-
-/* ---------- Functional panes ---------- */
 
 .pane {
   background: transparent;
@@ -599,8 +583,6 @@ body.flash-busy .appbar {
   content: "\2713";
 }
 
-/* ---------- Fields ---------- */
-
 .field {
   display: grid;
   gap: 6px;
@@ -681,8 +663,6 @@ select:disabled {
   color: var(--faint);
 }
 
-/* ---------- Buttons ---------- */
-
 .btn {
   display: inline-flex;
   align-items: center;
@@ -749,8 +729,6 @@ select:disabled {
   width: 100%;
 }
 
-/* ---------- State text ---------- */
-
 .status-text {
   color: var(--muted);
   font-size: 11px;
@@ -774,8 +752,6 @@ select:disabled {
 .status-text[data-tone="bad"] {
   color: var(--bad);
 }
-
-/* ---------- Switch ---------- */
 
 .switch {
   display: inline-flex;
@@ -821,8 +797,6 @@ select:disabled {
   left: 16px;
   background: var(--accent);
 }
-
-/* ---------- Empty states & inline errors ---------- */
 
 .empty-state {
   display: flex;
@@ -875,8 +849,6 @@ select:disabled {
   border-color: rgba(251, 191, 36, 0.34);
 }
 
-/* ---------- Validation ---------- */
-
 .validation {
   display: flex;
   flex-direction: column;
@@ -920,8 +892,6 @@ select:disabled {
 .v-text {
   overflow-wrap: anywhere;
 }
-
-/* ---------- Tables ---------- */
 
 .table-wrap {
   overflow-x: auto;
@@ -1005,8 +975,6 @@ select:disabled {
   color: var(--warn);
 }
 
-/* ---------- Mesh discovery ---------- */
-
 .mesh-layout {
   grid-template-columns: minmax(330px, 410px) minmax(280px, 1fr);
   align-items: stretch;
@@ -1087,8 +1055,6 @@ select:disabled {
   text-transform: uppercase;
 }
 
-/* ---------- Flash panel ---------- */
-
 .flash-review {
   display: grid;
   gap: 7px;
@@ -1139,7 +1105,6 @@ select:disabled {
   font-weight: 650;
 }
 
-/* Segmented control: radios are visually hidden, labels act as segments. */
 .segmented {
   position: relative;
   display: grid;
@@ -1274,8 +1239,6 @@ select:disabled {
   display: none;
 }
 
-/* ---------- Flash state ---------- */
-
 .flash-runtime {
   display: grid;
   gap: 12px;
@@ -1307,8 +1270,6 @@ select:disabled {
 .state-row[data-state="active"] td {
   color: var(--info);
 }
-
-/* ---------- Flash plan ---------- */
 
 .plan {
   display: grid;
@@ -1354,8 +1315,6 @@ select:disabled {
 .flash-output-col .plan-details pre {
   max-height: clamp(90px, 16vh, 140px);
 }
-
-/* ---------- Activity log ---------- */
 
 .console-wrap {
   display: grid;
@@ -1417,8 +1376,6 @@ select:disabled {
 .log-line.bad .log-msg {
   color: var(--bad);
 }
-
-/* ---------- Responsive ---------- */
 
 @media (max-width: 980px) {
   .app-shell {

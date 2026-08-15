@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Generate and optionally publish EasyMANET public product repositories."""
 
 from __future__ import annotations
 
@@ -32,17 +31,6 @@ from easymanet_publish.surfaces import (  # noqa: E402
 DEFAULT_OWNER = "the-Drunken-coder"
 DEFAULT_OUTPUT_DIR = ROOT / "build" / "product-repos"
 GITHUB_HOST = "github.com"
-
-
-def existing_path(*candidates: str) -> str:
-    for rel_path in candidates:
-        if (ROOT / rel_path).exists():
-            return rel_path
-    raise FileNotFoundError(f"None of these source paths exist: {', '.join(candidates)}")
-
-
-def optional_existing_paths(*candidates: str) -> tuple[str, ...]:
-    return tuple(rel_path for rel_path in candidates if (ROOT / rel_path).exists())
 
 
 RepoSpec = SurfaceSpec

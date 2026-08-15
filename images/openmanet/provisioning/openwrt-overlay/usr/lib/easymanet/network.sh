@@ -1,5 +1,4 @@
 #!/bin/sh
-# EasyMANET network helpers shared by provisioning and late boot repair.
 
 EASYMANET_NETWORK_LOG="${EASYMANET_NETWORK_LOG:-/var/log/easymanet-network.log}"
 EASYMANET_PROVISION_JSON="${EASYMANET_PROVISION_JSON:-/etc/easymanet/provision.json}"
@@ -15,10 +14,6 @@ PROVISION_JSON="$EASYMANET_PROVISION_JSON"
 
 easymanet_log_network() {
     echo "[$(date)] $*" >> "$EASYMANET_NETWORK_LOG"
-}
-
-easymanet_json_path() {
-    json_path "$@"
 }
 
 easymanet_json_val() {
@@ -112,8 +107,6 @@ easymanet_repair_management_lan() {
     uci -q delete network.lan 2>/dev/null || true
     easymanet_delete_network_device_by_name br-lan
 
-    # eth0 belongs to WAN only when this gateway selected it as the uplink.
-    # Otherwise stale WAN config on eth0 or a legacy bridge fights br-ahwlan.
     wan_device="$(uci -q get network.wan.device || true)"
     wan_ifname="$(uci -q get network.wan.ifname || true)"
     wan_uses_mesh_eth=0
@@ -133,8 +126,6 @@ easymanet_repair_management_lan() {
         uci -q delete network.wan6 2>/dev/null || true
     fi
 
-    # If stale mesh-side WAN was removed, rebuild gateway WAN from the
-    # provision payload for eth0, non-eth0, and Wi-Fi uplink gateways.
     easymanet_restore_gateway_wan
 
     easymanet_ensure_ahwlan_bridge

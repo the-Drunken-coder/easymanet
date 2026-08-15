@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Generate and optionally publish EasyMANET public product repositories."""
 
 from __future__ import annotations
 

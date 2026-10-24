@@ -3,13 +3,19 @@
 import gzip
 import hashlib
 import io
+import json
 import os
+from pathlib import Path
+import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
+import easymanet.image as image_writer
 from easymanet.disks import DiskInfo, capture_device_identity
+from easymanet.disks import core as disk_core
 from easymanet.image import (
     FlashError,
     _check_device_safety,
@@ -30,6 +36,15 @@ REAL_DD_TEST = pytest.mark.skipif(
     sys.platform != "linux",
     reason="spawns the host dd binary; command-line flags differ across platforms",
 )
+
+
+@pytest.fixture(autouse=True)
+def inert_image_resource(monkeypatch, tmp_path):
+    resource = f"inert-image:{tmp_path}"
+    monkeypatch.setattr(disk_core, "flash_resource_key", lambda _device: resource)
+    yield
+    digest = hashlib.sha256(resource.encode()).hexdigest()
+    Path(f"/tmp/easymanet-media-{digest}.lock").unlink(missing_ok=True)
 
 
 def _memory_tempfile():
@@ -134,7 +149,7 @@ def test_clear_stale_overlay_skips_trailing_metadata_gzip_when_payload_covers_re
         return subprocess_completed()
 
     monkeypatch.setattr("easymanet.image.subprocess.run", fake_run)
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
 
     events = []
     _clear_stale_overlay(
@@ -156,7 +171,7 @@ def subprocess_completed():
 
 
 def test_unmount_or_raise_does_not_wrap_programming_errors(monkeypatch):
-    def fail_unmount(_device):
+    def fail_unmount(_device, **_kwargs):
         raise TypeError("bug in caller")
 
     monkeypatch.setattr("easymanet.image.unmount_disk", fail_unmount)
@@ -183,11 +198,11 @@ def test_reread_partition_table_surfaces_command_failure(monkeypatch):
     assert run_calls == [
         (
             ["blockdev", "--rereadpt", "/dev/sdb"],
-            {"capture_output": True, "text": True, "timeout": 30, "check": True},
+            {"capture_output": True, "text": True, "timeout": 30, "check": True, "pass_fds": ()},
         ),
         (
             ["partprobe", "/dev/sdb"],
-            {"capture_output": True, "text": True, "timeout": 30, "check": True},
+            {"capture_output": True, "text": True, "timeout": 30, "check": True, "pass_fds": ()},
         ),
     ]
 
@@ -208,7 +223,7 @@ def test_reread_partition_table_skips_partprobe_when_blockdev_succeeds(monkeypat
     assert run_calls == [
         (
             ["blockdev", "--rereadpt", "/dev/sdb"],
-            {"capture_output": True, "text": True, "timeout": 30, "check": True},
+            {"capture_output": True, "text": True, "timeout": 30, "check": True, "pass_fds": ()},
         )
     ]
 
@@ -234,7 +249,7 @@ def test_clear_stale_overlay_uses_large_bulk_dd(monkeypatch, tmp_path):
     def fake_run(cmd, check=False, **kwargs):
         calls.append((cmd, check, kwargs))
 
-    def fake_unmount(device):
+    def fake_unmount(device, **_kwargs):
         unmount_calls.append(device)
 
     tail_start = 138412032
@@ -248,7 +263,7 @@ def test_clear_stale_overlay_uses_large_bulk_dd(monkeypatch, tmp_path):
     monkeypatch.setattr("easymanet.image.subprocess.run", fake_run)
     monkeypatch.setattr("easymanet.image.unmount_disk", fake_unmount)
     monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", fake_wipe_range)
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
     monkeypatch.setattr("easymanet.image._assert_device_identity", lambda _identity: None)
     monkeypatch.setattr(
         "easymanet.image._open_device_for_write",
@@ -325,12 +340,12 @@ def test_clear_stale_overlay_places_each_dd_phase_at_absolute_offset(monkeypatch
 
     monkeypatch.setattr("easymanet.image._OVERLAY_WIPE_SECTOR_BYTES", 1)
     monkeypatch.setattr("easymanet.image._OVERLAY_WIPE_BULK_BYTES", 1024)
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
     monkeypatch.setattr(
         "easymanet.image.get_partition2_wipe_range",
         lambda _d: (10, 2050),
     )
-    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d, **_kwargs: None)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
     monkeypatch.setattr("easymanet.image.subprocess.run", emulate_dd)
 
@@ -367,12 +382,12 @@ def test_clear_stale_overlay_never_writes_past_partition_range(
         os.write(stdout, b"\x00" * block_bytes * count_blocks)
 
     monkeypatch.setattr("easymanet.image._OVERLAY_WIPE_BULK_BYTES", 1024)
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
     monkeypatch.setattr(
         "easymanet.image.get_partition2_wipe_range",
         lambda _d: (1024, 2048),
     )
-    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d, **_kwargs: None)
     monkeypatch.setattr("easymanet.image._tool_path", lambda name: name)
     monkeypatch.setattr("easymanet.image.subprocess.run", emulate_dd)
 
@@ -400,7 +415,7 @@ def test_clear_stale_overlay_rejects_replacement_during_layout_reread(
     selected.symlink_to(original)
     identity = capture_device_identity(str(selected))
 
-    def replace_during_reread(_device):
+    def replace_during_reread(_device, **_kwargs):
         selected.unlink()
         selected.symlink_to(replacement)
 
@@ -454,7 +469,7 @@ def test_clear_stale_overlay_skips_when_image_covers_region(monkeypatch, tmp_pat
         "easymanet.image.get_partition2_wipe_range",
         lambda _d: (1024, 2048),
     )
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
 
     def fake_run(cmd, *args, **kwargs):
         if cmd and cmd[0] == "dd":
@@ -479,8 +494,8 @@ def test_clear_stale_overlay_raises_when_no_partition_layout(monkeypatch, tmp_pa
     device = tmp_path / "device"
     device.write_bytes(b"\x00" * 8192)
     identity = capture_device_identity(str(device))
-    monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", lambda _d: None)
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", lambda _d, **_kwargs: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
     monkeypatch.setattr("easymanet.image.subprocess.run", lambda *a, **k: subprocess_completed())
 
     with pytest.raises(FlashError, match="stale OpenWrt overlay"):
@@ -498,11 +513,11 @@ def _patch_flash_safety(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "easymanet.image.assert_flash_allowed",
-        lambda _d, force=False: DiskInfo(str(device), removable=True),
+        lambda _d, force=False: DiskInfo(str(device), size_bytes=device.stat().st_size, removable=True),
     )
-    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d: None)
+    monkeypatch.setattr("easymanet.image.unmount_disk", lambda _d, **_kwargs: None)
     monkeypatch.setattr("easymanet.image.get_partition2_wipe_range", lambda _d: (8192, 4096))
-    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d: None)
+    monkeypatch.setattr("easymanet.image._reread_partition_table", lambda _d, **_kwargs: None)
     return device
 
 
@@ -520,7 +535,7 @@ def test_flash_image_dry_run_emits_disk_details(monkeypatch, tmp_path):
             "message": f"Device: {device}",
             "device": str(device),
             "model": "",
-            "size_human": "0.0 MB",
+            "size_human": "0.1 MB",
             "mounted": [],
             "removable": True,
         }
@@ -611,7 +626,7 @@ def test_flash_image_passes_retained_identity_to_overlay_wipe(monkeypatch, tmp_p
 
     monkeypatch.setattr(
         "easymanet.image.unmount_disk",
-        lambda d: unmount_calls.append(d),
+        lambda d, **_kwargs: unmount_calls.append(d),
     )
     monkeypatch.setattr("easymanet.image._write_raw_via_dd", lambda *_a, **_k: None)
     monkeypatch.setattr(
@@ -633,7 +648,7 @@ def test_flash_image_wraps_initial_unmount_failure(monkeypatch, tmp_path):
     image = tmp_path / "firmware.img"
     image.write_bytes(b"FLASH" * 64)
 
-    def fail_unmount(_device):
+    def fail_unmount(_device, **_kwargs):
         raise RuntimeError("target is busy")
 
     def unexpected_write(*_args):
@@ -658,10 +673,10 @@ def test_flash_image_rejects_device_replacement_after_unmount(monkeypatch, tmp_p
 
     monkeypatch.setattr(
         "easymanet.image.assert_flash_allowed",
-        lambda _device, force=False: DiskInfo(str(selected), removable=True),
+        lambda _device, force=False: DiskInfo(str(selected), size_bytes=65536, removable=True),
     )
 
-    def replace_selected_path(_device):
+    def replace_selected_path(_device, **_kwargs):
         selected.unlink()
         selected.symlink_to(replacement)
 
@@ -738,13 +753,201 @@ def test_flash_image_writes_opened_verified_image_after_path_replacement(
     assert image.read_bytes() == replacement_payload
 
 
+@pytest.mark.parametrize("compressed", [False, True], ids=["raw", "gzip"])
+@pytest.mark.parametrize("interval", ["after_hash", "unmount", "writing"])
+def test_flash_image_isolates_reviewed_bytes_from_source_overwrites(
+    monkeypatch, tmp_path, compressed, interval,
+):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    source = tmp_path / ("firmware.img.gz" if compressed else "firmware.img")
+    approved = bytes(range(256)) * 16
+    replacement = b"unreviewed bytes" * 256
+    encode = (lambda payload: gzip.compress(payload, mtime=0)) if compressed else bytes
+    source.write_bytes(encode(approved))
+    expected = hashlib.sha256(source.read_bytes()).hexdigest()
+    source_fds = []
+
+    def overwrite():
+        source.write_bytes(encode(replacement))
+
+    if interval == "after_hash":
+        real_hash = image_writer._sha256_fd
+
+        def hash_then_overwrite(fd):
+            digest = real_hash(fd)
+            overwrite()
+            return digest
+
+        monkeypatch.setattr(image_writer, "_sha256_fd", hash_then_overwrite)
+    elif interval == "unmount":
+        monkeypatch.setattr(image_writer, "unmount_disk", lambda *_a, **_k: overwrite())
+
+    def inert_sink(source_fd, target_fd, **_kwargs):
+        source_fds.append(source_fd)
+        os.lseek(source_fd, 0, os.SEEK_SET)
+        first = os.read(source_fd, 32)
+        if interval == "writing":
+            overwrite()
+        with os.fdopen(os.dup(source_fd), "rb") as stream:
+            captured = first + stream.read()
+        payload = gzip.decompress(captured) if compressed else captured
+        image_writer._write_all(target_fd, payload)
+
+    writer_name = "_write_gz_via_dd" if compressed else "_write_raw_via_dd"
+    monkeypatch.setattr(image_writer, writer_name, inert_sink)
+    monkeypatch.setattr(image_writer.os, "sync", lambda: None)
+
+    flash_image(
+        str(device), str(source), expected_sha256=expected,
+        force=True, skip_overlay_wipe=True,
+    )
+
+    assert device.read_bytes()[:len(approved)] == approved
+    assert source.read_bytes() == encode(replacement)
+    with pytest.raises(OSError):
+        os.fstat(source_fds[0])
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["raw", "gzip"])
+def test_flash_image_dry_run_never_copies_image_bytes(monkeypatch, tmp_path, compressed):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    source = tmp_path / ("firmware.img.gz" if compressed else "firmware.img")
+    payload = b"reviewed bytes"
+    source.write_bytes(gzip.compress(payload) if compressed else payload)
+    original_target = device.read_bytes()
+
+    def unexpected_mutation(*_args, **_kwargs):
+        pytest.fail("dry run must not copy firmware, unmount, or open a write target")
+
+    monkeypatch.setattr(image_writer.os, "write", unexpected_mutation)
+    monkeypatch.setattr(image_writer, "unmount_disk", unexpected_mutation)
+    monkeypatch.setattr(image_writer, "open_device_for_write", unexpected_mutation)
+
+    flash_image(
+        str(device), str(source), dry_run=True,
+        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+
+    assert device.read_bytes() == original_target
+
+
+@pytest.mark.parametrize("failure", ["create", "copy", "flush"])
+def test_flash_image_snapshot_space_failure_precedes_unmount(monkeypatch, tmp_path, failure):
+    import errno
+
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    source = tmp_path / "firmware.img"
+    source.write_bytes(b"reviewed bytes")
+    original_target = device.read_bytes()
+    unmounted = []
+    monkeypatch.setattr(image_writer, "unmount_disk", lambda *_a, **_k: unmounted.append(True))
+    monkeypatch.setattr(image_writer, "_write_raw_via_dd", lambda *_a, **_k: None)
+    monkeypatch.setattr(image_writer.os, "sync", lambda: None)
+
+    def out_of_space(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    if failure == "create":
+        monkeypatch.setattr(image_writer.tempfile, "TemporaryFile", out_of_space)
+    elif failure == "copy":
+        monkeypatch.setattr(image_writer.os, "write", out_of_space)
+    else:
+        monkeypatch.setattr(image_writer.os, "fsync", out_of_space)
+
+    with pytest.raises(FlashError, match="snapshot"):
+        flash_image(str(device), str(source), skip_overlay_wipe=True)
+
+    assert unmounted == []
+    assert device.read_bytes() == original_target
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["raw", "gzip"])
+def test_flash_image_checks_snapshot_payload_capacity_before_unmount(monkeypatch, tmp_path, compressed):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    source = tmp_path / ("firmware.img.gz" if compressed else "firmware.img")
+    payload = b"image" * 14000
+    source.write_bytes(gzip.compress(payload) if compressed else payload)
+    original_target = device.read_bytes()
+
+    def unexpected_mutation(*_args, **_kwargs):
+        pytest.fail("oversized snapshot must not unmount or open a write target")
+
+    monkeypatch.setattr(image_writer, "unmount_disk", unexpected_mutation)
+    monkeypatch.setattr(image_writer, "open_device_for_write", unexpected_mutation)
+
+    with pytest.raises(FlashError, match="capacity"):
+        flash_image(
+            str(device), str(source),
+            expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        )
+
+    assert device.read_bytes() == original_target
+
+
+@pytest.mark.parametrize("compressed", [False, True], ids=["raw", "gzip"])
+@pytest.mark.parametrize("terminated", ["parent", "child"])
+def test_flash_snapshot_lifetime_follows_inherited_descriptor(tmp_path, compressed, terminated):
+    root = Path(__file__).resolve().parents[1]
+    helper = root / "tests/helpers/flash_snapshot_process.py"
+    source = tmp_path / ("firmware.img.gz" if compressed else "firmware.img")
+    payload = b"approved bytes" * 1024
+    source.write_bytes(gzip.compress(payload) if compressed else payload)
+    target = tmp_path / "target"
+    target.write_bytes(b"")
+    process = subprocess.Popen(
+        [sys.executable, str(helper), "writer", str(tmp_path), str(source)],
+        env={**os.environ, "PYTHONPATH": str(root / "packages/core/src")},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    child = None
+
+    def wait_for(path):
+        deadline = time.monotonic() + 10
+        while not path.exists():
+            if time.monotonic() >= deadline:
+                pytest.fail(f"Inert writer did not produce {path.name}")
+            time.sleep(0.01)
+
+    try:
+        ready = tmp_path / "child.json"
+        wait_for(ready)
+        child = json.loads(ready.read_text())
+        assert child["links"] == 0
+        assert child["size"] == source.stat().st_size
+        if terminated == "parent":
+            process.kill()
+            process.wait(timeout=5)
+            source.write_bytes(b"unreviewed replacement")
+            (tmp_path / "release").touch()
+            wait_for(tmp_path / "complete")
+            assert target.read_bytes() == payload
+        else:
+            os.kill(child["pid"], signal.SIGKILL)
+            _stdout, stderr = process.communicate(timeout=5)
+            assert process.returncode != 0
+            assert b"FlashError" in stderr
+            assert target.read_bytes() == b""
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+        if child and not (tmp_path / "complete").exists():
+            try:
+                os.kill(child["pid"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        resource = f"inert-snapshot:{tmp_path}"
+        lock_digest = hashlib.sha256(resource.encode()).hexdigest()
+        Path(f"/tmp/easymanet-media-{lock_digest}.lock").unlink(missing_ok=True)
+
+
 def test_finish_flash_raises_when_eject_fails(monkeypatch, tmp_path):
     device = tmp_path / "disk"
     device.write_bytes(b"disk")
     identity = capture_device_identity(str(device))
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
 
-    def fail_eject(_device):
+    def fail_eject(_device, **_kwargs):
         raise RuntimeError("eject failed")
 
     monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
@@ -788,7 +991,7 @@ def test_finish_flash_raises_when_eject_times_out(monkeypatch, tmp_path):
     identity = capture_device_identity(str(device))
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
 
-    def fail_eject(_device):
+    def fail_eject(_device, **_kwargs):
         raise subprocess.TimeoutExpired(["eject", "/dev/disk4"], timeout=30)
 
     monkeypatch.setattr("easymanet.image.eject_disk", fail_eject)
@@ -814,7 +1017,7 @@ def test_finish_flash_no_eject_unmounts_before_reporting_safe(monkeypatch, tmp_p
     monkeypatch.setattr("easymanet.image.os.sync", lambda: calls.append("sync"))
     monkeypatch.setattr(
         "easymanet.image.unmount_disk",
-        lambda device: calls.append(("unmount", device)),
+        lambda device, **_kwargs: calls.append(("unmount", device)),
     )
     events = []
 
@@ -837,7 +1040,7 @@ def test_finish_flash_no_eject_propagates_unmount_failure(monkeypatch, tmp_path)
     monkeypatch.setattr("easymanet.image.os.sync", lambda: None)
     monkeypatch.setattr(
         "easymanet.image.unmount_disk",
-        lambda _device: (_ for _ in ()).throw(RuntimeError("busy")),
+        lambda _device, **_kwargs: (_ for _ in ()).throw(RuntimeError("busy")),
     )
     events = []
 
@@ -952,6 +1155,7 @@ def test_write_gz_via_dd_accepts_gzip_exit_code_2(monkeypatch, tmp_path):
             "stdout": 42,
             "stderr": subprocess.PIPE,
             "text": True,
+            "pass_fds": (),
         },
     )
     assert gzip_stdout.closed is True
@@ -1187,7 +1391,7 @@ def test_write_raw_via_dd_uses_macos_dd_block_suffix(monkeypatch, tmp_path):
     assert run_calls == [
         (
             ["dd", "bs=16m", "status=progress"],
-            {"check": True, "stdin": image_fd, "stdout": 42},
+            {"check": True, "stdin": image_fd, "stdout": 42, "pass_fds": ()},
         )
     ]
 

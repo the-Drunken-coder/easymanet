@@ -4,6 +4,8 @@ import json
 import os
 import plistlib
 import stat
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +14,7 @@ from easymanet.inject import (
     InjectError,
     _atomic_write_text,
     _cleanup_mount,
-    _find_boot_mount,
+    _find_mount_for_partition,
     _find_boot_partition,
     _fix_usb_boot_root,
     inject,
@@ -66,6 +68,41 @@ def _flash_target(tmp_path):
     return str(device), capture_device_identity(str(device))
 
 
+def _boot_os(monkeypatch, device, boot_mount, *, mounted_here=False):
+    partition = f"{device}p1"
+    real_stat = os.stat
+    filesystem_device = boot_mount.stat().st_dev
+    mounted = not mounted_here
+
+    def stat_partition(path, *args, **kwargs):
+        if os.fspath(path) == partition:
+            result = real_stat(device)
+            fields = {name: getattr(result, name) for name in dir(result) if name.startswith("st_")}
+            return SimpleNamespace(**{**fields, "st_rdev": filesystem_device})
+        return real_stat(path, *args, **kwargs)
+
+    def check_output(cmd, **_kwargs):
+        if cmd[0] == "lsblk":
+            return json.dumps({"blockdevices": [{"name": device, "type": "disk", "children": [{"name": partition, "type": "part", "fstype": "vfat"}]}]}).encode()
+        if cmd[0] == "findmnt":
+            filesystems = [{"source": partition, "target": str(boot_mount), "fstype": "vfat"}] if mounted else []
+            return json.dumps({"filesystems": filesystems}).encode()
+        raise AssertionError(cmd)
+
+    def run(cmd, **_kwargs):
+        nonlocal mounted
+        if cmd[0] == "mount":
+            mounted = True
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(os, "stat", stat_partition)
+    monkeypatch.setattr("easymanet.inject.is_linux", lambda: True)
+    monkeypatch.setattr("easymanet.inject.is_macos", lambda: False)
+    monkeypatch.setattr("easymanet.inject.tempfile.mkdtemp", lambda **_kwargs: str(boot_mount))
+    monkeypatch.setattr(subprocess, "check_output", check_output)
+    monkeypatch.setattr(subprocess, "run", run)
+
+
 def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(monkeypatch):
     list_plist = {
         "AllDisksAndPartitions": [
@@ -90,13 +127,15 @@ def test_find_boot_partition_macos_uses_content_when_filesystem_type_missing(mon
     monkeypatch.setattr("easymanet.inject.is_linux", lambda: False)
 
     def fake_check_output(cmd, timeout=15):
-        assert cmd[:3] == ["diskutil", "list", "-plist"]
-        return plistlib.dumps(list_plist)
+        if cmd[:3] == ["diskutil", "list", "-plist"]:
+            return plistlib.dumps(list_plist)
+        assert cmd == ["diskutil", "info", "-plist", "/dev/disk4s1"]
+        return plistlib.dumps({"DeviceNode": "/dev/disk4s1", "MountPoint": "/Volumes/boot"})
 
     monkeypatch.setattr("easymanet.inject.subprocess.check_output", fake_check_output)
 
     assert _find_boot_partition("/dev/disk4") == "/dev/disk4s1"
-    assert _find_boot_mount("/dev/disk4") == "/Volumes/boot"
+    assert _find_mount_for_partition("/dev/disk4s1") == "/Volumes/boot"
 
 
 def test_inject_dry_run_info_mentions_boot_partition():
@@ -110,16 +149,13 @@ def test_inject_writes_provision_json_to_boot_partition(monkeypatch, tmp_path):
     path = _write_config(tmp_path, VALID_CONFIG)
     manifest = load_manifest(path)
     device, identity = _flash_target(tmp_path)
-    boot_mount = tmp_path / "boot"
+    boot_mount = tmp_path / "Boot Volume"
     boot_mount.mkdir()
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=False)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda _device, _mount_point, _mounted_here: None,
+        lambda _device, _mount_point, _mounted_here, **_kwargs: None,
     )
 
     results = inject(device, manifest, "node01", device_identity=identity)
@@ -144,13 +180,10 @@ def test_inject_patches_rpi_boot_root_to_partuuid(monkeypatch, tmp_path):
     )
     (boot_mount / "partuuid.txt").write_text("a7ad1f13\n")
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=False)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda _device, _mount_point, _mounted_here: None,
+        lambda _device, _mount_point, _mounted_here, **_kwargs: None,
     )
 
     results = inject(device, manifest, "node01", device_identity=identity)
@@ -173,13 +206,10 @@ def test_inject_patches_usb_sda_root_to_partuuid(monkeypatch, tmp_path):
     )
     (boot_mount / "partuuid.txt").write_text("b3c4d5e6\n")
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=False)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda _device, _mount_point, _mounted_here: None,
+        lambda _device, _mount_point, _mounted_here, **_kwargs: None,
     )
 
     results = inject(device, manifest, "node01", device_identity=identity)
@@ -202,13 +232,10 @@ def test_inject_patches_nvme_root_to_partuuid(monkeypatch, tmp_path):
     )
     (boot_mount / "partuuid.txt").write_text("c8d9e0f1\n")
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=False)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda _device, _mount_point, _mounted_here: None,
+        lambda _device, _mount_point, _mounted_here, **_kwargs: None,
     )
 
     results = inject(device, manifest, "node01", device_identity=identity)
@@ -230,13 +257,10 @@ def test_inject_leaves_existing_boot_root_alone(monkeypatch, tmp_path):
     cmdline.write_text(original)
     (boot_mount / "partuuid.txt").write_text("a7ad1f13\n")
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=False)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda _device, _mount_point, _mounted_here: None,
+        lambda _device, _mount_point, _mounted_here, **_kwargs: None,
     )
 
     results = inject(device, manifest, "node01", device_identity=identity)
@@ -271,13 +295,10 @@ def test_inject_propagates_owned_boot_volume_cleanup_failure(monkeypatch, tmp_pa
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), True),
-    )
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=True)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda *_args: (_ for _ in ()).throw(InjectError("owned volume is busy")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectError("owned volume is busy")),
     )
 
     with pytest.raises(InjectError, match="owned volume is busy"):
@@ -291,17 +312,14 @@ def test_inject_reports_staging_and_cleanup_failures(monkeypatch, tmp_path):
     boot_mount = tmp_path / "boot"
     boot_mount.mkdir()
 
+    _boot_os(monkeypatch, device, boot_mount, mounted_here=True)
     monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), True),
-    )
-    monkeypatch.setattr(
-        "easymanet.inject.stage_boot_payload",
+        "easymanet.inject._stage_boot_payload",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectError("staging failed")),
     )
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda *_args: (_ for _ in ()).throw(InjectError("cleanup failed")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectError("cleanup failed")),
     )
 
     with pytest.raises(InjectError, match="staging failed.*cleanup failed"):
@@ -340,18 +358,17 @@ def test_inject_rejects_device_replacement_during_mount(monkeypatch, tmp_path):
     identity = capture_device_identity(str(selected))
     cleanup_calls = []
 
-    def replace_while_mounting(_device):
+    _boot_os(monkeypatch, str(selected), boot_mount, mounted_here=True)
+
+    def replace_while_mounting(cmd, **_kwargs):
         selected.unlink()
         selected.symlink_to(replacement)
-        return str(boot_mount), True
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        replace_while_mounting,
-    )
+    monkeypatch.setattr(subprocess, "run", replace_while_mounting)
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda *args: cleanup_calls.append(args),
+        lambda *args, **_kwargs: cleanup_calls.append(args),
     )
 
     with pytest.raises(InjectError, match="Device identity changed"):
@@ -375,10 +392,7 @@ def test_inject_rejects_device_replacement_during_staging(monkeypatch, tmp_path)
     identity = capture_device_identity(str(selected))
     cleanup_calls = []
 
-    monkeypatch.setattr(
-        "easymanet.inject._mount_boot_partition",
-        lambda _device: (str(boot_mount), False),
-    )
+    _boot_os(monkeypatch, str(selected), boot_mount, mounted_here=False)
 
     def replace_while_staging(*_args, **_kwargs):
         selected.unlink()
@@ -386,12 +400,12 @@ def test_inject_rejects_device_replacement_during_staging(monkeypatch, tmp_path)
         return [("/boot/easymanet/provision.json", True)]
 
     monkeypatch.setattr(
-        "easymanet.inject.stage_boot_payload",
+        "easymanet.inject._stage_boot_payload",
         replace_while_staging,
     )
     monkeypatch.setattr(
         "easymanet.inject._cleanup_mount",
-        lambda *args: cleanup_calls.append(args),
+        lambda *args, **_kwargs: cleanup_calls.append(args),
     )
 
     with pytest.raises(InjectError, match="Device identity changed"):
@@ -450,15 +464,19 @@ def test_cmdline_atomic_failure_preserves_original_and_cleans_temp(monkeypatch, 
     (tmp_path / "partuuid.txt").write_text("a1b2c3d4\n")
     real_replace = os.replace
 
-    def fail_cmdline_replace(source, destination):
-        if os.fspath(destination) == os.fspath(cmdline):
+    def fail_cmdline_replace(source, destination, **kwargs):
+        if os.fspath(destination) == "cmdline.txt":
             raise OSError("cmdline replace failed")
-        real_replace(source, destination)
+        real_replace(source, destination, **kwargs)
 
     monkeypatch.setattr("easymanet.inject.os.replace", fail_cmdline_replace)
 
-    with pytest.raises(OSError, match="cmdline replace failed"):
-        _fix_usb_boot_root(tmp_path)
+    boot_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(OSError, match="cmdline replace failed"):
+            _fix_usb_boot_root(boot_fd)
+    finally:
+        os.close(boot_fd)
 
     assert cmdline.read_text() == original
     assert (tmp_path / "cmdline.txt.easymanet.bak").read_text() == original

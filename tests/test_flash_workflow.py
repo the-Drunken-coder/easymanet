@@ -1,10 +1,23 @@
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import easymanet.flash as flash
+from easymanet.disks import core as disk_core
 from easymanet.inject import InjectError
 from easymanet.privileges import PrivilegeError
+
+
+@pytest.fixture(autouse=True)
+def inert_workflow_resource(monkeypatch, tmp_path):
+    resource = f"inert-workflow:{tmp_path}"
+    monkeypatch.setattr(disk_core, "flash_resource_key", lambda _device: resource)
+    yield
+    digest = hashlib.sha256(resource.encode()).hexdigest()
+    Path(f"/tmp/easymanet-media-{digest}.lock").unlink(missing_ok=True)
 
 
 def _options(tmp_path, **overrides):
@@ -530,7 +543,7 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
 
     finish_calls = []
 
-    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None, admission_fd=None):
         finish_calls.append(device_identity)
         assert eject is True
         emit({"type": "safe_to_remove", "message": "Safe to remove."})
@@ -591,7 +604,7 @@ def test_flash_workflow_finish_failure_is_structured(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
 
-    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None, admission_fd=None):
         assert device_identity is not None
         assert eject is True
         emit({"type": "eject_failed", "message": "eject failed", "level": "warning"})

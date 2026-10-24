@@ -1,5 +1,6 @@
 """Tests for CLI helpers."""
 
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -521,6 +522,7 @@ def test_flash_exits_when_finish_flash_raises_eject_failure(tmp_path, monkeypatc
     monkeypatch.setattr(core_flash, "assert_flash_allowed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(core_flash, "inject_dry_run_info", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(core_flash, "check_privileges", lambda _device: None)
+    monkeypatch.setattr(core_flash, "flash_device_guard", lambda _device: nullcontext(None))
     device_identity = object()
     monkeypatch.setattr(core_flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(core_flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])

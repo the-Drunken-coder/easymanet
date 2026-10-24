@@ -10,6 +10,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
@@ -35,6 +37,7 @@ from .disks import (
     eject_disk,
 )
 from .platform import is_linux, is_macos
+from .disks.core import assert_flash_admission, flash_device_guard
 
 
 class FlashError(Exception):
@@ -109,9 +112,9 @@ def _open_device_for_write(
         raise FlashError(str(exc)) from exc
 
 
-def _unmount_or_raise(device: str) -> None:
+def _unmount_or_raise(device: str, *, admission_fd: int | None = None) -> None:
     try:
-        unmount_disk(device)
+        unmount_disk(device, admission_fd=admission_fd)
     except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         raise FlashError(f"Failed to unmount {device}: {e}") from e
 
@@ -186,6 +189,29 @@ def _sha256_fd(image_fd: int) -> str:
         offset += len(chunk)
 
 
+@contextmanager
+def _snapshot_image(source_fd: int) -> Iterator[int]:
+    with ExitStack() as lifetime:
+        try:
+            # System disk scratch avoids operator-owned state and tmpfs-prone /tmp.
+            # The anonymous inode lasts until the last inherited descriptor closes.
+            snapshot = lifetime.enter_context(
+                tempfile.TemporaryFile(dir="/var/tmp", prefix="easymanet-image-")
+            )
+            snapshot_fd = snapshot.fileno()
+            offset = 0
+            while True:
+                chunk = os.pread(source_fd, _IMAGE_READ_BYTES, offset)
+                if not chunk:
+                    break
+                _write_all(snapshot_fd, chunk)
+                offset += len(chunk)
+            os.fsync(snapshot_fd)
+        except OSError as exc:
+            raise FlashError(f"Could not prepare image snapshot: {exc}") from exc
+        yield snapshot_fd
+
+
 def _gzip_decompressed_bytes(image_fd: int) -> int:
     os.lseek(image_fd, 0, os.SEEK_SET)
     gzip_cmd = [_tool_path("gzip"), "-dc"]
@@ -226,17 +252,23 @@ def _check_gzip_result(return_code: int, command: list[str], stderr: str) -> Non
     raise subprocess.CalledProcessError(return_code, command, stderr=stderr)
 
 
-def _reread_partition_table(device: str) -> None:
+def _reread_partition_table(device: str, *, admission_fd: int | None = None) -> None:
     if is_linux():
         try:
-            _run_reread_partition_command([_tool_path("blockdev"), "--rereadpt", device], device)
+            _run_reread_partition_command(
+                [_tool_path("blockdev"), "--rereadpt", device], device, admission_fd=admission_fd,
+            )
         except FlashError:
-            _run_reread_partition_command([_tool_path("partprobe"), device], device)
+            _run_reread_partition_command(
+                [_tool_path("partprobe"), device], device, admission_fd=admission_fd,
+            )
     elif is_macos():
-        _run_reread_partition_command([_tool_path("diskutil"), "list", device], device)
+        _run_reread_partition_command(
+            [_tool_path("diskutil"), "list", device], device, admission_fd=admission_fd,
+        )
 
 
-def _run_reread_partition_command(cmd: list[str], device: str) -> None:
+def _run_reread_partition_command(cmd: list[str], device: str, *, admission_fd: int | None = None) -> None:
     try:
         subprocess.run(
             cmd,
@@ -244,6 +276,7 @@ def _run_reread_partition_command(cmd: list[str], device: str) -> None:
             text=True,
             timeout=30,
             check=True,
+            pass_fds=(admission_fd,) if admission_fd is not None else (),
         )
     except subprocess.CalledProcessError as e:
         detail = (e.stderr or e.stdout or "").strip()
@@ -269,15 +302,39 @@ def flash_image(
     skip_overlay_wipe: bool = False,
     expected_sha256: str | None = None,
     emit: FlashEventCallback | None = None,
+    expected_device_identity: DeviceIdentity | None = None,
+    admission_fd: int | None = None,
 ) -> DeviceIdentity:
+    if expected_device_identity is not None:
+        if expected_device_identity.path != device:
+            raise FlashError("Reviewed device path does not match the selected device.")
+        _assert_device_identity(expected_device_identity)
     image, image_fd = _open_image(image_path)
+    admission = ExitStack()
+    admission.callback(os.close, image_fd)
     try:
+        if not dry_run:
+            image_fd = admission.enter_context(_snapshot_image(image_fd))
         gzip_written_bytes = _check_open_image(
             image,
             image_fd,
             expected_sha256,
         )
+        payload_bytes = (
+            gzip_written_bytes
+            if gzip_written_bytes is not None
+            else os.fstat(image_fd).st_size
+        )
         disk, device_identity = _check_device_safety(device, force=force)
+        if expected_device_identity is not None:
+            _assert_device_identity(expected_device_identity)
+        if disk.size_bytes <= 0:
+            raise FlashError(f"Could not determine capacity of {device}.")
+        if payload_bytes > disk.size_bytes:
+            raise FlashError(
+                f"Image payload is {payload_bytes} bytes but {device} capacity is "
+                f"{disk.size_bytes} bytes."
+            )
 
         _emit_event(
             emit,
@@ -292,6 +349,16 @@ def flash_image(
 
         if dry_run:
             return device_identity
+
+        if admission_fd is None:
+            try:
+                admission_fd = admission.enter_context(flash_device_guard(device))
+            except ValueError as exc:
+                raise FlashError(str(exc)) from exc
+        try:
+            assert_flash_admission(device, admission_fd)
+        except ValueError as exc:
+            raise FlashError(str(exc)) from exc
 
         device = disk.device
         image_suffix = image.suffix.lower()
@@ -313,8 +380,10 @@ def flash_image(
         )
 
         try:
+            if expected_device_identity is not None:
+                _assert_device_identity(expected_device_identity)
             _assert_device_identity(device_identity)
-            _unmount_or_raise(device)
+            _unmount_or_raise(device, admission_fd=admission_fd)
             _emit_event(
                 emit,
                 "write_started",
@@ -326,9 +395,9 @@ def flash_image(
             device_fd = _open_device_for_write(write_identity, companions=companions)
             try:
                 if image_suffix == ".gz":
-                    _write_gz_via_dd(image_fd, device_fd, emit=emit)
+                    _write_gz_via_dd(image_fd, device_fd, emit=emit, admission_fd=admission_fd)
                 else:
-                    _write_raw_via_dd(image_fd, device_fd, emit=emit)
+                    _write_raw_via_dd(image_fd, device_fd, emit=emit, admission_fd=admission_fd)
             finally:
                 os.close(device_fd)
 
@@ -337,17 +406,13 @@ def flash_image(
             _emit_event(emit, "write_completed", "Done writing.")
 
             if not skip_overlay_wipe:
-                written_bytes = (
-                    gzip_written_bytes
-                    if gzip_written_bytes is not None
-                    else os.fstat(image_fd).st_size
-                )
                 _clear_stale_overlay(
                     device,
-                    written_bytes,
+                    payload_bytes,
                     device_identity=device_identity,
                     output_identity=overlay_identity,
                     emit=emit,
+                    admission_fd=admission_fd,
                 )
             return device_identity
 
@@ -358,7 +423,7 @@ def flash_image(
         except (OSError, subprocess.SubprocessError) as e:
             raise FlashError(f"Flash failed: {e}") from e
     finally:
-        os.close(image_fd)
+        admission.close()
 
 
 def _write_gz_via_dd(
@@ -366,6 +431,7 @@ def _write_gz_via_dd(
     output_fd: int,
     *,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     if is_macos():
         _write_gz_via_macos_stream(image_fd, output_fd, emit=emit)
@@ -392,6 +458,7 @@ def _write_gz_via_dd(
             "stdout": output_fd,
             "stderr": subprocess.PIPE,
             "text": True,
+            "pass_fds": (admission_fd,) if admission_fd is not None else (),
         }
         dd_proc = subprocess.Popen(dd_cmd, **dd_kwargs)
         gzip_proc.stdout.close()
@@ -504,6 +571,7 @@ def _run_zero_dd(
     count_blocks: int,
     *,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     if count_blocks <= 0:
         return
@@ -522,6 +590,7 @@ def _run_zero_dd(
         ],
         output_fd=output_fd,
         emit=emit,
+        admission_fd=admission_fd,
     )
 
 
@@ -532,9 +601,10 @@ def _clear_stale_overlay(
     device_identity: DeviceIdentity,
     output_identity: DeviceIdentity,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     _assert_device_identity(device_identity)
-    _reread_partition_table(device)
+    _reread_partition_table(device, admission_fd=admission_fd)
     _assert_device_identity(device_identity)
     wipe_range = get_partition2_wipe_range(device)
     _assert_device_identity(device_identity)
@@ -583,7 +653,7 @@ def _clear_stale_overlay(
     # Partition-table probing may auto-mount volumes, so unmount immediately
     # before opening the already-identified raw device node.
     _assert_device_identity(device_identity)
-    _unmount_or_raise(device)
+    _unmount_or_raise(device, admission_fd=admission_fd)
     output_fd = _open_device_for_write(output_identity, companions=companions)
     try:
         total_bytes = count_sectors * sector_bytes
@@ -597,6 +667,7 @@ def _clear_stale_overlay(
                 cursor // sector_bytes,
                 prefix_sectors,
                 emit=emit,
+                admission_fd=admission_fd,
             )
             prefix_written = prefix_sectors * sector_bytes
             cursor += prefix_written
@@ -609,6 +680,7 @@ def _clear_stale_overlay(
             cursor // bulk_bytes,
             bulk_blocks,
             emit=emit,
+            admission_fd=admission_fd,
         )
         bulk_written = bulk_blocks * bulk_bytes
         cursor += bulk_written
@@ -621,6 +693,7 @@ def _clear_stale_overlay(
             cursor // sector_bytes,
             tail_sectors,
             emit=emit,
+            admission_fd=admission_fd,
         )
     finally:
         os.close(output_fd)
@@ -631,6 +704,7 @@ def _write_raw_via_dd(
     output_fd: int,
     *,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     os.lseek(image_fd, 0, os.SEEK_SET)
     _run_dd_with_progress(
@@ -642,6 +716,7 @@ def _write_raw_via_dd(
         input_fd=image_fd,
         output_fd=output_fd,
         emit=emit,
+        admission_fd=admission_fd,
     )
 
 
@@ -651,17 +726,20 @@ def _run_dd_with_progress(
     input_fd: int | None = None,
     output_fd: int | None = None,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     input_kwargs = {"stdin": input_fd} if input_fd is not None else {}
     output_kwargs = {"stdout": output_fd} if output_fd is not None else {}
+    pass_fds = (admission_fd,) if admission_fd is not None else ()
     if emit is None:
-        subprocess.run(cmd, check=True, **input_kwargs, **output_kwargs)
+        subprocess.run(cmd, check=True, pass_fds=pass_fds, **input_kwargs, **output_kwargs)
         return
 
     proc = subprocess.Popen(
         cmd,
         stderr=subprocess.PIPE,
         text=True,
+        pass_fds=pass_fds,
         **input_kwargs,
         **output_kwargs,
     )
@@ -712,6 +790,7 @@ def finish_flash(
     device_identity: DeviceIdentity,
     eject: bool = True,
     emit: FlashEventCallback | None = None,
+    admission_fd: int | None = None,
 ) -> None:
     if device != device_identity.path:
         raise FlashError(
@@ -723,7 +802,7 @@ def finish_flash(
     if eject:
         _emit_event(emit, "eject_started", f"Ejecting {device}...", device=device)
         try:
-            eject_disk(device)
+            eject_disk(device, admission_fd=admission_fd)
         except (RuntimeError, OSError, subprocess.SubprocessError) as e:
             _emit_event(
                 emit,
@@ -741,7 +820,7 @@ def finish_flash(
             device=device,
         )
         try:
-            _unmount_or_raise(device)
+            _unmount_or_raise(device, admission_fd=admission_fd)
         except FlashError as exc:
             _emit_event(
                 emit,

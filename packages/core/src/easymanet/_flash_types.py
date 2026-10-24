@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from ._flash_display import redact_provision_for_display, render_provision_for_display
+from .disks.core import DeviceIdentity
 
 
 class FlashErrorCode(str, Enum):
@@ -45,6 +46,9 @@ class FlashOptions:
     disable_wan_api: bool = False
     show_secrets: bool = False
     attestation: Optional[dict[str, str]] = None
+    expected_device_identity: DeviceIdentity | None = None
+    expected_device_size_bytes: int | None = None
+    expected_device_model: str | None = None
 
 
 @dataclass(frozen=True)

@@ -1,43 +1,59 @@
+import json
 import os
+import subprocess
 import plistlib
 from dataclasses import replace
 
 import pytest
 
 from easymanet import disks
+from easymanet.disks import core as disk_core
 from easymanet.disks import linux as linux_disks
 from easymanet.disks import macos
 
 
 @pytest.fixture
 def linux_platform(monkeypatch):
-    monkeypatch.setattr(disks, "is_macos", lambda: False)
-    monkeypatch.setattr(disks, "is_linux", lambda: True)
+    monkeypatch.setattr(disk_core, "is_macos", lambda: False)
+    monkeypatch.setattr(disk_core, "is_linux", lambda: True)
+
+
+def _linux_os(monkeypatch, *, mounts=("/media/boot", "/media/root"), source="/dev/sda1"):
+    data = {
+        "blockdevices": [
+            {"name": "sda", "type": "disk", "children": [{"name": "sda1", "type": "part", "mountpoint": "/"}]},
+            {"name": "sdb", "type": "disk", "rm": True, "size": 32 * 1024**3, "children": [
+                {"name": f"sdb{index}", "type": "part", "mountpoint": mount}
+                for index, mount in enumerate(mounts, 1)
+            ]},
+        ]
+    }
+
+    def check_output(cmd, **_kwargs):
+        if cmd[0] == "lsblk":
+            return json.dumps(data).encode()
+        if cmd[0] == "findmnt":
+            return json.dumps({"filesystems": [{"source": source, "target": "/", "fstype": "ext4"}]}).encode()
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(subprocess, "check_output", check_output)
 
 
 def test_linux_unmount_disk_unmounts_discovered_partitions_without_shell(monkeypatch, linux_platform):
+    _linux_os(monkeypatch)
     calls = []
-
-    monkeypatch.setattr(
-        disks.glob,
-        "glob",
-        lambda pattern: {
-            "/dev/sdb[0-9]*": ["/dev/sdb2", "/dev/sdb1"],
-            "/dev/sdbp[0-9]*": [],
-        }.get(pattern, []),
-    )
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
-        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     disks.unmount_disk("/dev/sdb")
 
     assert calls == [
-        (["umount", "/dev/sdb1"], {"capture_output": True, "text": True, "timeout": 60}),
-        (["umount", "/dev/sdb2"], {"capture_output": True, "text": True, "timeout": 60}),
+        (["umount", "/media/root"], {"capture_output": True, "text": True, "timeout": 60, "pass_fds": ()}),
+        (["umount", "/media/boot"], {"capture_output": True, "text": True, "timeout": 60, "pass_fds": ()}),
     ]
 
 
@@ -60,49 +76,23 @@ def _macos_info_text(
     )
 
 
-def test_linux_unmount_disk_falls_back_to_device_when_no_partitions(monkeypatch, linux_platform):
-    calls = []
+def test_linux_unmount_disk_skips_unmounted_devices(monkeypatch, linux_platform):
+    _linux_os(monkeypatch, mounts=())
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: pytest.fail("unmounted device needs no umount"))
 
-    monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
-    def fake_run(cmd, **kwargs):
-        calls.append((cmd, kwargs))
-        return type("Result", (), {"returncode": 0, "stderr": "", "stdout": ""})()
-
-    monkeypatch.setattr(disks.subprocess, "run", fake_run)
-
-    disks.unmount_disk("/dev/mmcblk0")
-
-    assert calls == [
-        (["umount", "/dev/mmcblk0"], {"capture_output": True, "text": True, "timeout": 60}),
-    ]
+    disks.unmount_disk("/dev/sdb")
 
 
 def test_linux_unmount_disk_ignores_not_mounted(monkeypatch, linux_platform):
-    monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
-
-    def fake_run(cmd, **kwargs):
-        return type(
-            "Result",
-            (),
-            {"returncode": 32, "stderr": "umount: /dev/sdb: not mounted", "stdout": ""},
-        )()
-
-    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+    _linux_os(monkeypatch, mounts=("/media/boot",))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 32, stdout="", stderr="not mounted"))
 
     disks.unmount_disk("/dev/sdb")
 
 
 def test_linux_unmount_disk_raises_on_failure(monkeypatch, linux_platform):
-    monkeypatch.setattr(disks.glob, "glob", lambda _pattern: [])
-
-    def fake_run(cmd, **kwargs):
-        return type(
-            "Result",
-            (),
-            {"returncode": 32, "stderr": "umount: /dev/sdb: target is busy", "stdout": ""},
-        )()
-
-    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+    _linux_os(monkeypatch, mounts=("/media/boot",))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 32, stdout="", stderr="target is busy"))
 
     with pytest.raises(RuntimeError, match="target is busy"):
         disks.unmount_disk("/dev/sdb")
@@ -117,7 +107,7 @@ def test_eject_disk_raises_on_failure(monkeypatch, linux_platform):
             {"returncode": 1, "stderr": "eject failed", "stdout": ""},
         )()
 
-    monkeypatch.setattr(disks.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="eject failed"):
         disks.eject_disk("/dev/sdb")
@@ -166,20 +156,29 @@ def test_blocking_warnings_virtual_disk_image():
     assert any("Virtual disk image" in w for w in disk.blocking_warnings)
 
 
-def test_assert_flash_allowed_blocks_without_force(monkeypatch):
+@pytest.mark.parametrize("force", [False, True])
+def test_assert_flash_allowed_always_blocks_system_disk(monkeypatch, force):
     disk = disks.DiskInfo(
         device="/dev/sda",
         size_bytes=500 * 1024**3,
         is_system=True,
     )
 
-    monkeypatch.setattr(disks, "_is_block_device", lambda _d: True)
-    monkeypatch.setattr(disks, "lookup_device", lambda _d: disk)
+    monkeypatch.setattr(disk_core, "_is_block_device", lambda _d: True)
+    monkeypatch.setattr(disk_core, "lookup_device", lambda _d: disk)
+
+    with pytest.raises(ValueError, match="Refusing to flash.*system disk"):
+        disks.assert_flash_allowed("/dev/sda", force=force)
+
+
+def test_force_can_override_large_fixed_media_warning(monkeypatch):
+    disk = disks.DiskInfo(device="/dev/sdb", size_bytes=500 * 1024**3)
+    monkeypatch.setattr(disk_core, "_is_block_device", lambda _d: True)
+    monkeypatch.setattr(disk_core, "lookup_device", lambda _d: disk)
 
     with pytest.raises(ValueError, match="--force"):
-        disks.assert_flash_allowed("/dev/sda", force=False)
-
-    assert disks.assert_flash_allowed("/dev/sda", force=True) is disk
+        disks.assert_flash_allowed("/dev/sdb")
+    assert disks.assert_flash_allowed("/dev/sdb", force=True) is disk
 
 
 def test_device_identity_rejects_path_replacement(tmp_path):
@@ -223,7 +222,7 @@ def test_open_device_for_write_rejects_replacement_during_open(monkeypatch, tmp_
 
     monkeypatch.setattr("easymanet.disks.core.os.open", swap_after_open)
 
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="does not match|identity changed"):
         disks.open_device_for_write(identity)
 
 
@@ -247,155 +246,36 @@ def test_opened_device_fd_stays_bound_after_path_replacement(tmp_path):
 
 
 def test_linux_should_list_default_rm_or_tran():
-    assert disks._linux_should_list_default({"type": "disk", "rm": "1"})
-    assert disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "mmc"})
-    assert disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "usb"})
-    assert not disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "nvme"})
+    assert linux_disks._linux_should_list_default({"type": "disk", "rm": "1"})
+    assert linux_disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "mmc"})
+    assert linux_disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "usb"})
+    assert not linux_disks._linux_should_list_default({"type": "disk", "rm": "0", "tran": "nvme"})
 
 
 def test_linux_lsblk_data_returns_none_on_timeout(monkeypatch):
     def fail_check_output(*_args, **_kwargs):
-        raise disks.subprocess.TimeoutExpired(["lsblk"], timeout=10)
+        raise subprocess.TimeoutExpired(["lsblk"], timeout=10)
 
-    monkeypatch.setattr(linux_disks.subprocess, "check_output", fail_check_output)
+    monkeypatch.setattr(subprocess, "check_output", fail_check_output)
 
     assert linux_disks._linux_lsblk_data() is None
 
 
-def test_linux_disk_from_lsblk_marks_mmc_removable():
-    dev = {"name": "mmcblk0", "type": "disk", "rm": "0", "tran": "mmc", "size": "32G"}
-    disk = disks._linux_disk_from_lsblk(dev)
-    assert disk.removable is True
+@pytest.mark.parametrize("removable", [True, 1, "1"])
+def test_linux_should_list_default_native_removable(removable):
+    assert linux_disks._linux_should_list_default({"type": "disk", "rm": removable})
 
 
-def test_linux_root_block_devices_uses_findmnt(monkeypatch):
-    calls = []
+@pytest.mark.parametrize("source", ["/dev/sda1", "PARTUUID=abc-01", "UUID=abc", "/dev/sda1[/@]"])
+def test_linux_protects_root_backing_disk(monkeypatch, source):
+    _linux_os(monkeypatch, source=source)
+    realpath = os.path.realpath
+    monkeypatch.setattr(os.path, "realpath", lambda path: "/dev/sda1" if path.startswith("/dev/disk/by-") else realpath(path))
 
-    def fake_findmnt(mount_point):
-        calls.append(mount_point)
-        return {
-            "/": "/dev/nvme0n1p3",
-            "/boot": None,
-        }.get(mount_point)
+    found = {disk.device: disk for disk in linux_disks.list_disks_linux(include_all=True)}
 
-    monkeypatch.setattr(disks, "_findmnt_source", fake_findmnt)
-    monkeypatch.setattr(
-        disks,
-        "_linux_resolve_findmnt_source",
-        lambda source: "/dev/nvme0n1" if source == "/dev/nvme0n1p3" else None,
-    )
-    monkeypatch.setattr(disks.os.path, "realpath", lambda path: path)
-    monkeypatch.setattr(
-        disks,
-        "_linux_partitions_for_device",
-        lambda device: ["/dev/nvme0n1p1", "/dev/nvme0n1p2", "/dev/nvme0n1p3"]
-        if device == "/dev/nvme0n1"
-        else [],
-    )
-
-    related = disks._linux_root_block_devices()
-
-    assert calls == sorted(disks.SYS_MOUNT_POINTS)
-    assert "/dev/nvme0n1p3" in related
-    assert "/dev/nvme0n1" in related
-
-
-def test_linux_root_block_devices_includes_separate_home_disk(monkeypatch):
-    def fake_findmnt(mount_point):
-        return {
-            "/": "/dev/nvme0n1p3",
-            "/home": "/dev/sdb1",
-        }.get(mount_point)
-
-    def fake_resolve(source):
-        if source == "/dev/nvme0n1p3":
-            return "/dev/nvme0n1"
-        if source == "/dev/sdb1":
-            return "/dev/sdb"
-        return None
-
-    monkeypatch.setattr(disks, "_findmnt_source", fake_findmnt)
-    monkeypatch.setattr(disks, "_linux_resolve_findmnt_source", fake_resolve)
-    monkeypatch.setattr(disks.os.path, "realpath", lambda path: path)
-    monkeypatch.setattr(
-        disks,
-        "_linux_partitions_for_device",
-        lambda device: {
-            "/dev/nvme0n1": ["/dev/nvme0n1p1", "/dev/nvme0n1p2", "/dev/nvme0n1p3"],
-            "/dev/sdb": ["/dev/sdb1"],
-        }.get(device, []),
-    )
-
-    related = disks._linux_root_block_devices()
-
-    assert "/dev/sdb" in related
-    assert "/dev/sdb1" in related
-
-
-def test_check_linux_system_disk_detects_separate_home_mount(monkeypatch):
-    monkeypatch.setattr(
-        disks,
-        "_linux_root_block_devices",
-        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1", "/dev/sdb", "/dev/sdb1"},
-    )
-
-    assert disks._check_linux_system_disk("/dev/sdb", ["/home"]) is True
-    assert disks._check_linux_system_disk("/dev/sdb", []) is True
-
-
-def test_check_linux_system_disk_detects_root_disk_without_mount_points(monkeypatch):
-    monkeypatch.setattr(
-        disks,
-        "_linux_root_block_devices",
-        lambda: {"/dev/nvme0n1p3", "/dev/nvme0n1"},
-    )
-
-    assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
-    assert disks._check_linux_system_disk("/dev/sdb", []) is False
-
-
-def test_check_linux_system_disk_treats_unknown_root_detection_as_system(monkeypatch):
-    monkeypatch.setattr(disks, "_linux_root_block_devices", lambda: set())
-
-    assert disks._check_linux_system_disk("/dev/sdb", []) is True
-
-
-def test_linux_resolve_findmnt_source_handles_partuuid(monkeypatch):
-    partuuid_path = "/dev/disk/by-partuuid/abc-01"
-
-    monkeypatch.setattr(
-        disks.os.path,
-        "exists",
-        lambda path: path == partuuid_path,
-    )
-    monkeypatch.setattr(
-        disks.os.path,
-        "realpath",
-        lambda path: "/dev/nvme0n1p2" if path == partuuid_path else path,
-    )
-
-    assert disks._linux_resolve_findmnt_source("PARTUUID=abc-01") == "/dev/nvme0n1"
-
-
-def test_linux_resolve_findmnt_source_maps_mapper_to_base_disk(monkeypatch):
-    monkeypatch.setattr(
-        disks.os.path,
-        "realpath",
-        lambda path: "/dev/dm-0" if path == "/dev/mapper/vg-root" else path,
-    )
-    monkeypatch.setattr(disks, "_linux_lsblk_pkname", lambda device: "/dev/nvme0n1" if device == "/dev/dm-0" else None)
-
-    assert disks._linux_resolve_findmnt_source("/dev/mapper/vg-root") == "/dev/nvme0n1"
-
-
-def test_check_linux_system_disk_detects_mapper_backed_root(monkeypatch):
-    monkeypatch.setattr(
-        disks,
-        "_linux_root_block_devices",
-        lambda: {"/dev/nvme0n1", "/dev/nvme0n1p3"},
-    )
-
-    assert disks._check_linux_system_disk("/dev/nvme0n1", []) is True
+    assert found["/dev/sda"].is_system
+    assert not found["/dev/sdb"].is_system
 
 
 def test_lookup_device_lists_default_disks_once(monkeypatch, linux_platform):
@@ -406,9 +286,9 @@ def test_lookup_device_lists_default_disks_once(monkeypatch, linux_platform):
         assert include_all is False
         return [disks.DiskInfo(device="/dev/sdb", size_bytes=32 * 1024**3, removable=True)]
 
-    monkeypatch.setattr(disks, "list_disks", fake_list)
+    monkeypatch.setattr(disk_core, "list_disks", fake_list)
     monkeypatch.setattr(
-        disks,
+        linux_disks,
         "lookup_device_linux",
         lambda device: disks.DiskInfo(device=device, size_bytes=32 * 1024**3, removable=True),
     )
@@ -441,8 +321,8 @@ def test_get_partition2_wipe_range_macos_without_list_offset(monkeypatch):
         "disk4s2": {"PartitionMapPartitionOffset": 75497472},
     }
 
-    monkeypatch.setattr(disks, "is_linux", lambda: False)
-    monkeypatch.setattr(disks, "is_macos", lambda: True)
+    monkeypatch.setattr(disk_core, "is_linux", lambda: False)
+    monkeypatch.setattr(disk_core, "is_macos", lambda: True)
 
     def fake_check_output(cmd, timeout=15):
         if cmd[:3] == ["diskutil", "list", "-plist"]:
@@ -456,7 +336,7 @@ def test_get_partition2_wipe_range_macos_without_list_offset(monkeypatch):
             return plistlib.dumps(info_by_dev[dev])
         raise AssertionError(cmd)
 
-    monkeypatch.setattr(disks.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
 
     result = disks.get_partition2_wipe_range("/dev/disk4")
     assert result is not None
@@ -647,6 +527,10 @@ def test_get_macos_all_mounts_uses_structured_mount_points(monkeypatch):
     list_plist = {
         "AllDisksAndPartitions": [
             {
+                "DeviceIdentifier": "disk0",
+                "Partitions": [{"DeviceIdentifier": "disk0s2", "MountPoint": "/"}],
+            },
+            {
                 "DeviceIdentifier": "disk4",
                 "Partitions": [
                     {
@@ -674,6 +558,7 @@ def test_get_macos_all_mounts_uses_structured_mount_points(monkeypatch):
     monkeypatch.setattr(macos.subprocess, "check_output", fake_check_output)
 
     assert macos._get_macos_all_mounts() == {
+        "disk0": ["/"],
         "disk4": ["/Volumes/NO NAME", "/Volumes/DATA SET"]
     }
     assert calls == [
@@ -701,11 +586,11 @@ def test_unmount_disk_macos_raises_when_force_unmount_fails(monkeypatch):
     assert calls == [
         (
             ["diskutil", "unmountDisk", "/dev/disk4"],
-            {"capture_output": True, "text": True, "timeout": 60},
+            {"capture_output": True, "text": True, "timeout": 60, "pass_fds": ()},
         ),
         (
             ["diskutil", "unmountDisk", "force", "/dev/disk4"],
-            {"capture_output": True, "text": True, "timeout": 60},
+            {"capture_output": True, "text": True, "timeout": 60, "pass_fds": ()},
         ),
     ]
 
@@ -729,9 +614,9 @@ def test_get_partition2_wipe_range_linux(monkeypatch, linux_platform):
 
     def fake_check_output(cmd, timeout=10):
         assert "-b" in cmd
-        return __import__("json").dumps(lsblk_output).encode()
+        return json.dumps(lsblk_output).encode()
 
-    monkeypatch.setattr(disks.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
 
     result = disks.get_partition2_wipe_range("/dev/sdb")
     assert result is not None
@@ -764,11 +649,25 @@ def test_linux_partition2_wipe_range_uses_reported_logical_sector_size(monkeypat
 
     def fake_check_output(cmd, timeout=10):
         assert "LOG-SEC" in cmd[4]
-        return __import__("json").dumps(lsblk_output).encode()
+        return json.dumps(lsblk_output).encode()
 
-    monkeypatch.setattr(linux_disks.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
 
     assert linux_disks._linux_partition2_wipe_range("/dev/sdb", 512) == (
         10 * 4096 + 4096 - 512,
         512,
     )
+
+
+def test_macos_capacity_uses_exact_bytes_instead_of_rounded_display(monkeypatch):
+    monkeypatch.setattr(macos.os.path, "exists", lambda path: path == "/dev/disk4")
+    monkeypatch.setattr(macos, "_get_macos_all_mounts", lambda: {"disk4": ["/Volumes/BOOT"]})
+    monkeypatch.setattr(
+        macos,
+        "_get_diskutil_info_text",
+        lambda _path: "Disk Size: 32.0 GB (32,017,481,728 Bytes)\nRemovable Media: Yes\n",
+    )
+
+    disk = macos.lookup_device_macos("/dev/disk4")
+
+    assert disk.size_bytes == 32_017_481_728

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ from ._flash_types import (
     FlashWorkflowError,
 )
 from .disks import assert_flash_allowed, lookup_device
+from .disks.core import assert_device_identity, flash_device_guard
 from .download import (
     check_latest_version,
     download_image,
@@ -145,6 +147,7 @@ def run_flash_workflow(
     api_wan_enabled = prepared.api_wan_enabled
     attestation = prepared.attestation
     send = _event_sender(events, emit)
+    admission = ExitStack()
 
     try:
         if manifest is None:
@@ -162,12 +165,19 @@ def run_flash_workflow(
             ) from exc
 
         try:
+            admission_fd = admission.enter_context(flash_device_guard(options.device))
+        except ValueError as exc:
+            raise FlashWorkflowError(FlashErrorCode.DISK_SAFETY, str(exc), warnings=warnings) from exc
+
+        try:
             device_identity = flash_image(
                 device=options.device,
                 image_path=image_path,
                 force=options.force,
                 skip_overlay_wipe=options.skip_overlay_wipe,
                 expected_sha256=str(context["image"].get("sha256") or "") or None,
+                expected_device_identity=options.expected_device_identity,
+                admission_fd=admission_fd,
                 emit=lambda payload: _forward_media_event(
                     payload,
                     send,
@@ -193,6 +203,7 @@ def run_flash_workflow(
                     ssh_enabled=ssh_enabled,
                     api_wan_enabled=api_wan_enabled,
                     attestation=attestation,
+                    admission_fd=admission_fd,
                 )
             ]
             for item in inject_results:
@@ -216,6 +227,7 @@ def run_flash_workflow(
                 options.device,
                 device_identity=device_identity,
                 eject=not options.no_eject,
+                admission_fd=admission_fd,
                 emit=lambda payload: _forward_media_event(
                     payload,
                     send,
@@ -261,6 +273,8 @@ def run_flash_workflow(
             warnings=warnings,
             context=context,
         )
+    finally:
+        admission.close()
 
 
 def _prepare_flash_workflow(
@@ -371,7 +385,17 @@ def _prepare_flash_workflow(
 
         disk = _disk_details(options.device)
         try:
-            assert_flash_allowed(options.device, force=options.force)
+            if options.expected_device_identity is not None:
+                if options.expected_device_identity.path != options.device:
+                    raise ValueError("Reviewed device path does not match the selected device.")
+                assert_device_identity(options.expected_device_identity)
+            checked_disk = assert_flash_allowed(options.device, force=options.force)
+            if options.expected_device_size_bytes is not None:
+                if checked_disk.size_bytes != options.expected_device_size_bytes:
+                    raise ValueError("Disk capacity changed since review; preview again.")
+            if options.expected_device_model is not None:
+                if checked_disk.model != options.expected_device_model:
+                    raise ValueError("Disk model changed since review; preview again.")
         except ValueError as exc:
             message = f"Flash safety: {exc}"
             if options.dry_run:

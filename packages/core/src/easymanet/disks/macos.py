@@ -350,6 +350,14 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
 
 
 def unmount_disk_macos(device: str, *, admission_fd: int | None = None) -> None:
+    disk = lookup_device_macos(device)
+    if disk is None:
+        raise RuntimeError(f"Could not resolve block devices for {device}")
+    if disk.safety_error:
+        raise RuntimeError(disk.safety_error)
+    if disk.is_system:
+        raise RuntimeError(f"Refusing to unmount system disk {device}")
+    device = disk.device
     result = subprocess.run(
         ["diskutil", "unmountDisk", device],
         capture_output=True,

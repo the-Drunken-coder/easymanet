@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,60 @@ def _options(tmp_path, **overrides):
     }
     values.update(overrides)
     return flash.FlashOptions(**values)
+
+
+@pytest.mark.parametrize("review", ["matching", "identity", "path", "capacity", "model"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reviewed_device_constraints_gate_the_full_workflow(monkeypatch, tmp_path, review, dry_run):
+    device = tmp_path / "device"
+    device.write_bytes(b"untouched")
+    identity = disk_core.capture_device_identity(str(device))
+    checked = disk_core.DiskInfo(str(device), size_bytes=32768, model="Reviewed card", removable=True)
+    expected_identity = identity
+    if review == "identity":
+        device.rename(tmp_path / "original-device")
+        device.write_bytes(b"replacement")
+    elif review == "path":
+        expected_identity = replace(identity, path=str(tmp_path / "other-device"))
+    options = _options(
+        tmp_path,
+        device=str(device),
+        dry_run=dry_run,
+        expected_device_identity=expected_identity,
+        expected_device_size_bytes=checked.size_bytes + int(review == "capacity"),
+        expected_device_model="Other card" if review == "model" else checked.model,
+    )
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: checked)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: checked)
+    execution = []
+    monkeypatch.setattr(flash, "check_privileges", lambda _device: execution.append("privileges"))
+
+    def write(**kwargs):
+        assert kwargs["expected_device_identity"] == identity
+        execution.append("write")
+        return identity
+
+    def inject(**kwargs):
+        execution.append("inject")
+        return [("/easymanet/provision.json", True)]
+
+    monkeypatch.setattr(flash, "flash_image", write)
+    monkeypatch.setattr(flash, "inject", inject)
+    monkeypatch.setattr(flash, "finish_flash", lambda *args, **kwargs: execution.append("finish"))
+
+    result = flash.run_flash_workflow(options)
+
+    mismatch = review != "matching"
+    assert result.ok == (dry_run or not mismatch)
+    if mismatch:
+        messages = result.warnings if dry_run else result.errors
+        assert any(message.startswith("Flash safety:") for message in messages)
+        if not dry_run:
+            assert result.code is flash.FlashErrorCode.DISK_SAFETY
+    expected_execution = [] if dry_run or mismatch else ["privileges", "write", "inject", "finish"]
+    assert execution == expected_execution
+    assert device.read_bytes() == (b"replacement" if review == "identity" else b"untouched")
 
 
 def _guard_flash_execution_steps(monkeypatch):

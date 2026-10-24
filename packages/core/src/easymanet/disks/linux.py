@@ -64,19 +64,25 @@ class _BlockGraph:
         return graph
 
     def backing_disks(
-        self, path: str, visiting: frozenset[str] = frozenset()
+        self,
+        path: str,
+        visiting: frozenset[str] = frozenset(),
+        *,
+        allow_virtual: bool = False,
     ) -> set[str] | None:
         node = self.devices.get(path)
         if node is None or path in visiting:
             return None
         if node.kind == "disk" and not node.parents:
             return {path}
+        if allow_virtual and node.kind in {"loop", "rom"} and not node.parents:
+            return set()
         if not node.parents:
             return None
         backing = set()
         for parent in node.parents:
-            disks = self.backing_disks(parent, visiting | {path})
-            if not disks:
+            disks = self.backing_disks(parent, visiting | {path}, allow_virtual=allow_virtual)
+            if disks is None:
                 return None
             backing.update(disks)
         return backing
@@ -123,7 +129,7 @@ def _linux_lsblk_data() -> Optional[dict]:
         "-p",
         "--tree",
         "-o",
-        "NAME,PKNAME,SIZE,TYPE,MOUNTPOINTS,MODEL,RM,TRAN",
+        "NAME,PKNAME,SIZE,TYPE,MOUNTPOINT,MODEL,RM,TRAN",
     ]
     try:
         output = subprocess.check_output(cmd, timeout=10)
@@ -154,7 +160,7 @@ def _linux_resolve_findmnt_source(source: str) -> str | None:
     return os.path.realpath(source)
 
 
-def _linux_root_block_devices(graph: _BlockGraph) -> set[str] | None:
+def _linux_mounts_and_system_disks(graph: _BlockGraph) -> set[str] | None:
     try:
         output = subprocess.check_output(
             ["findmnt", "-J", "-o", "SOURCE,TARGET,FSTYPE"],
@@ -162,26 +168,51 @@ def _linux_root_block_devices(graph: _BlockGraph) -> set[str] | None:
         )
         filesystems = json.loads(output)["filesystems"]
         protected = set()
+        btrfs_members: dict[str, set[str]] = {}
         root_found = False
         pending = list(filesystems)
         while pending:
             filesystem = pending.pop()
             pending.extend(filesystem.get("children", []))
             target = filesystem["target"]
-            if target not in SYS_MOUNT_POINTS:
-                continue
             root_found = root_found or target == "/"
             fstype = filesystem.get("fstype")
-            if not fstype:
-                return None
             if fstype in _NONLOCAL_FILESYSTEMS:
                 continue
             source = _linux_resolve_findmnt_source(filesystem["source"])
+            backing = None
+            if source:
+                if source not in graph.devices:
+                    return None
+                graph.devices[source].mounts.add(target)
             if fstype == "btrfs":
-                backing = _linux_btrfs_backing_disks(graph, target, source)
-            else:
-                backing = graph.backing_disks(source) if source else None
-            if not backing:
+                if source is None:
+                    return None
+                if source not in btrfs_members:
+                    members = _linux_btrfs_members(target, source)
+                    if members is None:
+                        return None
+                    btrfs_members[source] = members
+                backing = set()
+                for member in btrfs_members[source]:
+                    member_backing = graph.backing_disks(
+                        member, allow_virtual=target not in SYS_MOUNT_POINTS
+                    )
+                    if member_backing is None:
+                        return None
+                    graph.devices[member].mounts.add(target)
+                    backing.update(member_backing)
+                for path in backing:
+                    graph.devices[path].mounts.add(target)
+            elif source:
+                backing = graph.backing_disks(
+                    source, allow_virtual=target not in SYS_MOUNT_POINTS
+                )
+                if backing is None:
+                    return None
+            if target not in SYS_MOUNT_POINTS:
+                continue
+            if not fstype or not backing:
                 return None
             protected.update(backing)
         return protected if root_found else None
@@ -189,9 +220,7 @@ def _linux_root_block_devices(graph: _BlockGraph) -> set[str] | None:
         return None
 
 
-def _linux_btrfs_backing_disks(
-    graph: _BlockGraph, target: str, source: str | None
-) -> set[str] | None:
+def _linux_btrfs_members(target: str, source: str) -> set[str] | None:
     output = subprocess.check_output(
         ["btrfs", "filesystem", "show", "--raw", target], timeout=5
     ).decode()
@@ -210,13 +239,7 @@ def _linux_btrfs_backing_disks(
     paths = {_block_path(path) for _device_id, path in members}
     if source not in paths:
         return None
-    protected = set()
-    for path in paths:
-        backing = graph.backing_disks(path)
-        if not backing:
-            return None
-        protected.update(backing)
-    return protected
+    return paths
 
 
 def _linux_disk_info(
@@ -244,7 +267,7 @@ def list_disks_linux(include_all: bool = False) -> List[DiskInfo]:
     graph = _linux_block_graph()
     if graph is None:
         return []
-    protected = _linux_root_block_devices(graph)
+    protected = _linux_mounts_and_system_disks(graph)
     disks = [
         _linux_disk_info(node, graph, protected)
         for node in graph.devices.values()
@@ -260,7 +283,7 @@ def lookup_device_linux(device: str) -> Optional[DiskInfo]:
     node = graph.devices.get(os.path.realpath(device))
     if node is None or node.kind != "disk":
         return None
-    return _linux_disk_info(node, graph, _linux_root_block_devices(graph))
+    return _linux_disk_info(node, graph, _linux_mounts_and_system_disks(graph))
 
 
 def _linux_partition2_wipe_range(
@@ -314,7 +337,7 @@ def unmount_disk_linux(device: str, *, admission_fd: int | None = None) -> None:
     path = os.path.realpath(device)
     if graph is None or path not in graph.devices:
         raise RuntimeError(f"Could not resolve block devices for {device}")
-    protected = _linux_root_block_devices(graph)
+    protected = _linux_mounts_and_system_disks(graph)
     backing = graph.backing_disks(path)
     if protected is None or not backing:
         raise RuntimeError(f"Could not resolve all system backing disks for {device}")

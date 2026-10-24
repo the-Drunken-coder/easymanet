@@ -542,6 +542,64 @@ def test_flash_image_dry_run_emits_disk_details(monkeypatch, tmp_path):
     ]
 
 
+@pytest.mark.parametrize("phase", ["before-start", "image-check", "admission", "unmount", "wrong-path"])
+def test_reviewed_device_replacement_never_opens_the_new_device(monkeypatch, tmp_path, phase):
+    device = _patch_flash_safety(monkeypatch, tmp_path)
+    reviewed = capture_device_identity(str(device))
+    image = tmp_path / "firmware.img"
+    image.write_bytes(b"approved")
+    unmounts = []
+    original = tmp_path / "original-device"
+
+    def replace_device():
+        device.rename(original)
+        device.write_bytes(b"replacement")
+
+    if phase == "before-start":
+        replace_device()
+    elif phase == "wrong-path":
+        other = tmp_path / "other-device"
+        other.write_bytes(b"other")
+        reviewed = capture_device_identity(str(other))
+
+    real_check = image_writer._check_device_safety
+
+    def check(*args, **kwargs):
+        result = real_check(*args, **kwargs)
+        if phase == "image-check":
+            replace_device()
+        return result
+
+    real_admission = image_writer.assert_flash_admission
+
+    def admission(*args, **kwargs):
+        real_admission(*args, **kwargs)
+        if phase == "admission":
+            replace_device()
+
+    def unmount(*args, **kwargs):
+        unmounts.append(str(device))
+        if phase == "unmount":
+            replace_device()
+
+    real_open = os.open
+
+    def checked_open(path, *args, **kwargs):
+        assert os.fspath(path) != str(device), "replacement reached device open"
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(image_writer, "_check_device_safety", check)
+    monkeypatch.setattr(image_writer, "assert_flash_admission", admission)
+    monkeypatch.setattr(image_writer, "unmount_disk", unmount)
+    monkeypatch.setattr(image_writer.os, "open", checked_open)
+
+    with pytest.raises(FlashError, match="identity changed|Reviewed device path"):
+        flash_image(str(device), str(image), expected_device_identity=reviewed, skip_overlay_wipe=True)
+
+    assert unmounts == ([str(device)] if phase == "unmount" else [])
+    assert device.read_bytes() == (b"\x00" * 65536 if phase == "wrong-path" else b"replacement")
+
+
 def test_flash_image_treats_uppercase_gzip_suffix_as_compressed(monkeypatch, tmp_path):
     device = _patch_flash_safety(monkeypatch, tmp_path)
     image = tmp_path / "firmware.img.GZ"

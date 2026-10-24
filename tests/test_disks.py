@@ -568,6 +568,9 @@ def test_get_macos_all_mounts_uses_structured_mount_points(monkeypatch):
 
 
 def test_unmount_disk_macos_raises_when_force_unmount_fails(monkeypatch):
+    monkeypatch.setattr(
+        macos, "lookup_device_macos", lambda device: disks.DiskInfo(device, removable=True)
+    )
     calls = []
     results = [
         type("Result", (), {"returncode": 1, "stderr": "busy", "stdout": ""})(),

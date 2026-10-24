@@ -29,12 +29,16 @@ def _disk(name, children=(), **fields):
     }
 
 
-def _linux_os(monkeypatch, devices, sources=None, *, fstypes=None, btrfs_output=None):
+def _linux_os(
+    monkeypatch, devices, sources=None, *, fstypes=None, btrfs_output=None, legacy=False
+):
     sources = sources or {"/": "/dev/md0"}
     fstypes = fstypes or {}
 
     def check_output(cmd, **_kwargs):
         if cmd[0] == "lsblk" and "-J" in cmd:
+            if legacy and "MOUNTPOINTS" in cmd[cmd.index("-o") + 1].split(","):
+                raise subprocess.CalledProcessError(1, cmd, stderr=b"unknown column: MOUNTPOINTS")
             return json.dumps({"blockdevices": devices}).encode()
         if cmd[0] == "lsblk" and "PKNAME" in cmd:
             return b"sda1\nsdb1\n"
@@ -56,6 +60,8 @@ def _linux_os(monkeypatch, devices, sources=None, *, fstypes=None, btrfs_output=
         raise AssertionError(cmd)
 
     monkeypatch.setattr(subprocess, "check_output", check_output)
+    monkeypatch.setattr(disk_core, "is_macos", lambda: False)
+    monkeypatch.setattr(disk_core, "is_linux", lambda: True)
     monkeypatch.setattr(disk_core, "_is_block_device", lambda _path: True)
 
 
@@ -651,3 +657,228 @@ def test_unresolved_macos_system_relationship_blocks_without_false_system_label(
     assert disk.safety_error
     with pytest.raises(ValueError, match="resolve"):
         disks.assert_flash_allowed("/dev/disk4", force=True)
+
+
+def test_linux_fixture_dispatches_independently_of_the_host(monkeypatch):
+    monkeypatch.setattr(disk_core, "is_macos", lambda: True)
+    monkeypatch.setattr(disk_core, "is_linux", lambda: False)
+    _linux_os(
+        monkeypatch,
+        [_disk("sda", [{"name": "sda1", "type": "part", "mountpoint": "/"}]), _disk("sdc")],
+        {"/": "/dev/sda1"},
+    )
+
+    assert disks.assert_flash_allowed("/dev/sdc").device == "/dev/sdc"
+
+
+@pytest.mark.parametrize("legacy", [False, True], ids=["current-tools", "older-tools"])
+def test_every_mount_is_unmounted_even_when_lsblk_reports_only_one(monkeypatch, legacy):
+    _linux_os(
+        monkeypatch,
+        [
+            _disk("sda", [{"name": "sda1", "type": "part", "mountpoint": "/"}]),
+            _disk("sdc", [{"name": "sdc1", "type": "part", "mountpoint": "/media/Card/bind"}]),
+        ],
+        {
+            "/": "/dev/sda1",
+            "/media/Card": "/dev/sdc1",
+            "/media/Card/bind": "/dev/sdc1[/directory]",
+            "/media/Other Mount": "/dev/sdc1[/another]",
+        },
+        legacy=legacy,
+    )
+    commands = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: (
+        commands.append(cmd) or subprocess.CompletedProcess(cmd, 0)
+    ))
+
+    disk = disks.assert_flash_allowed("/dev/sdc")
+    assert set(disk.mounted) == {"/media/Card", "/media/Card/bind", "/media/Other Mount"}
+    disks.unmount_disk("/dev/sdc")
+
+    assert commands == [
+        ["umount", "/media/Card/bind"],
+        ["umount", "/media/Other Mount"],
+        ["umount", "/media/Card"],
+    ]
+
+
+@pytest.mark.parametrize("layout", ["partitions", "single-holder", "multiple-holders"])
+def test_older_tools_unmount_all_btrfs_mounts_from_either_member(monkeypatch, layout):
+    partition_b = {"name": "sdb1", "type": "part", "mountpoint": "/media/Card/subvolume"}
+    partition_c = {"name": "sdc1", "type": "part"}
+    members = ["sdb1", "sdc1"]
+    candidates = ["sdb", "sdc"]
+    if layout == "single-holder":
+        holder = _disk("bcache0", mountpoint="/media/Card/subvolume")
+        partition_b["children"] = [holder]
+        partition_c["children"] = [holder]
+        members = ["bcache0"]
+        candidates.append("bcache0")
+    elif layout == "multiple-holders":
+        members = ["bcache0", "bcache1"]
+        partition_b["children"] = [_disk("bcache0", mountpoint="/media/Card/subvolume")]
+        partition_c["children"] = [_disk("bcache1")]
+        candidates.extend(members)
+    btrfs_output = f"Total devices {len(members)} FS bytes used 32768\n"
+    btrfs_output += "".join(
+        f"devid {index} size 34359738368 used 1048576 path /dev/{member}\n"
+        for index, member in enumerate(members, 1)
+    )
+    _linux_os(
+        monkeypatch,
+        [
+            _disk("sda", [{"name": "sda1", "type": "part", "mountpoint": "/"}]),
+            _disk("sdb", [partition_b]),
+            _disk("sdc", [partition_c]),
+        ],
+        {
+            "/": "/dev/sda1",
+            "/media/Card": f"/dev/{members[0]}[/@]",
+            "/media/Card/subvolume": f"/dev/{members[0]}[/@data]",
+        },
+        fstypes={"/media/Card": "btrfs", "/media/Card/subvolume": "btrfs"},
+        btrfs_output=btrfs_output,
+        legacy=True,
+    )
+    commands = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: (
+        commands.append(cmd) or subprocess.CompletedProcess(cmd, 0)
+    ))
+
+    for candidate in candidates:
+        device = f"/dev/{candidate}"
+        assert not disks.assert_flash_allowed(device).is_system
+        disks.unmount_disk(device)
+
+    assert commands == [
+        ["umount", "/media/Card/subvolume"], ["umount", "/media/Card"],
+    ] * len(candidates)
+
+
+@pytest.mark.parametrize(
+    ("kind", "partitioned", "fstype"),
+    [("loop", False, "ext4"), ("rom", False, "iso9660"),
+     ("loop", True, "ext4"), ("rom", True, "iso9660"), ("loop", True, "btrfs")],
+)
+def test_unrelated_virtual_mounts_do_not_block_card_unmount(monkeypatch, kind, partitioned, fstype):
+    name = "loop0" if kind == "loop" else "sr0"
+    source = f"/dev/{name}p1" if partitioned else f"/dev/{name}"
+    virtual = {"name": name, "type": kind}
+    if partitioned:
+        virtual["children"] = [{"name": source, "type": "part", "mountpoint": "/media/Image"}]
+    else:
+        virtual["mountpoint"] = "/media/Image"
+    _linux_os(
+        monkeypatch,
+        [
+            _disk("sda", [{"name": "sda1", "type": "part", "mountpoint": "/"}]),
+            _disk("sdc", mountpoint="/media/Card"),
+            virtual,
+        ],
+        {"/": "/dev/sda1", "/media/Card": "/dev/sdc", "/media/Image": source},
+        fstypes={"/media/Image": fstype},
+        btrfs_output=(
+            "Total devices 1 FS bytes used 32768\n"
+            f"devid 1 size 34359738368 used 1048576 path {source}\n"
+        ),
+        legacy=True,
+    )
+    commands = []
+
+    def run(cmd, **kwargs):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert not disks.assert_flash_allowed("/dev/sdc").safety_error
+    disks.unmount_disk("/dev/sdc")
+
+    assert commands == [["umount", "/media/Card"]]
+
+
+@pytest.mark.parametrize("fstype", ["ext4", "btrfs"])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_virtual_root_with_unknown_physical_backing_still_blocks_media(monkeypatch, fstype, mixed):
+    virtual = {"name": "loop0p1", "type": "part", "mountpoint": "/"}
+    devices = [{"name": "loop0", "type": "loop", "children": [virtual]}, _disk("sdc")]
+    source = "/dev/loop0p1"
+    if mixed:
+        root = {"name": "md0", "type": "raid1", "mountpoint": "/"}
+        virtual.pop("mountpoint")
+        virtual["children"] = [root]
+        devices.append(_disk("sda", [{"name": "sda1", "type": "part", "children": [root]}]))
+        source = "/dev/md0"
+    _linux_os(
+        monkeypatch,
+        devices,
+        {"/": source},
+        fstypes={"/": fstype},
+        btrfs_output=(
+            "Total devices 1 FS bytes used 32768\n"
+            f"devid 1 size 34359738368 used 1048576 path {source}\n"
+        ),
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("unresolved root reached unmount"))
+
+    with pytest.raises(ValueError, match="resolve"):
+        disks.assert_flash_allowed("/dev/sdc")
+    with pytest.raises(RuntimeError, match="resolve"):
+        disks.unmount_disk("/dev/sdc")
+
+
+@pytest.mark.parametrize("device", ["/dev/disk0", "/dev/rdisk0", "/dev/disk1", "/dev/disk3"])
+def test_public_macos_unmount_refuses_system_backing_before_any_command(monkeypatch, device):
+    _macos_apfs_os(monkeypatch, fusion=True)
+    commands = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: (
+        commands.append(cmd) or subprocess.CompletedProcess(cmd, 0)
+    ))
+
+    with pytest.raises(RuntimeError, match="system disk"):
+        disks.unmount_disk(device)
+
+    assert commands == []
+
+
+@pytest.mark.parametrize("failure", ["missing-stores", "unknown-store", "missing-root", "inventory-error"])
+def test_public_macos_unmount_refuses_unresolved_backing(monkeypatch, failure):
+    _macos_apfs_os(monkeypatch, failure=failure)
+    commands = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: (
+        commands.append(cmd) or subprocess.CompletedProcess(cmd, 0)
+    ))
+
+    with pytest.raises(RuntimeError, match="resolve"):
+        disks.unmount_disk("/dev/disk4")
+
+    assert commands == []
+
+
+@pytest.mark.parametrize("device", ["/dev/disk4s1", "/dev/missing"])
+def test_public_macos_unmount_refuses_unknown_targets(monkeypatch, device):
+    _macos_apfs_os(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("unknown target reached unmount"))
+
+    with pytest.raises(RuntimeError, match="resolve"):
+        disks.unmount_disk(device)
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_public_macos_unmount_accepts_safe_media_and_retains_admission(monkeypatch, busy):
+    _macos_apfs_os(monkeypatch)
+    commands = []
+
+    def run(cmd, **kwargs):
+        commands.append((cmd, kwargs["pass_fds"]))
+        return subprocess.CompletedProcess(cmd, int(busy and len(commands) == 1))
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    disks.unmount_disk("/dev/disk4", admission_fd=77)
+
+    expected = [(["diskutil", "unmountDisk", "/dev/disk4"], (77,))]
+    if busy:
+        expected.append((["diskutil", "unmountDisk", "force", "/dev/disk4"], (77,)))
+    assert commands == expected

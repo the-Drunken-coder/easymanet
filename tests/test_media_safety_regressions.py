@@ -85,6 +85,55 @@ def test_every_nested_raid_and_mapper_backing_disk_is_protected(monkeypatch, sou
     assert not found["/dev/sdc"].is_system
 
 
+@pytest.mark.parametrize("mountpoint", ["/", None])
+@pytest.mark.parametrize("device", ["/dev/sda", "/dev/sdb", "/dev/bcache0"])
+def test_disk_typed_holder_protects_every_backing_disk(monkeypatch, mountpoint, device):
+    holder = _disk("bcache0", mountpoint=mountpoint)
+    devices = [
+        _disk("sda", [{"name": "sda1", "type": "part", "children": [holder]}]),
+        _disk("sdb", [{"name": "sdb1", "type": "part", "children": [holder]}]),
+        _disk("sdc", mountpoint="/media/card"),
+    ]
+    _linux_os(monkeypatch, devices, {"/": "/dev/bcache0"})
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    with pytest.raises(ValueError, match="system disk"):
+        disks.assert_flash_allowed(device, force=True)
+    with pytest.raises(RuntimeError, match="system disk"):
+        disks.unmount_disk(device)
+    assert commands == []
+
+    assert not disks.assert_flash_allowed("/dev/sdc", force=True).is_system
+    disks.unmount_disk("/dev/sdc")
+    assert commands == [["umount", "/media/card"]]
+
+
+@pytest.mark.parametrize("mountpoint", ["/boot", "/home"])
+def test_unmount_refuses_system_mount_even_when_findmnt_omits_it(monkeypatch, mountpoint):
+    devices = [
+        _disk("sda", [{"name": "sda1", "type": "part", "mountpoint": mountpoint}]),
+        _disk("sdb", [{"name": "sdb1", "type": "part", "mountpoint": "/"}]),
+    ]
+    _linux_os(monkeypatch, devices, {"/": "/dev/sdb1"})
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    with pytest.raises(RuntimeError, match="system disk"):
+        disks.unmount_disk("/dev/sda")
+    assert commands == []
+
+
 @pytest.mark.parametrize(
     "unknown_source", ["/dev/md99", "/dev/mapper/missing", "overlay"]
 )

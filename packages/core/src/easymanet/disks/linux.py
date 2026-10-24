@@ -69,7 +69,7 @@ class _BlockGraph:
         node = self.devices.get(path)
         if node is None or path in visiting:
             return None
-        if node.kind == "disk":
+        if node.kind == "disk" and not node.parents:
             return {path}
         if not node.parents:
             return None
@@ -223,8 +223,9 @@ def _linux_disk_info(
     node: _BlockDevice, graph: _BlockGraph, protected: set[str] | None
 ) -> DiskInfo:
     mounts = graph.mounts(node.path)
-    unresolved = protected is None
-    is_system = protected is not None and node.path in protected
+    backing = graph.backing_disks(node.path)
+    unresolved = protected is None or backing is None
+    is_system = backing is not None and protected is not None and bool(backing & protected)
     has_system_mount = bool(set(mounts) & SYS_MOUNT_POINTS)
     return DiskInfo(
         device=node.path,
@@ -317,9 +318,9 @@ def unmount_disk_linux(device: str, *, admission_fd: int | None = None) -> None:
     backing = graph.backing_disks(path)
     if protected is None or not backing:
         raise RuntimeError(f"Could not resolve all system backing disks for {device}")
-    if backing & protected:
-        raise RuntimeError(f"Refusing to unmount system disk {device}")
     mounts = graph.mounts(path)
+    if backing & protected or set(mounts) & SYS_MOUNT_POINTS:
+        raise RuntimeError(f"Refusing to unmount system disk {device}")
     for target in sorted(
         mounts, key=lambda mount: (mount.count("/"), mount), reverse=True
     ):

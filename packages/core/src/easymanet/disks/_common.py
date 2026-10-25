@@ -42,6 +42,7 @@ class DiskInfo:
         is_system: bool = False,
         not_in_default_list: bool = False,
         virtual: bool = False,
+        safety_error: str = "",
     ):
         self.device = device
         self.size_bytes = size_bytes
@@ -51,6 +52,7 @@ class DiskInfo:
         self.is_system = is_system
         self.not_in_default_list = not_in_default_list
         self.virtual = virtual
+        self.safety_error = safety_error
 
     @property
     def size_gb(self) -> float:
@@ -73,7 +75,7 @@ class DiskInfo:
             )
         if self.is_system:
             w.append(
-                "WARNING: This appears to be a system disk — use --force to override"
+                "WARNING: This system disk cannot be flashed."
             )
         elif not self.removable and self.size_gb > DISK_WARN_THRESHOLD_GB:
             w.append(

@@ -1,12 +1,15 @@
 """Write node-specific provisioning payloads to the boot partition."""
 
+import json
 import os
 import plistlib
 import re
+import secrets
 import stat
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -28,7 +31,7 @@ _MACOS_FAT_CONTENTS = frozenset(
         "DOS_FAT_32",
     }
 )
-_MACOS_FAT_FILESYSTEMS = frozenset({"msdos", "vfat", "fat32", "exfat"})
+_BOOT_FILESYSTEMS = frozenset({"msdos", "vfat", "fat32", "exfat"})
 
 _SUBPROCESS_ERRORS = (
     subprocess.CalledProcessError,
@@ -52,6 +55,32 @@ class InjectError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class _BootMount:
+    device_identity: DeviceIdentity
+    partition: str
+    mount_point: str
+    mounted_here: bool
+
+    def open_root(self) -> int:
+        _assert_device_identity(self.device_identity)
+        _check_boot_mount(self)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        fd = os.open(self.mount_point, flags)
+        try:
+            filesystem_device = os.stat(self.partition).st_rdev
+            if os.fstat(fd).st_dev != filesystem_device:
+                raise InjectError(
+                    "Boot destination is not the selected partition's filesystem"
+                )
+            _check_boot_mount(self)
+            _assert_device_identity(self.device_identity)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+
 def inject(
     device: str,
     manifest: Manifest,
@@ -62,6 +91,7 @@ def inject(
     ssh_enabled: Optional[bool] = None,
     api_wan_enabled: Optional[bool] = None,
     attestation: ProvisionAttestation | None = None,
+    admission_fd: int | None = None,
 ) -> List[Tuple[str, bool]]:
     if dry_run:
         render(
@@ -82,19 +112,23 @@ def inject(
             f"{device_identity.path}."
         )
     _assert_device_identity(device_identity)
-    mount_point, mounted_here = _mount_boot_partition(device)
+    boot_mount = _mount_boot_partition(device_identity, admission_fd=admission_fd)
     results: List[Tuple[str, bool]] | None = None
     stage_error: BaseException | None = None
     try:
         _assert_device_identity(device_identity)
-        results = stage_boot_payload(
-            Path(mount_point),
-            manifest,
-            node_name,
-            ssh_enabled=ssh_enabled,
-            api_wan_enabled=api_wan_enabled,
-            attestation=attestation,
-        )
+        boot_fd = boot_mount.open_root()
+        try:
+            results = _stage_boot_payload(
+                boot_fd,
+                manifest,
+                node_name,
+                ssh_enabled=ssh_enabled,
+                api_wan_enabled=api_wan_enabled,
+                attestation=attestation,
+            )
+        finally:
+            os.close(boot_fd)
         _assert_device_identity(device_identity)
     except OSError as exc:
         stage_error = InjectError(
@@ -104,7 +138,7 @@ def inject(
     except BaseException as exc:
         stage_error = exc
     try:
-        _cleanup_mount(device, mount_point, mounted_here)
+        _cleanup_mount(device, boot_mount.mount_point, boot_mount.mounted_here, admission_fd=admission_fd)
     except InjectError as cleanup_error:
         if stage_error is not None:
             raise InjectError(
@@ -139,6 +173,30 @@ def stage_boot_payload(
     api_wan_enabled: Optional[bool] = None,
     attestation: ProvisionAttestation | None = None,
 ) -> List[Tuple[str, bool]]:
+    """Stage an offline boot tree, also used by artifact verification."""
+    boot_fd = os.open(boot_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        return _stage_boot_payload(
+            boot_fd,
+            manifest,
+            node_name,
+            ssh_enabled=ssh_enabled,
+            api_wan_enabled=api_wan_enabled,
+            attestation=attestation,
+        )
+    finally:
+        os.close(boot_fd)
+
+
+def _stage_boot_payload(
+    boot_fd: int,
+    manifest: Manifest,
+    node_name: str,
+    *,
+    ssh_enabled: Optional[bool] = None,
+    api_wan_enabled: Optional[bool] = None,
+    attestation: ProvisionAttestation | None = None,
+) -> List[Tuple[str, bool]]:
     provision_json = render(
         manifest,
         node_name,
@@ -146,20 +204,30 @@ def stage_boot_payload(
         api_wan_enabled=api_wan_enabled,
         attestation=attestation,
     )
-    dest_dir = boot_root / "easymanet"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / "provision.json"
-    _atomic_write_text(dest_path, provision_json, mode=0o600)
     try:
-        dest_path.chmod(0o600)
-    except OSError:
-        # FAT/exFAT boot media may not honor POSIX permissions.
+        os.mkdir("easymanet", mode=0o700, dir_fd=boot_fd)
+    except FileExistsError:
         pass
+    dest_fd = os.open(
+        "easymanet",
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        dir_fd=boot_fd,
+    )
+    try:
+        if os.fstat(dest_fd).st_dev != os.fstat(boot_fd).st_dev:
+            raise InjectError(
+                "Payload directory is on a different filesystem from the boot volume"
+            )
+        _atomic_write_text(
+            Path("provision.json"), provision_json, mode=0o600, dir_fd=dest_fd
+        )
+    finally:
+        os.close(dest_fd)
     results = [
         ("/boot/easymanet/provision.json", True),
         ("Base image must already include EasyMANET first-boot hooks", True),
     ]
-    cmdline_result = _fix_usb_boot_root(boot_root)
+    cmdline_result = _fix_usb_boot_root(boot_fd)
     if cmdline_result:
         results.append((cmdline_result, True))
     return results
@@ -190,13 +258,14 @@ def _root_device_partuuid_suffix(dev_path: str) -> Optional[str]:
     return None
 
 
-def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
-    cmdline_path = boot_root / "cmdline.txt"
-    partuuid_path = boot_root / "partuuid.txt"
-    if not cmdline_path.exists() or not partuuid_path.exists():
+def _fix_usb_boot_root(dir_fd: int) -> Optional[str]:
+    cmdline_path = Path("cmdline.txt")
+    partuuid_path = Path("partuuid.txt")
+    try:
+        cmdline = _read_text(cmdline_path, dir_fd=dir_fd)
+        partuuid = _read_text(partuuid_path, dir_fd=dir_fd).strip()
+    except FileNotFoundError:
         return None
-
-    cmdline = cmdline_path.read_text()
     if "root=PARTUUID=" in cmdline:
         return None
 
@@ -205,7 +274,6 @@ def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
         return None
 
     root_device = match.group(1)
-    partuuid = partuuid_path.read_text().strip()
     if not partuuid:
         return None
 
@@ -214,23 +282,35 @@ def _fix_usb_boot_root(boot_root: Path) -> Optional[str]:
         return None
 
     root_partuuid = f"PARTUUID={partuuid}{part_suffix}"
-    backup_path = boot_root / "cmdline.txt.easymanet.bak"
-    cmdline_mode = stat.S_IMODE(cmdline_path.stat().st_mode)
-    if not backup_path.exists():
-        _atomic_write_text(backup_path, cmdline, mode=cmdline_mode)
+    backup_path = Path("cmdline.txt.easymanet.bak")
+    cmdline_mode = stat.S_IMODE(
+        os.stat(cmdline_path, dir_fd=dir_fd, follow_symlinks=False).st_mode
+    )
+    try:
+        os.stat(backup_path, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        _atomic_write_text(backup_path, cmdline, mode=cmdline_mode, dir_fd=dir_fd)
 
     updated = cmdline.replace(f"root={root_device}", f"root={root_partuuid}", 1)
-    _atomic_write_text(cmdline_path, updated, mode=cmdline_mode)
+    _atomic_write_text(cmdline_path, updated, mode=cmdline_mode, dir_fd=dir_fd)
     return f"/boot/cmdline.txt root={root_partuuid}"
 
 
-def _atomic_write_text(path: Path, content: str, *, mode: int) -> None:
-    fd, raw_temp_path = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    temp_path = Path(raw_temp_path)
+def _read_text(path: Path, *, dir_fd: int | None) -> str:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    with os.fdopen(fd, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _atomic_write_text(
+    path: Path,
+    content: str,
+    *,
+    mode: int,
+    dir_fd: int | None = None,
+) -> None:
+    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode, dir_fd=dir_fd)
     open_fd = fd
     try:
         try:
@@ -243,38 +323,47 @@ def _atomic_write_text(path: Path, content: str, *, mode: int) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_path, path)
+        if dir_fd is None:
+            os.replace(temp_path, path)
+        else:
+            os.replace(temp_path, path, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     finally:
         if open_fd >= 0:
             os.close(open_fd)
-        temp_path.unlink(missing_ok=True)
+        try:
+            os.unlink(temp_path, dir_fd=dir_fd)
+        except FileNotFoundError:
+            pass
 
 
-def _mount_boot_partition(device: str) -> Tuple[str, bool]:
-    existing = _find_boot_mount(device)
-    if existing:
-        return existing, False
-
-    partition = _find_boot_partition(device)
+def _mount_boot_partition(expected: DeviceIdentity, *, admission_fd: int | None = None) -> _BootMount:
+    partition = _find_boot_partition(expected.path)
     if not partition:
-        raise InjectError(f"Could not find boot partition on {device}")
-
+        raise InjectError(f"Could not find boot partition on {expected.path}")
+    existing = _find_mount_for_partition(partition)
+    if existing:
+        return _BootMount(expected, partition, existing, False)
     if is_macos():
-        return _mount_boot_partition_macos(partition)
-    if is_linux():
-        return _mount_boot_partition_linux(partition)
-    raise InjectError("Unsupported platform for boot-partition mounting")
+        mount_point, owned = _mount_boot_partition_macos(partition, admission_fd=admission_fd)
+    elif is_linux():
+        mount_point, owned = _mount_boot_partition_linux(partition, admission_fd=admission_fd)
+    else:
+        raise InjectError("Unsupported platform for boot-partition mounting")
+    return _BootMount(expected, partition, mount_point, owned)
 
 
-def _mount_boot_partition_macos(partition: str) -> Tuple[str, bool]:
+def _mount_boot_partition_macos(partition: str, *, admission_fd: int | None = None) -> Tuple[str, bool]:
     result = subprocess.run(
         ["diskutil", "mount", partition],
         capture_output=True,
         text=True,
         timeout=30,
+        pass_fds=(admission_fd,) if admission_fd is not None else (),
     )
     if result.returncode != 0:
-        raise InjectError(f"diskutil mount failed for {partition}: {result.stderr.strip()}")
+        raise InjectError(
+            f"diskutil mount failed for {partition}: {result.stderr.strip()}"
+        )
 
     mount_point = _find_mount_for_partition(partition)
     if not mount_point:
@@ -282,13 +371,14 @@ def _mount_boot_partition_macos(partition: str) -> Tuple[str, bool]:
     return mount_point, True
 
 
-def _mount_boot_partition_linux(partition: str) -> Tuple[str, bool]:
+def _mount_boot_partition_linux(partition: str, *, admission_fd: int | None = None) -> Tuple[str, bool]:
     mount_point = tempfile.mkdtemp(prefix="easymanet_boot_")
     result = subprocess.run(
         ["mount", partition, mount_point],
         capture_output=True,
         text=True,
         timeout=30,
+        pass_fds=(admission_fd,) if admission_fd is not None else (),
     )
     if result.returncode != 0:
         try:
@@ -299,7 +389,7 @@ def _mount_boot_partition_linux(partition: str) -> Tuple[str, bool]:
     return mount_point, True
 
 
-def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
+def _cleanup_mount(device: str, mount_point: str, mounted_here: bool, *, admission_fd: int | None = None) -> None:
     if not mounted_here:
         return
 
@@ -310,6 +400,7 @@ def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                pass_fds=(admission_fd,) if admission_fd is not None else (),
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise InjectError(
@@ -330,6 +421,7 @@ def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                pass_fds=(admission_fd,) if admission_fd is not None else (),
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise InjectError(
@@ -349,7 +441,9 @@ def _cleanup_mount(device: str, mount_point: str, mounted_here: bool) -> None:
             ) from exc
         return
 
-    raise InjectError(f"Unsupported platform while cleaning up {mount_point} on {device}")
+    raise InjectError(
+        f"Unsupported platform while cleaning up {mount_point} on {device}"
+    )
 
 
 def _macos_partition_index(partition: dict) -> int:
@@ -362,7 +456,7 @@ def _macos_partition_index(partition: dict) -> int:
 
 def _is_macos_fat_partition(partition: dict) -> bool:
     fs_type = (partition.get("FilesystemType") or "").lower()
-    if fs_type in _MACOS_FAT_FILESYSTEMS:
+    if fs_type in _BOOT_FILESYSTEMS:
         return True
     content = partition.get("Content") or ""
     if content in _MACOS_FAT_CONTENTS:
@@ -383,68 +477,112 @@ def _macos_partitions_for_device(device: str) -> List[dict]:
 
     partitions: List[dict] = []
     for entry in data.get("AllDisksAndPartitions", []):
-        partitions.extend(entry.get("Partitions", []))
+        if f"/dev/{entry.get('DeviceIdentifier', '')}" == device:
+            partitions.extend(entry.get("Partitions", []))
     return sorted(partitions, key=_macos_partition_index)
 
 
 def _find_boot_partition(device: str) -> Optional[str]:
     if is_macos():
         for partition in _macos_partitions_for_device(device):
-            if not _is_macos_fat_partition(partition):
-                continue
-            dev_id = partition.get("DeviceIdentifier", "")
-            if dev_id:
-                return f"/dev/{dev_id}"
+            if _is_macos_fat_partition(partition) and partition.get("DeviceIdentifier"):
+                return f"/dev/{partition['DeviceIdentifier']}"
         return None
 
     if is_linux():
-        for suffix in ["1", "p1"]:
-            part = f"{device}{suffix}"
-            if os.path.exists(part):
-                return part
-        return None
-
-    return None
-
-
-def _find_boot_mount(device: str) -> Optional[str]:
-    if is_macos():
-        for partition in _macos_partitions_for_device(device):
-            if not _is_macos_fat_partition(partition):
-                continue
-            mount_point = partition.get("MountPoint")
-            if mount_point:
-                return mount_point
-            dev_id = partition.get("DeviceIdentifier", "")
-            if dev_id:
-                found = _find_mount_for_partition(f"/dev/{dev_id}")
-                if found:
-                    return found
-        return None
-
-    if is_linux():
-        partition = _find_boot_partition(device)
-        if not partition:
-            return None
-        return _find_mount_for_partition(partition)
-
+        try:
+            output = subprocess.check_output(
+                ["lsblk", "-J", "-p", "-o", "NAME,TYPE,FSTYPE", device],
+                timeout=15,
+            )
+            data = json.loads(output)
+            for disk in data["blockdevices"]:
+                if os.path.realpath(disk["name"]) != os.path.realpath(device):
+                    continue
+                for partition in disk.get("children", []):
+                    if (
+                        partition.get("type") == "part"
+                        and (partition.get("fstype") or "").lower() in _BOOT_FILESYSTEMS
+                    ):
+                        return partition["name"]
+        except (*_BOOT_PARTITION_PARSE_ERRORS, KeyError, TypeError) as exc:
+            _debug_note(f"boot partition lookup failed for {device}: {exc}")
     return None
 
 
 def _find_mount_for_partition(partition: str) -> Optional[str]:
     try:
-        output = subprocess.check_output(["mount"], timeout=5).decode()
-    except _BOOT_PARTITION_PARSE_ERRORS as exc:
-        _debug_note(f"mount output unavailable: {exc}")
-        return None
-
-    real_partition = os.path.realpath(partition)
-    for line in output.strip().split("\n"):
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        source = parts[0]
-        mount_point = parts[2]
-        if source == partition or os.path.realpath(source) == real_partition:
-            return mount_point
+        if is_macos():
+            info = _macos_partition_info(partition)
+            return info.get("MountPoint") or None
+        if is_linux():
+            filesystems = _linux_mount_info(["--source", partition])
+            if len(filesystems) == 1:
+                filesystem = filesystems[0]
+                if os.path.realpath(filesystem["source"]) == os.path.realpath(
+                    partition
+                ):
+                    return filesystem["target"]
+    except (*_BOOT_PARTITION_PARSE_ERRORS, KeyError, TypeError) as exc:
+        raise InjectError(f"Could not resolve mount for {partition}: {exc}") from exc
     return None
+
+
+def _macos_partition_info(partition: str) -> dict:
+    output = subprocess.check_output(
+        ["diskutil", "info", "-plist", partition], timeout=15
+    )
+    info = plistlib.loads(output)
+    if info.get("DeviceNode") != partition:
+        raise InjectError(
+            f"diskutil returned a different boot partition for {partition}"
+        )
+    return info
+
+
+def _linux_mount_info(selector: list[str]) -> list[dict]:
+    try:
+        output = subprocess.check_output(
+            ["findmnt", "-J", "-o", "SOURCE,TARGET,FSTYPE", *selector],
+            timeout=5,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode == 1:
+            return []
+        raise
+    return json.loads(output).get("filesystems", [])
+
+
+def _check_boot_mount(mount: _BootMount) -> None:
+    try:
+        if is_macos():
+            info = _macos_partition_info(mount.partition)
+            parent = f"/dev/{info['ParentWholeDisk']}"
+            if (
+                parent != mount.device_identity.path
+                or info.get("MountPoint") != mount.mount_point
+            ):
+                raise InjectError("Boot mount does not belong to the selected device")
+            filesystem = (info.get("FilesystemType") or "").lower()
+        elif is_linux():
+            if _find_boot_partition(mount.device_identity.path) != mount.partition:
+                raise InjectError(
+                    "Boot partition no longer belongs to the selected device"
+                )
+            filesystems = _linux_mount_info(["--mountpoint", mount.mount_point])
+            if len(filesystems) != 1:
+                raise InjectError("Boot destination is not a mounted filesystem")
+            info = filesystems[0]
+            if info["target"] != mount.mount_point or os.path.realpath(
+                info["source"]
+            ) != os.path.realpath(mount.partition):
+                raise InjectError(
+                    "Boot mount does not belong to the selected partition"
+                )
+            filesystem = (info.get("fstype") or "").lower()
+        else:
+            raise InjectError("Unsupported platform for boot mount validation")
+        if filesystem not in _BOOT_FILESYSTEMS:
+            raise InjectError("Boot destination is not a supported FAT filesystem")
+    except (*_BOOT_PARTITION_PARSE_ERRORS, KeyError, TypeError) as exc:
+        raise InjectError(f"Could not verify boot mount identity: {exc}") from exc

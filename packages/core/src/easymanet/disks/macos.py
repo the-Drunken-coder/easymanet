@@ -81,13 +81,16 @@ def _list_disks_macos_all() -> List[DiskInfo]:
                 mounted=mounted,
                 is_system=is_system,
                 virtual=virtual,
+                safety_error="Could not resolve all macOS system backing disks."
+                if all_mounts is None
+                else "",
             )
         )
 
     return sorted(disks, key=lambda d: d.size_bytes, reverse=True)
 
 
-def _diskinfo_from_macos_entry(entry: dict, all_mounts: dict) -> Optional[DiskInfo]:
+def _diskinfo_from_macos_entry(entry: dict, all_mounts: dict | None) -> Optional[DiskInfo]:
     dev_id = entry.get("DeviceIdentifier", "")
     if not dev_id:
         return None
@@ -107,6 +110,9 @@ def _diskinfo_from_macos_entry(entry: dict, all_mounts: dict) -> Optional[DiskIn
         mounted=mounted,
         is_system=is_system,
         virtual=virtual,
+        safety_error="Could not resolve all macOS system backing disks."
+        if all_mounts is None
+        else "",
     )
 
 
@@ -144,47 +150,69 @@ def lookup_device_macos(device: str) -> Optional[DiskInfo]:
         mounted=mounted,
         is_system=is_system,
         virtual=virtual,
+        safety_error="Could not resolve all macOS system backing disks."
+        if all_mounts is None
+        else "",
     )
 
 
 def _parse_macos_size(size_str: str) -> int:
-    if not size_str:
-        return 0
-    m = re.match(r"([\d.]+)\s*([KMGT]?B)", size_str.strip(), re.I)
-    if not m:
-        return 0
-    num = float(m.group(1))
-    unit = m.group(2).upper()
-    multipliers = {
-        "B": 1,
-        "KB": 1024,
-        "MB": 1024**2,
-        "GB": 1024**3,
-        "TB": 1024**4,
-    }
-    return int(num * multipliers.get(unit, 1))
+    exact_bytes = re.search(r"\(([\d,]+) Bytes\)", size_str)
+    if exact_bytes:
+        return int(exact_bytes.group(1).replace(",", ""))
+    return 0
 
 
-def _get_macos_all_mounts() -> dict:
-    mounts = {}
+def _get_macos_all_mounts() -> dict[str, list[str]] | None:
     try:
         output = subprocess.check_output(["diskutil", "list", "-plist"], timeout=15)
         data = plistlib.loads(output)
-    except DISK_PARSE_ERRORS as exc:
-        debug_note(f"diskutil mount plist unavailable: {exc}")
-        return mounts
+        entries = data["AllDisksAndPartitions"]
+        mounts: dict[str, list[str]] = {}
+        physical_parents = {}
+        for entry in entries:
+            dev_id = entry["DeviceIdentifier"]
+            if "APFSVolumes" not in entry and "APFSPhysicalStores" not in entry:
+                physical_parents[dev_id] = dev_id
+            if entry.get("MountPoint"):
+                mounts.setdefault(dev_id, []).append(entry["MountPoint"])
+            for partition in entry.get("Partitions", []):
+                physical_parents[partition["DeviceIdentifier"]] = dev_id
+            volumes = entry.get("Partitions", []) + entry.get("APFSVolumes", [])
+            for volume in volumes:
+                mount_point = volume.get("MountPoint")
+                if mount_point is None:
+                    mount_point = _get_macos_mount_point(f"/dev/{volume['DeviceIdentifier']}")
+                if mount_point:
+                    mounts.setdefault(dev_id, []).append(mount_point)
+                for snapshot in volume.get("MountedSnapshots", []):
+                    snapshot_mount = snapshot.get("SnapshotMountPoint")
+                    if snapshot_mount:
+                        mounts.setdefault(dev_id, []).append(snapshot_mount)
 
-    for entry in data.get("AllDisksAndPartitions", []):
-        dev_id = entry.get("DeviceIdentifier", "")
-        if not dev_id:
-            continue
-        for partition in entry.get("Partitions", []):
-            mount_point = partition.get("MountPoint")
-            part_id = partition.get("DeviceIdentifier", "")
-            if mount_point is None and part_id:
-                mount_point = _get_macos_mount_point(f"/dev/{part_id}")
-            if mount_point:
-                mounts.setdefault(dev_id, []).append(mount_point)
+        for entry in entries:
+            if "APFSVolumes" not in entry:
+                continue
+            container_mounts = mounts.get(entry["DeviceIdentifier"], [])
+            system_container = _check_macos_system(container_mounts)
+            stores = entry.get("APFSPhysicalStores", [])
+            if system_container and not stores:
+                return None
+            for store in stores:
+                parent = physical_parents.get(store["DeviceIdentifier"])
+                if parent is None:
+                    if system_container:
+                        return None
+                    continue
+                mounts.setdefault(parent, []).extend(container_mounts)
+
+        if not any("/" in disk_mounts for disk_mounts in mounts.values()):
+            return None
+    except (*DISK_PARSE_ERRORS, KeyError, TypeError) as exc:
+        debug_note(f"diskutil mount plist unavailable: {exc}")
+        return None
+
+    mounts = {device: list(dict.fromkeys(points)) for device, points in mounts.items()}
     return mounts
 
 
@@ -201,8 +229,8 @@ def _get_macos_mount_point(dev_path: str) -> str:
     return data.get("MountPoint") or ""
 
 
-def _find_mounts_for_disk(dev_id: str, all_mounts: dict) -> List[str]:
-    return all_mounts.get(dev_id, [])
+def _find_mounts_for_disk(dev_id: str, all_mounts: dict | None) -> List[str]:
+    return all_mounts.get(dev_id, []) if all_mounts is not None else []
 
 
 def _get_diskutil_info_text(dev_path: str) -> str:
@@ -321,12 +349,21 @@ def _macos_partition2_wipe_range(device: str, max_wipe: int) -> Optional[Tuple[i
     return (tail_start, wipe_bytes)
 
 
-def unmount_disk_macos(device: str) -> None:
+def unmount_disk_macos(device: str, *, admission_fd: int | None = None) -> None:
+    disk = lookup_device_macos(device)
+    if disk is None:
+        raise RuntimeError(f"Could not resolve block devices for {device}")
+    if disk.safety_error:
+        raise RuntimeError(disk.safety_error)
+    if disk.is_system:
+        raise RuntimeError(f"Refusing to unmount system disk {device}")
+    device = disk.device
     result = subprocess.run(
         ["diskutil", "unmountDisk", device],
         capture_output=True,
         text=True,
         timeout=60,
+        pass_fds=(admission_fd,) if admission_fd is not None else (),
     )
     if result.returncode != 0:
         force_result = subprocess.run(
@@ -334,6 +371,7 @@ def unmount_disk_macos(device: str) -> None:
             capture_output=True,
             text=True,
             timeout=60,
+            pass_fds=(admission_fd,) if admission_fd is not None else (),
         )
         if force_result.returncode != 0:
             detail = (force_result.stderr or force_result.stdout or "").strip()

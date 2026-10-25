@@ -1,10 +1,24 @@
 import hashlib
 import json
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import easymanet.flash as flash
+from easymanet.disks import core as disk_core
 from easymanet.inject import InjectError
 from easymanet.privileges import PrivilegeError
+
+
+@pytest.fixture(autouse=True)
+def inert_workflow_resource(monkeypatch, tmp_path):
+    resource = f"inert-workflow:{tmp_path}"
+    monkeypatch.setattr(disk_core, "flash_resource_key", lambda _device: resource)
+    yield
+    digest = hashlib.sha256(resource.encode()).hexdigest()
+    Path(f"/tmp/easymanet-media-{digest}.lock").unlink(missing_ok=True)
 
 
 def _options(tmp_path, **overrides):
@@ -20,6 +34,60 @@ def _options(tmp_path, **overrides):
     }
     values.update(overrides)
     return flash.FlashOptions(**values)
+
+
+@pytest.mark.parametrize("review", ["matching", "identity", "path", "capacity", "model"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reviewed_device_constraints_gate_the_full_workflow(monkeypatch, tmp_path, review, dry_run):
+    device = tmp_path / "device"
+    device.write_bytes(b"untouched")
+    identity = disk_core.capture_device_identity(str(device))
+    checked = disk_core.DiskInfo(str(device), size_bytes=32768, model="Reviewed card", removable=True)
+    expected_identity = identity
+    if review == "identity":
+        device.rename(tmp_path / "original-device")
+        device.write_bytes(b"replacement")
+    elif review == "path":
+        expected_identity = replace(identity, path=str(tmp_path / "other-device"))
+    options = _options(
+        tmp_path,
+        device=str(device),
+        dry_run=dry_run,
+        expected_device_identity=expected_identity,
+        expected_device_size_bytes=checked.size_bytes + int(review == "capacity"),
+        expected_device_model="Other card" if review == "model" else checked.model,
+    )
+    monkeypatch.setattr(flash, "check_platform", lambda: None)
+    monkeypatch.setattr(flash, "lookup_device", lambda _device: checked)
+    monkeypatch.setattr(flash, "assert_flash_allowed", lambda *_args, **_kwargs: checked)
+    execution = []
+    monkeypatch.setattr(flash, "check_privileges", lambda _device: execution.append("privileges"))
+
+    def write(**kwargs):
+        assert kwargs["expected_device_identity"] == identity
+        execution.append("write")
+        return identity
+
+    def inject(**kwargs):
+        execution.append("inject")
+        return [("/easymanet/provision.json", True)]
+
+    monkeypatch.setattr(flash, "flash_image", write)
+    monkeypatch.setattr(flash, "inject", inject)
+    monkeypatch.setattr(flash, "finish_flash", lambda *args, **kwargs: execution.append("finish"))
+
+    result = flash.run_flash_workflow(options)
+
+    mismatch = review != "matching"
+    assert result.ok == (dry_run or not mismatch)
+    if mismatch:
+        messages = result.warnings if dry_run else result.errors
+        assert any(message.startswith("Flash safety:") for message in messages)
+        if not dry_run:
+            assert result.code is flash.FlashErrorCode.DISK_SAFETY
+    expected_execution = [] if dry_run or mismatch else ["privileges", "write", "inject", "finish"]
+    assert execution == expected_execution
+    assert device.read_bytes() == (b"replacement" if review == "identity" else b"untouched")
 
 
 def _guard_flash_execution_steps(monkeypatch):
@@ -530,7 +598,7 @@ def test_flash_workflow_success_runs_steps_in_order(tmp_path, monkeypatch):
 
     finish_calls = []
 
-    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None, admission_fd=None):
         finish_calls.append(device_identity)
         assert eject is True
         emit({"type": "safe_to_remove", "message": "Safe to remove."})
@@ -591,7 +659,7 @@ def test_flash_workflow_finish_failure_is_structured(tmp_path, monkeypatch):
     monkeypatch.setattr(flash, "flash_image", lambda **_kwargs: device_identity)
     monkeypatch.setattr(flash, "inject", lambda **_kwargs: [("/easymanet/provision.json", True)])
 
-    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None):
+    def fake_finish_flash(_device, *, device_identity, eject=True, emit=None, admission_fd=None):
         assert device_identity is not None
         assert eject is True
         emit({"type": "eject_failed", "message": "eject failed", "level": "warning"})
